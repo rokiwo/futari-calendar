@@ -125,14 +125,15 @@ export const App: React.FC = () => {
         }
       }
 
-      // ご要望：「いったん今登録してある全部の予定削除」を初回起動時に自動適用
-      const CLEAR_EVENTS_FLAG = 'futarical_clear_all_events_20261103_v1';
-      const shouldClearAllEvents = localStorage.getItem(CLEAR_EVENTS_FLAG) !== '1';
+      // ご要望：「既存の予定データとシフトデータを削除しておいてほしい」を自動適用
+      const CLEAR_SHIFTS_AND_EVENTS_FLAG = 'futarical_clear_all_shifts_and_events_20261103_v2';
+      const shouldClearAll = localStorage.getItem(CLEAR_SHIFTS_AND_EVENTS_FLAG) !== '1';
 
       const nextStore: CalendarDataStore = {
         ...loaded,
-        events: shouldClearAllEvents ? {} : loaded.events || {},
-        daySupports: shouldClearAllEvents ? {} : loaded.daySupports || {},
+        shifts: shouldClearAll ? {} : loaded.shifts || {},
+        events: shouldClearAll ? {} : loaded.events || {},
+        daySupports: shouldClearAll ? {} : loaded.daySupports || {},
         categories:
           loaded.categories && loaded.categories.length > 0
             ? loaded.categories
@@ -140,8 +141,8 @@ export const App: React.FC = () => {
         stamps: mergedStamps,
       };
 
-      if (shouldClearAllEvents) {
-        localStorage.setItem(CLEAR_EVENTS_FLAG, '1');
+      if (shouldClearAll) {
+        localStorage.setItem(CLEAR_SHIFTS_AND_EVENTS_FLAG, '1');
         await saveLocalStore(nextStore);
       }
 
@@ -195,15 +196,13 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  // 指定日にシフトを登録または消去し、必ず次の日（翌日）へ移動する
+  // 指定日にシフトを登録または消去する（advanceDate=true の場合は翌日へ自動移動、false の場合は同じ日に留まる）
   const handleSetShiftAndAdvance = useCallback(
     (
       dateStr: string,
       partnerId: PartnerId,
       stamp: StampPreset | null,
-      customStartTime?: string,
-      customEndTime?: string,
-      memo?: string
+      advanceDate = true
     ) => {
       const shiftId = `${dateStr}_${partnerId}`;
       const nowIso = new Date().toISOString();
@@ -228,9 +227,8 @@ export const App: React.FC = () => {
           date: dateStr,
           partnerId,
           stampId: stamp.id,
-          startTime: customStartTime ?? stamp.startTime,
-          endTime: customEndTime ?? stamp.endTime,
-          memo: memo ?? existing?.memo,
+          startTime: stamp.startTime,
+          endTime: stamp.endTime,
           createdBy: activePartner,
           createdAt: existing?.createdAt || nowIso,
           updatedAt: nowIso,
@@ -247,14 +245,23 @@ export const App: React.FC = () => {
       };
       commitStore(nextStore);
 
-      // シフトが1つ入ったら必ず翌日へ自動移動！
-      const nextDate = addDaysToDateStr(dateStr, 1);
-      setSelectedDate(nextDate);
-      const [ny, nm] = nextDate.split('-').map(Number);
-      setYear(ny);
-      setMonth(nm);
+      if (advanceDate) {
+        // 連続スタンプモード時は翌日へ自動移動！
+        const nextDate = addDaysToDateStr(dateStr, 1);
+        setSelectedDate(nextDate);
+        const [ny, nm] = nextDate.split('-').map(Number);
+        setYear(ny);
+        setMonth(nm);
+      } else {
+        const [, m, d] = dateStr.split('-').map(Number);
+        showToast(
+          stamp
+            ? `✨ ${m}/${d} のシフトを「${stamp.label}」に更新しました`
+            : `🧹 ${m}/${d} のシフトをクリアしました`
+        );
+      }
     },
-    [activePartner, commitStore, store]
+    [activePartner, commitStore, showToast, store]
   );
 
   // 指定日のサブシフト（仕事終わり・休日のバイト）や残業・休日出勤時間を更新（日付は移動しない）
@@ -263,24 +270,23 @@ export const App: React.FC = () => {
       const shiftId = `${dateStr}_${partnerId}`;
       const nowIso = new Date().toISOString();
       const existing = store.shifts[shiftId];
+      const activeExisting = existing && !existing.deletedAt ? existing : undefined;
 
-      // まだメインシフトが入っていない日にバイトや残業だけ先に入れる場合は「日勤」または先頭スタンプをベースにする
-      const fallbackStamp =
-        store.stamps.find((s) => s.id === 'shift_day') || store.stamps[0];
+      const defaultStampId = activeExisting?.stampId
+        ? activeExisting.stampId
+        : patch.isHolidayWork || (patch.holidayWorkHours && patch.holidayWorkHours > 0)
+        ? 'shift_hol_work'
+        : '';
 
       const nextShift: ShiftEntry = {
-        ...(existing && !existing.deletedAt
-          ? existing
-          : {
-              id: shiftId,
-              date: dateStr,
-              partnerId,
-              stampId: fallbackStamp ? fallbackStamp.id : 'shift_day',
-              startTime: fallbackStamp?.startTime,
-              endTime: fallbackStamp?.endTime,
-              createdBy: activePartner,
-              createdAt: nowIso,
-            }),
+        ...(activeExisting || {
+          id: shiftId,
+          date: dateStr,
+          partnerId,
+          stampId: defaultStampId,
+          createdBy: activePartner,
+          createdAt: nowIso,
+        }),
         ...patch,
         id: shiftId,
         date: dateStr,
@@ -296,8 +302,22 @@ export const App: React.FC = () => {
           [shiftId]: nextShift,
         },
       });
+
+      const [, m, d] = dateStr.split('-').map(Number);
+      const pName = store.metadata.partners[partnerId].name;
+      if (patch.overtimeHours !== undefined || patch.holidayWorkHours !== undefined) {
+        const hrs = patch.holidayWorkHours || patch.overtimeHours || 0;
+        const kind = patch.isHolidayWork || (patch.holidayWorkHours || 0) > 0 ? '休日出勤' : '残業';
+        showToast(
+          hrs > 0
+            ? `⏱️ ${m}/${d}（${pName}）に${kind} +${hrs}h を反映しました！`
+            : `⏱️ ${m}/${d}（${pName}）の残業・休出時間を0hにリセットしました`
+        );
+      } else {
+        showToast(`✨ ${m}/${d}（${pName}）のシフト詳細を反映しました！`);
+      }
     },
-    [activePartner, commitStore, store]
+    [activePartner, commitStore, showToast, store]
   );
 
   // AI画像読取やナスカレ連携からの一括シフト＆予定登録
@@ -501,6 +521,62 @@ export const App: React.FC = () => {
       daySupports: {},
     });
     showToast('🗑️ すべての予定・タスクを削除しました');
+  }, [commitStore, showToast, store]);
+
+  // 登録されているすべてのシフトデータ（残業・休出・バイト含む）を一括削除
+  const handleClearAllShifts = useCallback(() => {
+    const nowIso = new Date().toISOString();
+    const deletedShifts: Record<string, ShiftEntry> = {};
+    for (const [id, s] of Object.entries(store.shifts)) {
+      deletedShifts[id] = {
+        ...s,
+        overtimeHours: 0,
+        holidayWorkHours: 0,
+        isHolidayWork: false,
+        subStampId: undefined,
+        subCustomLabel: undefined,
+        updatedAt: nowIso,
+        deletedAt: nowIso,
+      };
+    }
+    commitStore({
+      ...store,
+      shifts: deletedShifts,
+    });
+    showToast('🗑️ すべてのシフトデータを削除しました');
+  }, [commitStore, showToast, store]);
+
+  // 予定データ＋シフトデータを両方すべて一括削除
+  const handleClearAllData = useCallback(() => {
+    const nowIso = new Date().toISOString();
+    const deletedEvents: Record<string, ScheduleEvent> = {};
+    for (const [id, ev] of Object.entries(store.events)) {
+      deletedEvents[id] = {
+        ...ev,
+        updatedAt: nowIso,
+        deletedAt: nowIso,
+      };
+    }
+    const deletedShifts: Record<string, ShiftEntry> = {};
+    for (const [id, s] of Object.entries(store.shifts)) {
+      deletedShifts[id] = {
+        ...s,
+        overtimeHours: 0,
+        holidayWorkHours: 0,
+        isHolidayWork: false,
+        subStampId: undefined,
+        subCustomLabel: undefined,
+        updatedAt: nowIso,
+        deletedAt: nowIso,
+      };
+    }
+    commitStore({
+      ...store,
+      shifts: deletedShifts,
+      events: deletedEvents,
+      daySupports: {},
+    });
+    showToast('🗑️ 予定データとシフトデータをすべて削除しました');
   }, [commitStore, showToast, store]);
 
   // 操作中パートナーの切り替え（🐻夫 ⇔ 🐰妻）
@@ -1014,6 +1090,8 @@ export const App: React.FC = () => {
             });
           }}
           onClearAllEvents={handleClearAllEvents}
+          onClearAllShifts={handleClearAllShifts}
+          onClearAllData={handleClearAllData}
           onUpdatePartnerProfiles={(nameA, avatarA, nameB, avatarB) => {
             const nowIso = new Date().toISOString();
             commitStore({
