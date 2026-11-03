@@ -24,6 +24,7 @@ import {
 } from '../types/calendar';
 import { decryptCalendarStore, encryptCalendarStore } from '../utils/crypto';
 import { exportToIcs, IcsExportTarget, parseIcsEvents } from '../utils/ical';
+import { generatePartnerNotificationIcs } from '../utils/googleCalendar';
 import { createNewSecretGist } from '../utils/storage';
 
 interface SettingsAndSyncModalProps {
@@ -37,6 +38,7 @@ interface SettingsAndSyncModalProps {
   onTriggerCloudSync: (configOverride?: CloudSyncConfig, passwordOverride?: string) => Promise<void>;
   onMergeRemoteStore: (remoteStore: CalendarDataStore, message: string) => void;
   onImportEvents: (events: ScheduleEvent[]) => void;
+  onClearAllEvents: () => void;
   onUpdatePartnerProfiles: (
     partnerAName: string,
     partnerAAvatar: string,
@@ -60,6 +62,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   onTriggerCloudSync,
   onMergeRemoteStore,
   onImportEvents,
+  onClearAllEvents,
   onUpdatePartnerProfiles,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('sync');
@@ -598,6 +601,67 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
           {/* タブ2：iCal (.ics) カレンダー連携 ＆ JSONバックアップ */}
           {activeTab === 'ical_backup' && (
             <div className="space-y-4">
+              {/* 🔔 Googleカレンダー端末別通知出力（妻の端末には妻の通知のみ、夫の端末には夫の通知のみ） */}
+              <div className="bg-[#F6F9FF] rounded-2xl p-4 border border-sky-200/90 space-y-2.5 shadow-2xs">
+                <h3 className="text-sm font-extrabold text-sky-900 flex items-center gap-1.5">
+                  🔔 Googleカレンダー 端末別通知連携（夫の端末専用 ／ 妻の端末専用）
+                </h3>
+                <p className="text-stone-600 leading-relaxed">
+                  妻の予定・タスクは妻の端末のみに、夫の予定・タスクは夫の端末のみにアラーム通知（VALARM）が入る専用カレンダーファイルを取り込めます。ご自身のスマホのボタンを押してGoogleカレンダーへ追加してください。
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const icsText = generatePartnerNotificationIcs(store, 'partnerA');
+                      const blob = new Blob([icsText], { type: 'text/calendar;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `futarical-notify-partnerA-${new Date().toISOString().slice(0, 10)}.ics`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      setStatusMsg({
+                        type: 'ok',
+                        text: `${store.metadata.partners.partnerA.avatar}${store.metadata.partners.partnerA.name}の端末専用の通知付きカレンダー(.ics)を書き出しました🔔`,
+                      });
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-[#126875] hover:bg-[#0D4F59] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      {store.metadata.partners.partnerA.avatar}{' '}
+                      {store.metadata.partners.partnerA.name}の端末専用 通知カレンダー
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const icsText = generatePartnerNotificationIcs(store, 'partnerB');
+                      const blob = new Blob([icsText], { type: 'text/calendar;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `futarical-notify-partnerB-${new Date().toISOString().slice(0, 10)}.ics`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      setStatusMsg({
+                        type: 'ok',
+                        text: `${store.metadata.partners.partnerB.avatar}${store.metadata.partners.partnerB.name}の端末専用の通知付きカレンダー(.ics)を書き出しました🔔`,
+                      });
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-[#6638A6] hover:bg-[#4F2A82] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      {store.metadata.partners.partnerB.avatar}{' '}
+                      {store.metadata.partners.partnerB.name}の端末専用 通知カレンダー
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               {/* iCal (.ics) エクスポート＆インポート */}
               <div className="bg-white rounded-2xl p-4 border border-stone-200/90 space-y-3 shadow-2xs">
                 <h3 className="text-sm font-extrabold text-stone-800 flex items-center gap-1.5">
@@ -725,6 +789,29 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     <span>📂 JSONファイルからマージ復元</span>
                   </button>
                 </div>
+              </div>
+
+              {/* 🗑️ 全予定一括削除（リセット） */}
+              <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 space-y-2">
+                <h3 className="text-sm font-extrabold text-rose-700">
+                  🗑️ 登録されている予定・タスクをすべて削除
+                </h3>
+                <p className="text-stone-600">
+                  現在登録されているすべての予定・タスクを一括で空にします（シフト種類の設定は残ります）。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClearAllEvents();
+                    setStatusMsg({
+                      type: 'ok',
+                      text: '登録されていたすべての予定・タスクを削除しました✨',
+                    });
+                  }}
+                  className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs shadow-xs"
+                >
+                  🗑️ すべての予定を今すぐ削除する
+                </button>
               </div>
             </div>
           )}
