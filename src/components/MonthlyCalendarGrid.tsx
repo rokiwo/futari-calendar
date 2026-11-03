@@ -7,7 +7,7 @@ import {
   ShiftEntry,
   StampPreset,
 } from '../types/calendar';
-import { CATEGORY_MAP, getJapaneseHoliday } from '../utils/presets';
+import { getJapaneseHoliday, resolveCategoryInfo } from '../utils/presets';
 
 interface MonthlyCalendarGridProps {
   year: number;
@@ -46,7 +46,6 @@ function buildMonthGrid(year: number, month: number): DayCellData[] {
 
   const cells: DayCellData[] = [];
 
-  // 前月の埋め草
   const prevMonthLastDay = new Date(year, month - 1, 0).getDate();
   for (let i = startDayOfWeek - 1; i >= 0; i--) {
     const d = prevMonthLastDay - i;
@@ -65,7 +64,6 @@ function buildMonthGrid(year: number, month: number): DayCellData[] {
     });
   }
 
-  // 当月
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const dt = new Date(year, month - 1, d);
@@ -79,7 +77,6 @@ function buildMonthGrid(year: number, month: number): DayCellData[] {
     });
   }
 
-  // 翌月の埋め草
   const remaining = (7 - (cells.length % 7)) % 7;
   for (let d = 1; d <= remaining; d++) {
     const dt = new Date(year, month, d);
@@ -130,7 +127,6 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   const otherPartnerId: PartnerId = activePartner === 'partnerA' ? 'partnerB' : 'partnerA';
   const otherLastSeenMs = Date.parse(store.metadata.partners[otherPartnerId].lastSeenAt || '') || 0;
 
-  // 日付ごとの予定マップを構築（件数制限なし・時刻順ソート）
   const eventsByDate = new Map<string, ScheduleEvent[]>();
   for (const ev of Object.values(store.events)) {
     if (ev.deletedAt) continue;
@@ -148,8 +144,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     });
   }
 
+  // 休日一致判定（休日出勤やバイトが入っていない純粋な休日のみ一致とみなす場合はサブシフトも考慮可能だが、まず休日スタンプで判定）
   const isHolidayShift = (shift?: ShiftEntry): boolean => {
-    if (!shift || shift.deletedAt) return false;
+    if (!shift || shift.deletedAt || shift.isHolidayWork) return false;
     const preset = stampMap.get(shift.stampId);
     if (!preset) return false;
     if (preset.isHoliday) return true;
@@ -178,6 +175,94 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     { label: '金', color: 'text-stone-600 bg-white/80' },
     { label: '土', color: 'text-sky-600 bg-sky-50/70' },
   ];
+
+  // 各パートナーのシフト枠（メインシフト＋仕事終わり/休日のバイト＋残業時間バッジ）を描画
+  const renderPartnerShiftBox = (
+    shift: ShiftEntry | undefined,
+    partnerAvatar: string,
+    unreadColorClass: string
+  ) => {
+    const stamp = shift ? stampMap.get(shift.stampId) : undefined;
+    const subStamp = shift?.subStampId ? stampMap.get(shift.subStampId) : undefined;
+    const hasSubWork = Boolean(shift?.subCustomLabel || subStamp);
+    const subLabel = shift?.subCustomLabel || subStamp?.shortLabel || '';
+
+    const overtime = shift?.overtimeHours || 0;
+    const holWork = shift?.holidayWorkHours || 0;
+
+    return (
+      <div
+        onClick={(e) => {
+          if (shift && (shift.startTime || stamp?.startTime || shift.subStartTime)) {
+            e.stopPropagation();
+            setPoppedShiftId(poppedShiftId === shift.id ? null : shift.id);
+          }
+        }}
+        style={
+          stamp
+            ? { backgroundColor: stamp.color, color: stamp.textColor }
+            : undefined
+        }
+        className={`relative rounded-md sm:rounded-lg px-0.5 py-0.5 text-[9px] sm:text-[10px] font-extrabold flex flex-col items-center justify-center leading-tight border ${
+          stamp
+            ? 'border-black/5'
+            : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
+        }`}
+      >
+        {/* メインシフト行 */}
+        <div className="flex items-center justify-center gap-0.5 truncate max-w-full">
+          {stamp ? (
+            <span className="truncate">
+              {shift?.customLabel || stamp.shortLabel}
+            </span>
+          ) : (
+            <span className="text-[8px] font-normal opacity-60">{partnerAvatar}</span>
+          )}
+        </div>
+
+        {/* 仕事終わりや休日のバイト（サブシフト）がある場合の2段目表示 */}
+        {hasSubWork && (
+          <div className="w-full mt-0.5 px-0.5 rounded bg-amber-100/90 text-amber-900 text-[7.5px] sm:text-[9px] font-black text-center truncate leading-tight">
+            +{subLabel}
+          </div>
+        )}
+
+        {/* 残業時間・休日出勤時間のバッジ表示 */}
+        {(overtime > 0 || holWork > 0) && (
+          <div className="w-full mt-0.5 px-0.5 rounded bg-rose-500/90 text-white text-[7.5px] sm:text-[8.5px] font-black text-center truncate leading-tight">
+            {holWork > 0 ? `休出${holWork}h` : `+${overtime}h`}
+          </div>
+        )}
+
+        {/* シフト時間常時表示ONの時 */}
+        {showShiftTimeInCell &&
+          stamp &&
+          (shift?.startTime || stamp.startTime) && (
+            <span className="text-[7px] sm:text-[8px] font-bold opacity-85 tracking-tighter truncate max-w-full">
+              {shift?.startTime || stamp.startTime}
+            </span>
+          )}
+
+        {/* 未読ドット */}
+        {shift &&
+          (isUnreadByPartner(shift.updatedAt, shift.createdBy) ||
+            isNewFromPartner(shift.updatedAt, shift.createdBy)) && (
+            <span
+              className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${unreadColorClass} ring-1 ring-white`}
+            />
+          )}
+
+        {/* タップ時の時間ポップオーバー */}
+        {poppedShiftId === shift?.id && (
+          <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap bg-stone-800 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md">
+            {shift?.startTime || stamp?.startTime || ''}
+            {(shift?.endTime || stamp?.endTime) ? `-${shift?.endTime || stamp?.endTime}` : ''}
+            {shift?.subStartTime ? ` / 🏪${shift.subStartTime}-${shift.subEndTime || ''}` : ''}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -221,11 +306,15 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           const activeShiftA = shiftA && !shiftA.deletedAt ? shiftA : undefined;
           const activeShiftB = shiftB && !shiftB.deletedAt ? shiftB : undefined;
 
-          const stampA = activeShiftA ? stampMap.get(activeShiftA.stampId) : undefined;
-          const stampB = activeShiftB ? stampMap.get(activeShiftB.stampId) : undefined;
-
           const isBothHoliday = isHolidayShift(activeShiftA) && isHolidayShift(activeShiftB);
           const dayEvents = eventsByDate.get(cell.dateStr) || [];
+
+          // コンパクトモード時は最大3件までに制限し、4件以上ある場合は「＋他〇件」を表示！
+          const visibleEvents = isExpandedView ? dayEvents : dayEvents.slice(0, 3);
+          const hiddenEventsCount = isExpandedView
+            ? 0
+            : Math.max(0, dayEvents.length - 3);
+
           const daySupport = store.daySupports?.[cell.dateStr];
           const supportBadges = [
             ...(daySupport?.badges || []),
@@ -247,7 +336,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
               key={cell.dateStr}
               onClick={() => onCellClick(cell.dateStr)}
               className={`group relative flex flex-col rounded-xl sm:rounded-2xl border transition-all cursor-pointer select-none ${
-                isExpandedView ? 'min-h-[112px] sm:min-h-[140px]' : 'h-[108px] sm:h-[130px]'
+                isExpandedView ? 'min-h-[118px] sm:min-h-[146px]' : 'min-h-[112px] sm:min-h-[136px]'
               } ${
                 !cell.isCurrentMonth ? 'opacity-40 bg-stone-50/70' : 'bg-white'
               } ${
@@ -294,111 +383,16 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 )}
               </div>
 
-              {/* 2. シフト2人並列バー（セル上部固定） */}
+              {/* 2. シフト2人並列バー（夫・妻横並び＋バイト＋残業表示） */}
               <div className="grid grid-cols-2 gap-0.5 mb-0.5 shrink-0">
-                {/* パートナーA */}
-                <div
-                  onClick={(e) => {
-                    if (activeShiftA && (activeShiftA.startTime || stampA?.startTime)) {
-                      e.stopPropagation();
-                      setPoppedShiftId(poppedShiftId === activeShiftA.id ? null : activeShiftA.id);
-                    }
-                  }}
-                  style={
-                    stampA
-                      ? { backgroundColor: stampA.color, color: stampA.textColor }
-                      : undefined
-                  }
-                  className={`relative rounded-md sm:rounded-lg px-0.5 py-0.5 text-[9px] sm:text-[11px] font-extrabold flex flex-col items-center justify-center leading-tight border ${
-                    stampA
-                      ? 'border-black/5'
-                      : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-0.5 truncate max-w-full">
-                    {stampA ? (
-                      <span className="truncate">
-                        {activeShiftA?.customLabel || stampA.shortLabel}
-                      </span>
-                    ) : (
-                      <span className="text-[8px] font-normal opacity-60">{partnerA.avatar}</span>
-                    )}
-                  </div>
-                  {showShiftTimeInCell &&
-                    stampA &&
-                    (activeShiftA?.startTime || stampA.startTime) && (
-                      <span className="text-[7px] sm:text-[8px] font-bold opacity-85 tracking-tighter truncate max-w-full">
-                        {activeShiftA?.startTime || stampA.startTime}
-                      </span>
-                    )}
-                  {activeShiftA &&
-                    (isUnreadByPartner(activeShiftA.updatedAt, activeShiftA.createdBy) ||
-                      isNewFromPartner(activeShiftA.updatedAt, activeShiftA.createdBy)) && (
-                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[#FF8FAB] ring-1 ring-white" />
-                    )}
-                  {poppedShiftId === activeShiftA?.id &&
-                    (activeShiftA?.startTime || stampA?.startTime) && (
-                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap bg-stone-800 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md">
-                        {activeShiftA?.startTime || stampA?.startTime}-
-                        {activeShiftA?.endTime || stampA?.endTime}
-                      </div>
-                    )}
-                </div>
-
-                {/* パートナーB */}
-                <div
-                  onClick={(e) => {
-                    if (activeShiftB && (activeShiftB.startTime || stampB?.startTime)) {
-                      e.stopPropagation();
-                      setPoppedShiftId(poppedShiftId === activeShiftB.id ? null : activeShiftB.id);
-                    }
-                  }}
-                  style={
-                    stampB
-                      ? { backgroundColor: stampB.color, color: stampB.textColor }
-                      : undefined
-                  }
-                  className={`relative rounded-md sm:rounded-lg px-0.5 py-0.5 text-[9px] sm:text-[11px] font-extrabold flex flex-col items-center justify-center leading-tight border ${
-                    stampB
-                      ? 'border-black/5'
-                      : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-0.5 truncate max-w-full">
-                    {stampB ? (
-                      <span className="truncate">
-                        {activeShiftB?.customLabel || stampB.shortLabel}
-                      </span>
-                    ) : (
-                      <span className="text-[8px] font-normal opacity-60">{partnerB.avatar}</span>
-                    )}
-                  </div>
-                  {showShiftTimeInCell &&
-                    stampB &&
-                    (activeShiftB?.startTime || stampB.startTime) && (
-                      <span className="text-[7px] sm:text-[8px] font-bold opacity-85 tracking-tighter truncate max-w-full">
-                        {activeShiftB?.startTime || stampB.startTime}
-                      </span>
-                    )}
-                  {activeShiftB &&
-                    (isUnreadByPartner(activeShiftB.updatedAt, activeShiftB.createdBy) ||
-                      isNewFromPartner(activeShiftB.updatedAt, activeShiftB.createdBy)) && (
-                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[#B388EB] ring-1 ring-white" />
-                    )}
-                  {poppedShiftId === activeShiftB?.id &&
-                    (activeShiftB?.startTime || stampB?.startTime) && (
-                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap bg-stone-800 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md">
-                        {activeShiftB?.startTime || stampB?.startTime}-
-                        {activeShiftB?.endTime || stampB?.endTime}
-                      </div>
-                    )}
-                </div>
+                {renderPartnerShiftBox(activeShiftA, partnerA.avatar, 'bg-[#FF8FAB]')}
+                {renderPartnerShiftBox(activeShiftB, partnerB.avatar, 'bg-[#B388EB]')}
               </div>
 
               {/* 3. すれ違いサポートアイコン */}
               {uniqueSupports.length > 0 && (
                 <div className="flex flex-wrap gap-0.5 mb-0.5 shrink-0">
-                  {uniqueSupports.map((badge) => (
+                  {uniqueSupports.slice(0, isExpandedView ? undefined : 2).map((badge) => (
                     <span
                       key={badge}
                       className="px-1 py-0.1 rounded bg-[#FFF6D6] border border-[#FFE28A] text-[#8A5A00] text-[8px] sm:text-[9px] font-extrabold leading-tight truncate max-w-full"
@@ -409,14 +403,10 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 </div>
               )}
 
-              {/* 4. 予定リストエリア */}
-              <div
-                className={`flex-1 flex flex-col gap-0.5 ${
-                  isExpandedView ? '' : 'overflow-y-auto no-scrollbar'
-                }`}
-              >
-                {dayEvents.map((ev) => {
-                  const cat = CATEGORY_MAP[ev.categoryId] || CATEGORY_MAP.shared;
+              {/* 4. 予定リストエリア（コンパクト時は3件まで＋他〇件、全件表示時は無制限） */}
+              <div className="flex-1 flex flex-col gap-0.5">
+                {visibleEvents.map((ev) => {
+                  const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
                   const unreadForOther = isUnreadByPartner(ev.updatedAt, ev.createdBy);
                   const unreadForMe = isNewFromPartner(ev.updatedAt, ev.createdBy);
 
@@ -453,6 +443,13 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                     </div>
                   );
                 })}
+
+                {/* コンパクトモードで4件以上予定がある場合の「＋他〇件」表示 */}
+                {hiddenEventsCount > 0 && (
+                  <div className="text-[8.5px] sm:text-[10px] font-extrabold text-[#9E2A47] bg-[#FFF0F5] rounded px-1 py-0.2 text-center">
+                    ＋他{hiddenEventsCount}件
+                  </div>
+                )}
               </div>
             </div>
           );
