@@ -11,13 +11,33 @@ import {
   Clock,
   Lock,
   Heart,
+  Plus,
+  Timer,
 } from 'lucide-react';
 import {
+  CalendarCategoryItem,
   CoupleMetadata,
   FilterCategoryId,
   PartnerId,
+  ShiftEntry,
 } from '../types/calendar';
-import { CATEGORY_MAP } from '../utils/presets';
+
+export interface MonthlyOvertimeSummary {
+  partnerA: {
+    overtimeHours: number;
+    holidayWorkHours: number;
+    totalExtraHours: number;
+    partTimeCount: number;
+    entries: ShiftEntry[];
+  };
+  partnerB: {
+    overtimeHours: number;
+    holidayWorkHours: number;
+    totalExtraHours: number;
+    partTimeCount: number;
+    entries: ShiftEntry[];
+  };
+}
 
 interface TopHeaderProps {
   year: number;
@@ -29,8 +49,11 @@ interface TopHeaderProps {
   activePartner: PartnerId;
   onToggleActivePartner: (p: PartnerId) => void;
   metadata: CoupleMetadata;
+  categories: CalendarCategoryItem[];
+  onOpenCategoryManager: () => void;
   onMarkSeenNow: () => void;
   matchedHolidays: string[]; // "YYYY-MM-DD" の配列
+  overtimeSummary: MonthlyOvertimeSummary;
   onSelectDate: (dateStr: string) => void;
   filterCategory: FilterCategoryId;
   onChangeFilter: (cat: FilterCategoryId) => void;
@@ -46,7 +69,6 @@ interface TopHeaderProps {
   onLockScreen: () => void;
 }
 
-// 相対時間＆日時フォーマット（「5分前」「今日 19:40」「11/03 18:30」など）
 export function formatLastSeen(isoStr?: string): string {
   if (!isoStr) return '未確認';
   const dt = new Date(isoStr);
@@ -83,8 +105,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   activePartner,
   onToggleActivePartner,
   metadata,
+  categories,
+  onOpenCategoryManager,
   onMarkSeenNow,
   matchedHolidays,
+  overtimeSummary,
   onSelectDate,
   filterCategory,
   onChangeFilter,
@@ -100,6 +125,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onLockScreen,
 }) => {
   const [showHolidayPopup, setShowHolidayPopup] = useState(false);
+  const [showOvertimePopup, setShowOvertimePopup] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
 
   const partnerA = metadata.partners.partnerA;
@@ -108,27 +134,20 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   const otherPartner = metadata.partners[otherPartnerId];
   const currentPartner = metadata.partners[activePartner];
 
-  const filterOptions: { id: FilterCategoryId; label: string; icon: string; activeBg: string; activeText: string }[] = [
-    { id: 'all', label: 'すべて', icon: '🌈', activeBg: 'bg-stone-800', activeText: 'text-white' },
-    { id: 'shared', label: 'ふたり', icon: '💕', activeBg: 'bg-[#FF8FAB]', activeText: 'text-white' },
-    { id: 'partnerA', label: partnerA.name, icon: partnerA.avatar, activeBg: 'bg-[#56CFE1]', activeText: 'text-white' },
-    { id: 'partnerB', label: partnerB.name, icon: partnerB.avatar, activeBg: 'bg-[#B388EB]', activeText: 'text-white' },
-    { id: 'anniversary', label: '記念日', icon: '🎉', activeBg: 'bg-[#FFB703]', activeText: 'text-stone-900' },
-    { id: 'chore', label: '家事', icon: '🏠', activeBg: 'bg-[#52B788]', activeText: 'text-white' },
-  ];
+  const sortedCategories = [...categories].sort((a, b) => a.order - b.order);
 
   return (
-    <header className="sticky top-0 z-30 bg-[#FFFBF7]/95 backdrop-blur-md border-b border-[#FFE5EC] shadow-sm">
-      <div className="max-w-6xl mx-auto px-2.5 sm:px-4 pt-2 pb-2 space-y-2">
-        {/* 上段：年月セレクター ＋ ふたり休日一致バッジ ＋ 操作中パートナー＆相手の最終確認ステータス */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {/* 左側：年月切替＆お休み一致バッジ */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <div className="flex items-center bg-white rounded-2xl border border-stone-200/80 shadow-sm px-1 py-0.5">
+    <header className="sticky top-0 z-30 bg-[#FFFBF7]/95 backdrop-blur-md border-b border-[#FFE5EC] shadow-xs">
+      <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-1.5 pb-1.5 space-y-1.5">
+        {/* 上段：年月セレクター ＋ ふたり休日一致 ＋ 残業時間集計 ＋ 既読・操作切替 */}
+        <div className="flex flex-wrap items-center justify-between gap-1.5">
+          {/* 左側：年月切替＆お休み一致＆残業バッジ */}
+          <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+            <div className="flex items-center bg-white rounded-2xl border border-stone-200/80 shadow-2xs px-0.5 py-0.5">
               <button
                 type="button"
                 onClick={onPrevMonth}
-                className="p-1.5 rounded-xl hover:bg-[#FFE5EC]/60 text-stone-600 transition-colors"
+                className="p-1 rounded-xl hover:bg-[#FFE5EC]/60 text-stone-600"
                 title="前の月"
               >
                 <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -136,18 +155,17 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               <button
                 type="button"
                 onClick={() => setShowMonthPicker(!showMonthPicker)}
-                className="px-2 sm:px-3 py-1 rounded-xl hover:bg-[#FFF0F5] transition-colors flex items-baseline gap-1"
-                title="年月を選択"
+                className="px-1.5 sm:px-2.5 py-0.5 rounded-xl hover:bg-[#FFF0F5] flex items-baseline gap-0.5"
               >
-                <span className="text-xs sm:text-sm font-bold text-stone-500">{year}年</span>
-                <span className="text-lg sm:text-2xl font-extrabold text-stone-800 tracking-tight">
+                <span className="text-[11px] font-bold text-stone-500">{year}年</span>
+                <span className="text-base sm:text-xl font-extrabold text-stone-800">
                   {month}月
                 </span>
               </button>
               <button
                 type="button"
                 onClick={onNextMonth}
-                className="p-1.5 rounded-xl hover:bg-[#FFE5EC]/60 text-stone-600 transition-colors"
+                className="p-1 rounded-xl hover:bg-[#FFE5EC]/60 text-stone-600"
                 title="次の月"
               >
                 <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -157,7 +175,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <button
               type="button"
               onClick={onToday}
-              className="px-2.5 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-600 hover:bg-stone-100 text-xs font-bold shadow-sm transition-colors"
+              className="px-2 py-1 rounded-xl bg-white border border-stone-200 text-stone-600 text-[11px] font-bold shadow-2xs"
             >
               今日
             </button>
@@ -166,22 +184,22 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <div className="relative">
               <button
                 type="button"
-                onClick={() => setShowHolidayPopup(!showHolidayPopup)}
-                className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-2xl bg-gradient-to-r from-[#FFE5EC] to-[#F3EAFF] border border-[#FFC2D1] text-[#9E2A47] text-xs font-extrabold shadow-sm hover:scale-[1.02] active:scale-95 transition-all"
-                title="2人ともお休みの日を確認"
+                onClick={() => {
+                  setShowHolidayPopup(!showHolidayPopup);
+                  setShowOvertimePopup(false);
+                }}
+                className="flex items-center gap-1 px-2 py-1 rounded-2xl bg-[#FFE5EC] border border-[#FFC2D1] text-[#9E2A47] text-[11px] font-extrabold shadow-2xs active:scale-95 transition-all"
               >
-                <Sparkles className="w-3.5 h-3.5 text-[#FF8FAB] shrink-0" />
-                <span className="hidden xs:inline">お休み一致</span>
-                <span className="inline xs:hidden">一致</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-white text-[#D63864] font-black text-xs shadow-inner">
+                <Sparkles className="w-3 h-3 text-[#FF8FAB] shrink-0" />
+                <span>休一致</span>
+                <span className="px-1.5 rounded-full bg-white text-[#D63864] font-black text-[11px]">
                   {matchedHolidays.length}日
                 </span>
               </button>
 
-              {/* お休み一致日リストポップアップ */}
               {showHolidayPopup && (
-                <div className="absolute left-0 mt-2 w-64 bg-white rounded-3xl shadow-xl border-2 border-[#FFE5EC] p-3.5 z-50 animate-pop">
-                  <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-stone-100">
+                <div className="absolute left-0 mt-1.5 w-64 bg-white rounded-3xl shadow-xl border-2 border-[#FFE5EC] p-3 z-50 animate-pop">
+                  <div className="flex items-center justify-between mb-2 pb-1 border-b border-stone-100">
                     <span className="text-xs font-extrabold text-[#9E2A47] flex items-center gap-1">
                       <Heart className="w-3.5 h-3.5 fill-[#FF8FAB] text-[#FF8FAB]" />
                       {month}月のふたり休日一致 ({matchedHolidays.length}日)
@@ -196,10 +214,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   </div>
                   {matchedHolidays.length === 0 ? (
                     <p className="text-xs text-stone-500 py-2 text-center">
-                      まだ今月の2人共通のお休みスタンプがありません🐾
+                      まだ今月の2人共通のお休み日がありません🐾
                     </p>
                   ) : (
-                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+                    <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
                       {matchedHolidays.map((dateStr) => {
                         const dayNum = Number(dateStr.split('-')[2]);
                         const dt = new Date(
@@ -216,9 +234,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                               onSelectDate(dateStr);
                               setShowHolidayPopup(false);
                             }}
-                            className="px-2.5 py-1.5 rounded-xl bg-[#FFE5EC]/70 hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-xs font-extrabold transition-colors flex items-center gap-1"
+                            className="px-2.5 py-1 rounded-xl bg-[#FFE5EC]/70 hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-xs font-extrabold"
                           >
-                            <span>💕 {month}/{dayNum}({w})</span>
+                            💕 {month}/{dayNum}({w})
                           </button>
                         );
                       })}
@@ -227,106 +245,185 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 </div>
               )}
             </div>
+
+            {/* ⏱️ 今月の残業・休日出勤時間バッジ（タップで詳細内訳ポップアップ） */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowOvertimePopup(!showOvertimePopup);
+                  setShowHolidayPopup(false);
+                }}
+                className="flex items-center gap-1 px-2 py-1 rounded-2xl bg-[#FFF6D6] border border-[#FFE28A] text-[#8A5A00] text-[11px] font-extrabold shadow-2xs active:scale-95 transition-all"
+                title="今月の残業時間・休日出勤時間・バイト回数を確認"
+              >
+                <Timer className="w-3.5 h-3.5 text-[#D49600] shrink-0" />
+                <span>
+                  残業 {partnerA.avatar}
+                  {overtimeSummary.partnerA.totalExtraHours}h / {partnerB.avatar}
+                  {overtimeSummary.partnerB.totalExtraHours}h
+                </span>
+              </button>
+
+              {showOvertimePopup && (
+                <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-72 sm:w-80 bg-white rounded-3xl shadow-xl border-2 border-[#FFE28A] p-3.5 z-50 animate-pop text-xs space-y-2.5">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-stone-100">
+                    <span className="font-extrabold text-[#8A5A00] flex items-center gap-1">
+                      <Timer className="w-4 h-4 text-[#FFB703]" />
+                      {month}月の残業・休日出勤・バイト集計
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowOvertimePopup(false)}
+                      className="text-stone-400 hover:text-stone-600 font-bold px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* 夫・妻それぞれの残業・休出・バイト集計カード */}
+                  {(['partnerA', 'partnerB'] as PartnerId[]).map((pid) => {
+                    const p = metadata.partners[pid];
+                    const sum = overtimeSummary[pid];
+                    return (
+                      <div
+                        key={pid}
+                        className="p-2.5 rounded-2xl bg-[#FFFBF7] border border-stone-200/80 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-stone-800">
+                            {p.avatar} {p.name}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-[#FFF6D6] text-[#8A5A00] font-black text-xs">
+                            合計 {sum.totalExtraHours} 時間
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-[11px] text-stone-600 font-bold">
+                          <span>⏱️ 通常残業: {sum.overtimeHours}h</span>
+                          <span>💼 休日出勤: {sum.holidayWorkHours}h</span>
+                          <span>🏪 バイト: {sum.partTimeCount}回</span>
+                        </div>
+
+                        {sum.entries.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {sum.entries.map((en) => {
+                              const dayN = Number(en.date.split('-')[2]);
+                              return (
+                                <button
+                                  key={en.id}
+                                  type="button"
+                                  onClick={() => {
+                                    onSelectDate(en.date);
+                                    setShowOvertimePopup(false);
+                                  }}
+                                  className="px-1.5 py-0.5 rounded-lg bg-white border border-stone-200 text-[10px] font-bold text-stone-700 hover:border-[#FF8FAB]"
+                                >
+                                  {dayN}日(
+                                  {en.holidayWorkHours
+                                    ? `休出${en.holidayWorkHours}h`
+                                    : en.overtimeHours
+                                    ? `+${en.overtimeHours}h`
+                                    : 'バイト'}
+                                  )
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* 右側：操作中ユーザー切替 ＋ 相手の最終確認（既読ステータス） ＋ 同期・設定ボタン */}
-          <div className="flex items-center gap-1.5 flex-wrap justify-end">
-            {/* 相手の最終確認バッジ */}
-            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-2xl border border-stone-200/90 shadow-sm text-[11px]">
-              <span className="font-bold text-stone-600 flex items-center gap-1">
+          {/* 右側：既読確認 ＆ パートナー切替 ＆ 設定 */}
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-2xl border border-stone-200/90 shadow-2xs text-[10px] sm:text-[11px]">
+              <span className="font-bold text-stone-600 flex items-center gap-0.5">
                 <span>{otherPartner.avatar}</span>
-                <span className="hidden md:inline">{otherPartner.name}の</span>最終確認:
                 <span className="font-extrabold text-stone-800">
                   {formatLastSeen(otherPartner.lastSeenAt)}
                 </span>
               </span>
               {unreadCountForPartner > 0 && (
-                <span
-                  className="px-1.5 py-0.5 rounded-full bg-[#FFE5EC] text-[#D63864] font-extrabold text-[10px]"
-                  title={`${otherPartner.name}さんがまだ見ていない変更が ${unreadCountForPartner} 件あります`}
-                >
-                  🆕未見{unreadCountForPartner}
+                <span className="px-1.5 py-0.2 rounded-full bg-[#FFE5EC] text-[#D63864] font-extrabold text-[9px]">
+                  未見{unreadCountForPartner}
                 </span>
               )}
               <button
                 type="button"
                 onClick={onMarkSeenNow}
-                className="ml-0.5 px-2 py-0.5 rounded-xl bg-[#E6F7EF] hover:bg-[#52B788] text-[#1E6645] hover:text-white font-extrabold text-[10px] transition-colors flex items-center gap-0.5"
-                title={`${currentPartner.avatar}${currentPartner.name}の最終確認時刻を「たった今」に更新します`}
+                className="px-1.5 py-0.5 rounded-lg bg-[#E6F7EF] hover:bg-[#52B788] text-[#1E6645] hover:text-white font-extrabold text-[10px] flex items-center gap-0.5"
+                title={`${currentPartner.avatar}${currentPartner.name}の既読時刻を更新`}
               >
-                <CheckCircle2 className="w-3 h-3" />
-                <span>既読更新</span>
+                <CheckCircle2 className="w-2.5 h-2.5" />
+                <span>既読</span>
               </button>
             </div>
 
-            {/* 自分がどちらか（🐻夫 / 🐰妻）切替ピル */}
-            <div
-              className="flex items-center bg-stone-100 p-0.5 rounded-2xl border border-stone-200"
-              title="操作する人を切り替え（誰が予定を入れたか＆既読記録に使われます）"
-            >
+            {/* 操作中パートナー切替（🐻夫 ⇔ 🐰妻） */}
+            <div className="flex items-center bg-stone-100 p-0.5 rounded-2xl border border-stone-200">
               <button
                 type="button"
                 onClick={() => onToggleActivePartner('partnerA')}
-                className={`px-2 py-1 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1 ${
+                className={`px-2 py-0.5 rounded-xl text-[11px] font-extrabold transition-all flex items-center gap-0.5 ${
                   activePartner === 'partnerA'
-                    ? 'bg-[#56CFE1] text-white shadow-sm'
-                    : 'text-stone-500 hover:text-stone-800'
+                    ? 'bg-[#56CFE1] text-white shadow-2xs'
+                    : 'text-stone-500'
                 }`}
               >
                 <span>{partnerA.avatar}</span>
-                <span className="hidden sm:inline">{partnerA.name}</span>
+                <span>{partnerA.name}</span>
               </button>
               <button
                 type="button"
                 onClick={() => onToggleActivePartner('partnerB')}
-                className={`px-2 py-1 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1 ${
+                className={`px-2 py-0.5 rounded-xl text-[11px] font-extrabold transition-all flex items-center gap-0.5 ${
                   activePartner === 'partnerB'
-                    ? 'bg-[#B388EB] text-white shadow-sm'
-                    : 'text-stone-500 hover:text-stone-800'
+                    ? 'bg-[#B388EB] text-white shadow-2xs'
+                    : 'text-stone-500'
                 }`}
               >
                 <span>{partnerB.avatar}</span>
-                <span className="hidden sm:inline">{partnerB.name}</span>
+                <span>{partnerB.name}</span>
               </button>
             </div>
 
-            {/* クラウド同期ボタン */}
             {syncEnabled && (
               <button
                 type="button"
                 onClick={onTriggerSync}
                 disabled={isSyncing}
-                className="p-2 rounded-2xl bg-white border border-stone-200 text-stone-600 hover:bg-[#E2F9FC] hover:text-[#136370] shadow-sm transition-colors"
-                title="GitHubクラウドと今すぐ暗号化マージ同期"
+                className="p-1.5 rounded-xl bg-white border border-stone-200 text-stone-600"
+                title="今すぐクラウド同期"
               >
-                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-[#FF8FAB]' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#FF8FAB]' : ''}`} />
               </button>
             )}
 
-            {/* ロックボタン */}
             <button
               type="button"
               onClick={onLockScreen}
-              className="p-2 rounded-2xl bg-white border border-stone-200 text-stone-500 hover:bg-[#FFE5EC] hover:text-[#9E2A47] shadow-sm transition-colors"
-              title="合言葉で画面をロック"
+              className="p-1.5 rounded-xl bg-white border border-stone-200 text-stone-500"
+              title="画面ロック"
             >
-              <Lock className="w-4 h-4" />
+              <Lock className="w-3.5 h-3.5" />
             </button>
 
-            {/* 設定＆同期モーダルボタン */}
             <button
               type="button"
               onClick={onOpenSettings}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-2xl bg-white border border-stone-200 text-stone-700 hover:bg-stone-100 shadow-sm text-xs font-bold transition-colors"
-              title="クラウド同期・iCal連携・プロフィール設定"
+              className="p-1.5 rounded-xl bg-white border border-stone-200 text-stone-700"
+              title="設定・クラウド同期・iCal連携"
             >
-              <Settings className="w-4 h-4 text-[#FF8FAB]" />
-              <span className="hidden sm:inline">設定・同期</span>
+              <Settings className="w-3.5 h-3.5 text-[#FF8FAB]" />
             </button>
           </div>
         </div>
 
-        {/* 年月ジャンプピッカー（展開時） */}
+        {/* 年月ジャンプピッカー */}
         {showMonthPicker && (
           <div className="bg-white rounded-3xl p-3 border-2 border-[#FFE5EC] shadow-lg flex flex-wrap items-center justify-between gap-2 animate-pop">
             <div className="flex items-center gap-1.5">
@@ -336,7 +433,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   type="button"
                   onClick={() => onSelectYearMonth(y, month)}
                   className={`px-3 py-1 rounded-xl text-xs font-extrabold ${
-                    y === year ? 'bg-[#FF8FAB] text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                    y === year ? 'bg-[#FF8FAB] text-white' : 'bg-stone-100 text-stone-600'
                   }`}
                 >
                   {y}年
@@ -352,10 +449,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                     onSelectYearMonth(year, m);
                     setShowMonthPicker(false);
                   }}
-                  className={`py-1 rounded-xl text-xs font-bold transition-colors ${
-                    m === month
-                      ? 'bg-[#B388EB] text-white font-extrabold'
-                      : 'bg-[#FFFBF7] hover:bg-[#FFE5EC] text-stone-700'
+                  className={`py-1 rounded-xl text-xs font-bold ${
+                    m === month ? 'bg-[#B388EB] text-white font-extrabold' : 'bg-[#FFFBF7] text-stone-700'
                   }`}
                 >
                   {m}月
@@ -365,65 +460,106 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           </div>
         )}
 
-        {/* 下段：カレンダー別フィルタピル ＋ 全件展開/コンパクト切替 ＋ 時間表示切替 */}
-        <div className="flex items-center justify-between gap-2 pt-0.5 overflow-x-auto no-scrollbar">
-          {/* カテゴリフィルタピル */}
+        {/* 下段：カレンダー予定項目フィルタ（デフォルト：すべて | 💕二人予定 | 🐻夫予定 | 🐰妻予定 ＋ 項目追加・削除ボタン）＋ 全件/コンパクト（3件まで）切替 */}
+        <div className="flex items-center justify-between gap-1.5 overflow-x-auto no-scrollbar">
           <div className="flex items-center gap-1 shrink-0">
-            {filterOptions.map((opt) => {
-              const isActive = filterCategory === opt.id;
+            <button
+              type="button"
+              onClick={() => onChangeFilter('all')}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold transition-all flex items-center gap-1 ${
+                filterCategory === 'all'
+                  ? 'bg-stone-800 text-white shadow-2xs'
+                  : 'bg-white text-stone-600 border border-stone-200/80'
+              }`}
+            >
+              <span>🌈</span>
+              <span>すべて</span>
+            </button>
+
+            {sortedCategories.map((cat) => {
+              const isActive = filterCategory === cat.id;
+              const displayLabel =
+                cat.id === 'partnerA'
+                  ? `${partnerA.name}予定`
+                  : cat.id === 'partnerB'
+                  ? `${partnerB.name}予定`
+                  : cat.shortLabel;
+              const displayIcon =
+                cat.id === 'partnerA'
+                  ? partnerA.avatar
+                  : cat.id === 'partnerB'
+                  ? partnerB.avatar
+                  : cat.icon;
+
               return (
                 <button
-                  key={opt.id}
+                  key={cat.id}
                   type="button"
-                  onClick={() => onChangeFilter(opt.id)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-extrabold transition-all flex items-center gap-1 shadow-sm ${
+                  onClick={() => onChangeFilter(cat.id)}
+                  style={
                     isActive
-                      ? `${opt.activeBg} ${opt.activeText} scale-[1.03]`
-                      : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200/70'
+                      ? { backgroundColor: cat.accentColor, color: '#ffffff' }
+                      : undefined
+                  }
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold transition-all flex items-center gap-1 ${
+                    isActive
+                      ? 'shadow-2xs scale-[1.02]'
+                      : 'bg-white text-stone-600 border border-stone-200/80'
                   }`}
                 >
-                  <span>{opt.icon}</span>
-                  <span>{opt.label}</span>
+                  <span>{displayIcon}</span>
+                  <span>{displayLabel}</span>
                 </button>
               );
             })}
+
+            {/* カレンダー項目の追加・削除ボタン */}
+            <button
+              type="button"
+              onClick={onOpenCategoryManager}
+              className="px-2 py-1 rounded-full bg-[#FFF0F5] hover:bg-[#FFE5EC] border border-[#FFC2D1] text-[#9E2A47] text-[10px] font-extrabold flex items-center gap-0.5 shrink-0"
+              title="カレンダーの予定項目を追加・削除する"
+            >
+              <Plus className="w-3 h-3" />
+              <span>項目編集</span>
+            </button>
           </div>
 
-          {/* 表示モード切替スイッチ（全件展開 / コンパクト ＋ シフト時間表示） */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          {/* 右端：シフト時間表示トグル ＋ 全件展開 / コンパクト(3件まで)切替 */}
+          <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={onToggleShowShiftTime}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all flex items-center gap-1 ${
+              className={`px-2 py-1 rounded-full text-[10px] font-bold border flex items-center gap-0.5 ${
                 showShiftTimeInCell
                   ? 'bg-[#E2F9FC] border-[#56CFE1] text-[#136370]'
-                  : 'bg-white border-stone-200 text-stone-500 hover:bg-stone-50'
+                  : 'bg-white border-stone-200 text-stone-500'
               }`}
-              title="セル内にシフトの開始・終了時間を常時表示するか切り替え"
+              title="シフト枠に開始時間を表示"
             >
               <Clock className="w-3 h-3" />
-              <span className="hidden md:inline">シフト時間</span>
+              <span className="hidden sm:inline">時間</span>
             </button>
 
             <button
               type="button"
               onClick={onToggleExpandedView}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border transition-all flex items-center gap-1 ${
+              className={`px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-extrabold border flex items-center gap-1 ${
                 isExpandedView
                   ? 'bg-[#FFE5EC] border-[#FF8FAB] text-[#9E2A47]'
-                  : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                  : 'bg-white border-stone-200 text-stone-700'
               }`}
-              title="1日の予定が何件あっても複数行で全文表示する「全件展開モード」と「コンパクトモード」を切り替えます"
+              title="コンパクト時は1日3件まで表示し、全件展開時はすべて表示します"
             >
               {isExpandedView ? (
                 <>
                   <Maximize2 className="w-3 h-3" />
-                  <span>全件展開中</span>
+                  <span>全件表示</span>
                 </>
               ) : (
                 <>
                   <Minimize2 className="w-3 h-3" />
-                  <span>コンパクト</span>
+                  <span>コンパクト(3件)</span>
                 </>
               )}
             </button>
