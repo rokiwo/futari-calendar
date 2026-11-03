@@ -39,6 +39,8 @@ interface SettingsAndSyncModalProps {
   onMergeRemoteStore: (remoteStore: CalendarDataStore, message: string) => void;
   onImportEvents: (events: ScheduleEvent[]) => void;
   onClearAllEvents: () => void;
+  onClearAllShifts: () => void;
+  onClearAllData: () => void;
   onUpdatePartnerProfiles: (
     partnerAName: string,
     partnerAAvatar: string,
@@ -63,6 +65,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   onMergeRemoteStore,
   onImportEvents,
   onClearAllEvents,
+  onClearAllShifts,
+  onClearAllData,
   onUpdatePartnerProfiles,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('sync');
@@ -79,6 +83,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   );
   const [autoSync, setAutoSync] = useState(syncConfig.autoSync ?? true);
   const [passwordInput, setPasswordInput] = useState(currentPassword || '');
+  const [sharePasteText, setSharePasteText] = useState('');
 
   // プロフィール編集状態
   const [nameA, setNameA] = useState(store.metadata.partners.partnerA.name);
@@ -204,6 +209,83 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
       setTimeout(() => setCopiedShare(false), 2500);
     } catch {
       // ignore
+    }
+  };
+
+  // パートナーからLINE等で送られてきた共有設定テキストを貼り付けて自動反映
+  const handleApplyPastedShareText = async () => {
+    setStatusMsg(null);
+    const text = sharePasteText.trim();
+    if (!text) {
+      setStatusMsg({
+        type: 'err',
+        text: 'パートナーから送られた「共有設定テキスト」を貼り付けてください📋',
+      });
+      return;
+    }
+
+    const passMatch = text.match(/合言葉\(パスワード\):\s*(.+)/);
+    const gistMatch = text.match(/Gist ID:\s*([a-zA-Z0-9]+)/);
+    const repoMatch = text.match(/Repo:\s*([^\s/]+)\/([^\s]+)/);
+    const tokenMatch = text.match(/GitHub Token:\s*([a-zA-Z0-9_]+)/);
+
+    const nextPass = passMatch ? passMatch[1].trim() : passwordInput.trim();
+    const nextToken = tokenMatch ? tokenMatch[1].trim() : githubToken.trim();
+    const nextGist = gistMatch ? gistMatch[1].trim() : gistId.trim();
+    const nextMode: 'gist' | 'repo' = repoMatch && !gistMatch ? 'repo' : 'gist';
+    const nextOwner = repoMatch ? repoMatch[1].trim() : repoOwner.trim();
+    const nextRepo = repoMatch ? repoMatch[2].trim() : repoName.trim();
+
+    if (nextPass && nextPass !== '(設定した合言葉)') setPasswordInput(nextPass);
+    if (nextToken) setGithubToken(nextToken);
+    if (nextGist) setGistId(nextGist);
+    setMode(nextMode);
+    if (nextOwner) setRepoOwner(nextOwner);
+    if (nextRepo) setRepoName(nextRepo);
+
+    if (!nextPass || nextPass.length < 4 || nextPass === '(設定した合言葉)') {
+      setStatusMsg({
+        type: 'err',
+        text: 'テキストから合言葉（4文字以上）を読み取れませんでした。上の欄に合言葉を入力してください🔑',
+      });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await onUpdatePassword(nextPass);
+      const nextCfg: CloudSyncConfig = {
+        enabled: Boolean(nextToken && (nextMode === 'repo' ? nextOwner : nextGist)),
+        mode: nextMode,
+        githubToken: nextToken,
+        gistId: nextGist,
+        repoOwner: nextOwner,
+        repoName: nextRepo || 'futari-calendar',
+        repoBranch: repoBranch.trim() || 'main',
+        repoFilePath: repoFilePath.trim() || 'data/calendar-encrypted.json',
+        autoSync: true,
+      };
+      onUpdateSyncConfig(nextCfg);
+      if (nextCfg.enabled) {
+        await onTriggerCloudSync(nextCfg, nextPass);
+        setStatusMsg({
+          type: 'ok',
+          text: 'パートナーの共有設定を自動反映し、クラウド同期を完了しました💕',
+        });
+      } else {
+        setStatusMsg({
+          type: 'ok',
+          text: '合言葉を設定しました🔑（クラウド同期にはGitHub TokenとGist IDが必要です）',
+        });
+      }
+      setSharePasteText('');
+    } catch (err) {
+      setStatusMsg({
+        type: 'err',
+        text: err instanceof Error ? err.message : '共有設定の同期に失敗しました',
+      });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -594,6 +676,86 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     <span>{copiedShare ? 'コピー完了!' : 'パートナー共有用コピー'}</span>
                   </button>
                 </div>
+
+                {/* パートナーから送られてきた共有設定を1タップで貼り付け反映 */}
+                <div className="mt-3 pt-3 border-t border-stone-200/80 space-y-2">
+                  <div className="font-extrabold text-stone-700 text-xs flex items-center gap-1">
+                    <span>📥 パートナーから送られた「共有設定テキスト」を貼り付けて自動連携</span>
+                  </div>
+                  <p className="text-[11px] text-stone-500">
+                    パートナーが上の「パートナー共有用コピー」でLINE等に送ってくれたメッセージをそのまま下に貼り付けるだけで、合言葉・Gist ID・Tokenが自動入力されて同期されます。
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <textarea
+                      rows={2}
+                      value={sharePasteText}
+                      onChange={(e) => setSharePasteText(e.target.value)}
+                      placeholder="【ふたりカレ (FutariCal) 共有設定💕】... をここに貼り付け"
+                      className="flex-1 px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-[11px] font-mono resize-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleApplyPastedShareText}
+                      className="px-3.5 py-2 rounded-xl bg-[#126875] hover:bg-[#0E515C] text-white font-extrabold text-xs shrink-0"
+                    >
+                      ✨ 貼り付けた設定で自動連携
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 🗑️ 既存のシフトデータ・予定データの削除（リセット） */}
+              <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 space-y-2.5">
+                <h3 className="text-sm font-extrabold text-rose-700">
+                  🗑️ 既存のシフトデータ・予定データの削除（リセット）
+                </h3>
+                <p className="text-stone-600 text-[11px]">
+                  登録済みのシフトデータ（残業・休出・バイト含む）や予定・タスクデータを削除して白紙に戻せます（シフトスタンプの種類設定や項目設定は消えません）。
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearAllShifts();
+                      setStatusMsg({
+                        type: 'ok',
+                        text: '登録されていたすべてのシフトデータ（残業・休出・バイト含む）を削除しました✨',
+                      });
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shadow-xs"
+                  >
+                    🗑️ 既存のシフトデータをすべて削除
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearAllEvents();
+                      setStatusMsg({
+                        type: 'ok',
+                        text: '登録されていたすべての予定・タスクデータを削除しました✨',
+                      });
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs shadow-xs"
+                  >
+                    🗑️ 既存の予定・タスクデータをすべて削除
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearAllData();
+                      setStatusMsg({
+                        type: 'ok',
+                        text: 'すべてのシフトデータと予定・タスクデータを一括削除しました✨',
+                      });
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-rose-700 hover:bg-rose-800 text-white font-extrabold text-xs shadow-xs"
+                  >
+                    🗑️ 予定＋シフトを両方すべて一括削除
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -791,27 +953,57 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 </div>
               </div>
 
-              {/* 🗑️ 全予定一括削除（リセット） */}
-              <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 space-y-2">
+              {/* 🗑️ 全シフト・全予定一括削除（リセット） */}
+              <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 space-y-2.5">
                 <h3 className="text-sm font-extrabold text-rose-700">
-                  🗑️ 登録されている予定・タスクをすべて削除
+                  🗑️ 既存のシフトデータ・予定データの削除（リセット）
                 </h3>
                 <p className="text-stone-600">
-                  現在登録されているすべての予定・タスクを一括で空にします（シフト種類の設定は残ります）。
+                  現在登録されているシフトデータ（残業・休出・バイト含む）や予定・タスクを一括で空にします（シフト種類の設定は残ります）。
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClearAllEvents();
-                    setStatusMsg({
-                      type: 'ok',
-                      text: '登録されていたすべての予定・タスクを削除しました✨',
-                    });
-                  }}
-                  className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs shadow-xs"
-                >
-                  🗑️ すべての予定を今すぐ削除する
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearAllShifts();
+                      setStatusMsg({
+                        type: 'ok',
+                        text: '登録されていたすべてのシフトデータを削除しました✨',
+                      });
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shadow-xs"
+                  >
+                    🗑️ すべてのシフトデータを削除
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearAllEvents();
+                      setStatusMsg({
+                        type: 'ok',
+                        text: '登録されていたすべての予定・タスクを削除しました✨',
+                      });
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs shadow-xs"
+                  >
+                    🗑️ すべての予定・タスクを削除
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearAllData();
+                      setStatusMsg({
+                        type: 'ok',
+                        text: 'すべてのシフトデータと予定・タスクデータを一括削除しました✨',
+                      });
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-rose-700 hover:bg-rose-800 text-white font-extrabold text-xs shadow-xs"
+                  >
+                    🗑️ 予定＋シフトをすべて一括削除
+                  </button>
+                </div>
               </div>
             </div>
           )}
