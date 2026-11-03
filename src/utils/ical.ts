@@ -55,6 +55,15 @@ export function exportToIcs(
     'METHOD:PUBLISH',
     'X-WR-CALNAME:ふたりカレ (FutariCal)',
     'X-WR-TIMEZONE:Asia/Tokyo',
+    'BEGIN:VTIMEZONE',
+    'TZID:Asia/Tokyo',
+    'BEGIN:STANDARD',
+    'DTSTART:19700101T000000',
+    'TZOFFSETFROM:+0900',
+    'TZOFFSETTO:+0900',
+    'TZNAME:JST',
+    'END:STANDARD',
+    'END:VTIMEZONE',
   ];
 
   const stampMap = new Map<string, StampPreset>();
@@ -63,6 +72,7 @@ export function exportToIcs(
   }
 
   const dtstamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  let count = 0;
 
   // 1. シフトデータの出力
   if (target === 'all' || target === 'partnerA' || target === 'partnerB') {
@@ -73,9 +83,16 @@ export function exportToIcs(
 
       const partner = store.metadata.partners[shift.partnerId];
       const stamp = stampMap.get(shift.stampId);
-      const label = shift.customLabel || stamp?.label || 'シフト';
+      const label =
+        shift.customLabel || stamp?.label || (shift.isHolidayWork ? '休日出勤' : 'シフト');
       const icon = stamp?.icon || '';
-      const summary = `${partner.avatar}${partner.name}: ${icon}${label}`;
+      const extraParts: string[] = [];
+      if ((shift.overtimeHours || 0) > 0) extraParts.push(`残業+${shift.overtimeHours}h`);
+      if ((shift.holidayWorkHours || 0) > 0) extraParts.push(`休出${shift.holidayWorkHours}h`);
+      if (shift.subCustomLabel) extraParts.push(`+${shift.subCustomLabel}`);
+      const extraSuffix = extraParts.length > 0 ? ` (${extraParts.join('/')})` : '';
+
+      const summary = `${partner.avatar}${partner.name}: ${icon}${label}${extraSuffix}`;
       const startTime = shift.startTime || stamp?.startTime;
       const endTime = shift.endTime || stamp?.endTime;
 
@@ -98,6 +115,7 @@ export function exportToIcs(
         lines.push(`DESCRIPTION:${escapeIcsText(shift.memo)}`);
       }
       lines.push('END:VEVENT');
+      count++;
     }
   }
 
@@ -133,6 +151,26 @@ export function exportToIcs(
     if (descParts.length > 0) {
       lines.push(`DESCRIPTION:${escapeIcsText(descParts.join('\n'))}`);
     }
+    lines.push('END:VEVENT');
+    count++;
+  }
+
+  // 0件の時にスマホで「開けません」とならないよう、案内予定を1件含める
+  if (count === 0) {
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+      2,
+      '0'
+    )}-${String(now.getDate()).padStart(2, '0')}`;
+    lines.push('BEGIN:VEVENT');
+    lines.push('UID:futarical-sample-welcome@futarical.local');
+    lines.push(`DTSTAMP:${dtstamp}`);
+    lines.push(`DTSTART;VALUE=DATE:${formatIcsDateOnly(todayStr)}`);
+    lines.push(`DTEND;VALUE=DATE:${getNextDayIcs(todayStr)}`);
+    lines.push('SUMMARY:🐻💕🐰 ふたりカレ カレンダー連携テスト');
+    lines.push(
+      'DESCRIPTION:ふたりカレにシフトや予定を登録してから書き出すと、ここにまとめて表示されます。'
+    );
     lines.push('END:VEVENT');
   }
 
