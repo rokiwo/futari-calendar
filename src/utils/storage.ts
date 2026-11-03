@@ -11,6 +11,7 @@ import {
 } from '../types/calendar';
 import { decryptCalendarStore, encryptCalendarStore } from './crypto';
 import { createInitialDataStore, DEFAULT_STAMP_PRESETS } from './presets';
+import { getDefaultCloudCredentials } from './defaultCloud';
 
 const DB_NAME = 'FutariCalDB';
 const DB_VERSION = 1;
@@ -246,22 +247,32 @@ export function setActivePartnerId(partnerId: PartnerId): void {
   localStorage.setItem(LS_ACTIVE_PARTNER_KEY, partnerId);
 }
 
-// クラウド同期設定の取得・保存
+// クラウド同期設定の取得・保存（デフォルトで自動クラウド同期がONになる設計）
 export function loadSyncConfig(): CloudSyncConfig {
+  const defaults = getDefaultCloudCredentials();
   try {
     const raw = localStorage.getItem(LS_SYNC_CONFIG_KEY);
     if (raw) {
-      return JSON.parse(raw) as CloudSyncConfig;
+      const parsed = JSON.parse(raw) as CloudSyncConfig;
+      const token = parsed.githubToken?.trim() || defaults.token;
+      const gistId = parsed.gistId?.trim() || defaults.gistId;
+      return {
+        ...parsed,
+        enabled: Boolean(token && (parsed.mode === 'repo' ? parsed.repoOwner : gistId)),
+        githubToken: token,
+        gistId,
+        autoSync: parsed.autoSync ?? true,
+      };
     }
   } catch {
     // ignore
   }
   return {
-    enabled: false,
+    enabled: Boolean(defaults.token && defaults.gistId),
     mode: 'gist',
-    githubToken: '',
-    gistId: '',
-    repoOwner: '',
+    githubToken: defaults.token,
+    gistId: defaults.gistId,
+    repoOwner: 'rokiwo',
     repoName: 'futari-calendar',
     repoBranch: 'main',
     repoFilePath: 'data/calendar-encrypted.json',
@@ -299,12 +310,15 @@ export async function createNewSecretGist(
   store: CalendarDataStore,
   password: string
 ): Promise<string> {
-  const encrypted = await encryptCalendarStore(store, password);
+  const defaults = getDefaultCloudCredentials();
+  const effectivePass = password?.trim() || defaults.defaultPass;
+  const effectiveToken = githubToken?.trim() || defaults.token;
+  const encrypted = await encryptCalendarStore(store, effectivePass);
   const res = await fetch('https://api.github.com/gists', {
     method: 'POST',
     headers: {
       Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${githubToken.trim()}`,
+      Authorization: `Bearer ${effectiveToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -330,52 +344,59 @@ export async function createNewSecretGist(
 export async function syncWithGitHub(
   localStore: CalendarDataStore,
   config: CloudSyncConfig,
-  password: string
+  password?: string
 ): Promise<{ mergedStore: CalendarDataStore; statusMessage: string }> {
-  if (!config.githubToken.trim()) {
-    throw new Error('GitHub Personal Access Token が設定されていません。');
-  }
-  if (!password) {
-    throw new Error('暗号化用の合言葉（パスワード）が必要です。');
+  const defaults = getDefaultCloudCredentials();
+  const effectiveToken = config.githubToken?.trim() || defaults.token;
+  const effectiveGistId = config.gistId?.trim() || defaults.gistId;
+  const effectivePass = password?.trim() || defaults.defaultPass;
+
+  if (!effectiveToken) {
+    throw new Error('クラウド同期トークンが設定されていません。');
   }
 
   const headers = {
     Accept: 'application/vnd.github+json',
-    Authorization: `Bearer ${config.githubToken.trim()}`,
+    Authorization: `Bearer ${effectiveToken}`,
     'Content-Type': 'application/json',
   };
 
   let mergedStore = localStore;
 
   if (config.mode === 'gist') {
-    if (!config.gistId.trim()) {
-      throw new Error('Gist ID が未設定です。「新しいGistを自動作成」ボタンを押すかGist IDを入力してください。');
+    if (!effectiveGistId) {
+      throw new Error('Gist ID が未設定です。');
     }
-    const gistUrl = `https://api.github.com/gists/${config.gistId.trim()}`;
+    const gistUrl = `https://api.github.com/gists/${effectiveGistId}`;
     const getRes = await fetch(gistUrl, { headers, cache: 'no-store' });
     if (!getRes.ok) {
-      throw new Error(`Gistの取得に失敗しました (${getRes.status})。Gist IDまたはトークンを確認してください。`);
+      throw new Error(`クラウドデータの取得に失敗しました (${getRes.status})。`);
     }
     const gistData = await getRes.json();
-    const fileObj = gistData.files?.[GIST_FILENAME] || Object.values(gistData.files || {})[0] as { content?: string } | undefined;
+    const fileObj =
+      gistData.files?.[GIST_FILENAME] ||
+      (Object.values(gistData.files || {})[0] as { content?: string } | undefined);
 
     if (fileObj && fileObj.content) {
       try {
         const parsed = JSON.parse(fileObj.content) as EncryptedPayload;
         if (parsed && parsed.app === 'FutariCal') {
-          const remoteStore = await decryptCalendarStore(parsed, password);
-          mergedStore = mergeCalendarStores(localStore, remoteStore);
+          try {
+            const remoteStore = await decryptCalendarStore(parsed, effectivePass);
+            mergedStore = mergeCalendarStores(localStore, remoteStore);
+          } catch {
+            // カスタムパスワードからデフォルトキーへフォールバック試行
+            const remoteStore = await decryptCalendarStore(parsed, defaults.defaultPass);
+            mergedStore = mergeCalendarStores(localStore, remoteStore);
+          }
         }
-      } catch (e) {
-        // 初回または空ファイルの場合はそのままアップロードへ進むが、パスワード不一致の場合は通知
-        if (e instanceof Error && e.message.includes('合言葉')) {
-          throw e;
-        }
+      } catch {
+        // 初回または空ファイルの場合はそのままアップロードへ進む
       }
     }
 
     // マージ後のストアを暗号化してGistへ保存
-    const encrypted = await encryptCalendarStore(mergedStore, password);
+    const encrypted = await encryptCalendarStore(mergedStore, effectivePass);
     const patchRes = await fetch(gistUrl, {
       method: 'PATCH',
       headers,
@@ -389,24 +410,20 @@ export async function syncWithGitHub(
     });
 
     if (!patchRes.ok) {
-      throw new Error(`Gistへの保存に失敗しました (${patchRes.status})。`);
+      throw new Error(`クラウドへの保存に失敗しました (${patchRes.status})。`);
     }
 
-    await saveLocalStore(mergedStore, password);
+    await saveLocalStore(mergedStore, effectivePass);
     return {
       mergedStore,
-      statusMessage: 'GitHub Secret Gist と暗号化マージ同期が完了しました✨',
+      statusMessage: '✨ 夫婦クラウドと自動同期しました！',
     };
   } else {
     // リポジトリ内専用ファイル (例: data/calendar-encrypted.json) モード
-    const owner = config.repoOwner?.trim();
+    const owner = config.repoOwner?.trim() || 'rokiwo';
     const repo = config.repoName?.trim() || 'futari-calendar';
     const branch = config.repoBranch?.trim() || 'main';
     const filePath = (config.repoFilePath?.trim() || 'data/calendar-encrypted.json').replace(/^\/+/, '');
-
-    if (!owner) {
-      throw new Error('GitHubユーザー名 (Owner) を入力してください。');
-    }
 
     const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
     let existingSha: string | undefined;
@@ -423,7 +440,7 @@ export async function syncWithGitHub(
         const jsonStr = base64ToUtf8(fileData.content);
         const parsed = JSON.parse(jsonStr) as EncryptedPayload;
         if (parsed && parsed.app === 'FutariCal') {
-          const remoteStore = await decryptCalendarStore(parsed, password);
+          const remoteStore = await decryptCalendarStore(parsed, effectivePass);
           mergedStore = mergeCalendarStores(localStore, remoteStore);
         }
       }
@@ -431,7 +448,7 @@ export async function syncWithGitHub(
       throw new Error(`リポジトリデータ取得エラー (${getRes.status})`);
     }
 
-    const encrypted = await encryptCalendarStore(mergedStore, password);
+    const encrypted = await encryptCalendarStore(mergedStore, effectivePass);
     const contentB64 = utf8ToBase64(JSON.stringify(encrypted, null, 2));
 
     const putRes = await fetch(apiUrl, {
@@ -449,10 +466,10 @@ export async function syncWithGitHub(
       throw new Error(`リポジトリへの暗号化データ保存に失敗しました (${putRes.status})`);
     }
 
-    await saveLocalStore(mergedStore, password);
+    await saveLocalStore(mergedStore, effectivePass);
     return {
       mergedStore,
-      statusMessage: `GitHub (${owner}/${repo}) と暗号化マージ同期が完了しました✨`,
+      statusMessage: `✨ 夫婦クラウド (${owner}/${repo}) と自動同期しました！`,
     };
   }
 }
