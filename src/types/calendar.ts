@@ -1,34 +1,60 @@
 // ふたりカレ (FutariCal) データモデル定義
 
 export type PartnerId = 'partnerA' | 'partnerB';
-export type CalendarCategoryId = 'shared' | 'partnerA' | 'partnerB' | 'anniversary' | 'chore';
+// デフォルトの3項目（二人予定・夫予定・妻予定）に加え、ユーザーが自由に追加・削除可能
+export type CalendarCategoryId = string;
 export type FilterCategoryId = 'all' | CalendarCategoryId;
 
-// シフト＆予定スタンプの定義（ポチポチ連続入力用）
+// カレンダーの予定項目（カテゴリ）定義（追加・削除・カスタマイズ可能）
+export interface CalendarCategoryItem {
+  id: CalendarCategoryId;
+  label: string;          // 例: "二人予定", "夫予定", "妻予定", "記念日", "家事"
+  shortLabel: string;     // 例: "二人", "夫", "妻"
+  icon: string;           // 例: "💕", "🐻", "🐰"
+  accentColor: string;    // HEX
+  bgColor: string;        // HEX
+  textColor: string;      // HEX
+  borderColor: string;    // HEX
+  order: number;
+}
+
+// シフトスタンプの定義（ポチポチ連続入力用）
 export interface StampPreset {
   id: string;
-  label: string;          // 例: "日勤", "夜勤", "休み", "デート", "通院"
-  shortLabel: string;     // カレンダーセル表示用（例: "日", "夜", "休", "💕"）
-  type: 'shift' | 'event'; // シフト枠に入るか、予定リスト枠に入るか
+  label: string;          // 例: "日勤", "夜勤", "休み", "バイト", "休出"
+  shortLabel: string;     // カレンダーセル表示用（例: "日勤", "夜勤", "休み", "バイト"）
+  type: 'shift' | 'event';
   color: string;          // 背景パステルカラー (HEX)
   textColor: string;      // 文字カラー (HEX)
   startTime?: string;     // 付随する開始時間 例: "08:30"
   endTime?: string;       // 付随する終了時間 例: "17:30"
-  icon?: string;          // 絵文字またはアイコン名
+  icon?: string;          // 絵文字アイコン
   isHoliday?: boolean;    // ふたり休日一致判定用の休日フラグ（休・有休・公休など）
-  categoryId?: CalendarCategoryId; // eventタイプの場合のデフォルトカテゴリ
+  categoryId?: CalendarCategoryId;
   order: number;
 }
 
-// 日ごとのシフトデータ（2人並べて表示用）
+// 日ごとのシフトデータ（2人並べて表示＋仕事終わりや休日のバイト重ね書き＋残業・休日出勤時間対応）
 export interface ShiftEntry {
   id: string;             // `${date}_${partnerId}` (例: "2026-11-03_partnerA")
   date: string;           // "YYYY-MM-DD"
   partnerId: PartnerId;
-  stampId: string;
+  stampId: string;        // メインのシフト（例: 日勤、休み、休日出勤）
   customLabel?: string;
   startTime?: string;
   endTime?: string;
+
+  // 普通の仕事＋バイト、または休みの日のバイト等の2つ目（サブ）記載欄
+  subStampId?: string;
+  subCustomLabel?: string; // 例: "バイト", "副業", "夜バイト"
+  subStartTime?: string;   // 例: "18:30"
+  subEndTime?: string;     // 例: "22:00"
+
+  // 残業・休日出勤の記録（月間集計対応）
+  overtimeHours?: number;    // 残業時間（例: 1.5, 2.0）
+  holidayWorkHours?: number; // 休日出勤時間（例: 4.0, 8.0）
+  isHolidayWork?: boolean;   // 休日出勤フラグ
+
   memo?: string;
   createdBy: PartnerId;
   createdAt: string;      // ISO 8601
@@ -36,10 +62,10 @@ export interface ShiftEntry {
   deletedAt?: string | null;
 }
 
-// カレンダー予定データ（1日あたりの件数無制限）
+// カレンダー予定データ
 export interface ScheduleEvent {
   id: string;             // UUID
-  date: string;           // "YYYY-MM-DD"（複数日またぎの場合は終了日も保持）
+  date: string;           // "YYYY-MM-DD"
   endDate?: string;       // "YYYY-MM-DD"
   title: string;          // 複数行表示対応
   categoryId: CalendarCategoryId;
@@ -48,7 +74,7 @@ export interface ScheduleEvent {
   startTime?: string;     // "HH:mm"
   endTime?: string;       // "HH:mm"
   memo?: string;
-  supportBadges?: string[]; // 例: ["🍳夕飯不要", "🍱お弁当"]
+  supportBadges?: string[]; // 例: ["🍳夜ごはん不要", "🍱お弁当あり"]
   createdBy: PartnerId;   // 誰が入れたか
   createdAt: string;      // いつ予定を入れたか
   updatedAt: string;      // いつ更新したか
@@ -87,6 +113,7 @@ export interface CoupleMetadata {
 export interface CalendarDataStore {
   version: number;
   metadata: CoupleMetadata;
+  categories?: CalendarCategoryItem[];      // カスタマイズ可能なカレンダー予定項目リスト
   stamps: StampPreset[];
   shifts: Record<string, ShiftEntry>;        // key: `${date}_${partnerId}`
   events: Record<string, ScheduleEvent>;     // key: event.id
