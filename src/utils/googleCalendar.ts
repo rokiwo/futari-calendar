@@ -150,14 +150,17 @@ export function buildGoogleCalendarUrl(
 }
 
 /**
- * 指定したパートナー（夫のみ または 妻のみ）の対象タスク＆予定だけを抽出し、
- * Googleカレンダーの通知アラーム（VALARM）付き .ics ファイルを生成する
+ * 指定したパートナー（夫のみ または 妻のみ）の対象タスク・予定・シフトを抽出し、
+ * カレンダーの通知アラーム（VALARM）付き .ics ファイルを生成する
+ * ※予定・シフトが0件の状態で押された場合も「開けないエラー」にならないよう、確認用のサンプル通知予定を1件含めます。
  */
 export function generatePartnerNotificationIcs(
   store: CalendarDataStore,
   targetPartner: PartnerId
 ): string {
   const partner = store.metadata.partners[targetPartner];
+  const stampMap = new Map(store.stamps.map((s) => [s.id, s]));
+
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -172,6 +175,59 @@ export function generatePartnerNotificationIcs(
   const nowStamp =
     new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
+  let itemCount = 0;
+
+  // 1. 対象パートナーのシフト（残業・休出・バイト含む）を出力
+  const partnerShifts = Object.values(store.shifts).filter(
+    (s) => !s.deletedAt && s.partnerId === targetPartner
+  );
+
+  for (const s of partnerShifts) {
+    const stamp = stampMap.get(s.stampId);
+    const label = s.customLabel || stamp?.label || (s.isHolidayWork ? '休日出勤' : 'シフト');
+    const icon = stamp?.icon || '📅';
+    const [y, m, d] = s.date.split('-').map(Number);
+    const dateCompact = `${y}${pad(m)}${pad(d)}`;
+
+    const extraParts: string[] = [];
+    if ((s.overtimeHours || 0) > 0) extraParts.push(`残業+${s.overtimeHours}h`);
+    if ((s.holidayWorkHours || 0) > 0) extraParts.push(`休出${s.holidayWorkHours}h`);
+    if (s.subCustomLabel) extraParts.push(`+${s.subCustomLabel}`);
+    const extraSuffix = extraParts.length > 0 ? ` (${extraParts.join('/')})` : '';
+
+    const summary = `${partner.avatar}${icon}${label}${extraSuffix}`.replace(/\r?\n/g, ' ');
+
+    lines.push('BEGIN:VEVENT');
+    lines.push(`UID:futarical-shift-${s.id}@futarical.local`);
+    lines.push(`DTSTAMP:${nowStamp}`);
+
+    const startT = s.startTime || stamp?.startTime;
+    const endT = s.endTime || stamp?.endTime;
+    if (startT && endT && startT < endT) {
+      const [sh, sm] = startT.split(':').map(Number);
+      const [eh, em] = endT.split(':').map(Number);
+      lines.push(`DTSTART:${dateCompact}T${pad(sh)}${pad(sm || 0)}00`);
+      lines.push(`DTEND:${dateCompact}T${pad(eh)}${pad(em || 0)}00`);
+    } else {
+      const nextDt = new Date(y, m - 1, d + 1);
+      const nextCompact = `${nextDt.getFullYear()}${pad(nextDt.getMonth() + 1)}${pad(
+        nextDt.getDate()
+      )}`;
+      lines.push(`DTSTART;VALUE=DATE:${dateCompact}`);
+      lines.push(`DTEND;VALUE=DATE:${nextCompact}`);
+    }
+
+    lines.push(`SUMMARY:${summary}`);
+    lines.push('BEGIN:VALARM');
+    lines.push('ACTION:DISPLAY');
+    lines.push(`DESCRIPTION:${summary}`);
+    lines.push('TRIGGER:-PT60M');
+    lines.push('END:VALARM');
+    lines.push('END:VEVENT');
+    itemCount++;
+  }
+
+  // 2. 対象パートナーに通知すべき予定＆タスクを出力
   const events = Object.values(store.events).filter((ev) =>
     shouldNotifyPartner(ev, targetPartner)
   );
@@ -181,7 +237,7 @@ export function generatePartnerNotificationIcs(
     const dateCompact = `${y}${pad(m)}${pad(d)}`;
 
     lines.push('BEGIN:VEVENT');
-    lines.push(`UID:futarical-${ev.id}-${targetPartner}@futarical.local`);
+    lines.push(`UID:futarical-ev-${ev.id}-${targetPartner}@futarical.local`);
     lines.push(`DTSTAMP:${nowStamp}`);
 
     if (ev.isAllDay && !ev.isTask) {
@@ -196,8 +252,8 @@ export function generatePartnerNotificationIcs(
       const endT = ev.endTime || '09:30';
       const [sh, sm] = startT.split(':').map(Number);
       const [eh, em] = endT.split(':').map(Number);
-      lines.push(`DTSTART;TZID=Asia/Tokyo:${dateCompact}T${pad(sh)}${pad(sm || 0)}00`);
-      lines.push(`DTEND;TZID=Asia/Tokyo:${dateCompact}T${pad(eh)}${pad(em || 0)}00`);
+      lines.push(`DTSTART:${dateCompact}T${pad(sh)}${pad(sm || 0)}00`);
+      lines.push(`DTEND:${dateCompact}T${pad(eh)}${pad(em || 0)}00`);
     }
 
     const summary = `${ev.isTask ? '✅【タスク】' : ''}${ev.title}`.replace(
@@ -209,7 +265,6 @@ export function generatePartnerNotificationIcs(
       lines.push(`DESCRIPTION:${ev.memo.replace(/\r?\n/g, '\\n')}`);
     }
 
-    // Googleカレンダーで確実にプッシュ通知を鳴らす VALARM ブロック
     const remMin = ev.reminderMinutes ?? 30;
     lines.push('BEGIN:VALARM');
     lines.push('ACTION:DISPLAY');
@@ -222,8 +277,81 @@ export function generatePartnerNotificationIcs(
     lines.push('END:VALARM');
 
     lines.push('END:VEVENT');
+    itemCount++;
+  }
+
+  // 3. まだ予定もシフトも0件の状態で押された場合、空の.icsでスマホがエラーにならないよう案内イベントを1件入れる
+  if (itemCount === 0) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    const d = now.getDate();
+    const dateCompact = `${y}${pad(m)}${pad(d)}`;
+    lines.push('BEGIN:VEVENT');
+    lines.push(`UID:futarical-welcome-${targetPartner}@futarical.local`);
+    lines.push(`DTSTAMP:${nowStamp}`);
+    lines.push(`DTSTART:${dateCompact}T090000`);
+    lines.push(`DTEND:${dateCompact}T093000`);
+    lines.push(`SUMMARY:🔔 ふたりカレ通知連携テスト（${partner.avatar}${partner.name}専用）`);
+    lines.push('DESCRIPTION:ふたりカレで予定やシフトを登録してから再度読み込むと、まとめてカレンダーに取り込まれます。');
+    lines.push('BEGIN:VALARM');
+    lines.push('ACTION:DISPLAY');
+    lines.push('DESCRIPTION:ふたりカレ通知テスト');
+    lines.push('TRIGGER:-PT10M');
+    lines.push('END:VALARM');
+    lines.push('END:VEVENT');
   }
 
   lines.push('END:VCALENDAR');
   return lines.join('\r\n');
 }
+
+/**
+ * スマホ（iPhone / Android）およびPCで .ics カレンダーを確実に開く・共有・保存するヘルパー
+ */
+export async function openOrShareIcsOnDevice(
+  icsText: string,
+  filename: string
+): Promise<'shared' | 'opened' | 'downloaded'> {
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  // iPhone / iPad Safari の場合は data:text/calendar スキームでOS標準の「カレンダーに追加」画面が直接開く
+  if (isIOS) {
+    const dataUri = `data:text/calendar;charset=utf-8,${encodeURIComponent(icsText)}`;
+    const a = document.createElement('a');
+    a.href = dataUri;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return 'opened';
+  }
+
+  // Android 等で Web Share API (ファイル共有) が使える場合は「Googleカレンダー」等を直接選べるシートを出す
+  try {
+    const file = new File([icsText], filename, { type: 'text/calendar;charset=utf-8' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        title: 'ふたりカレ カレンダー連携',
+        files: [file],
+      });
+      return 'shared';
+    }
+  } catch {
+    // キャンセルまたは非対応時は通常ダウンロードへフォールバック
+  }
+
+  // PC / 標準ブラウザ向けダウンロード
+  const blob = new Blob([icsText], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+  return 'downloaded';
+}
+
