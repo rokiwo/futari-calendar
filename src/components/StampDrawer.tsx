@@ -18,7 +18,7 @@ import {
   ShiftEntry,
   StampPreset,
 } from '../types/calendar';
-import { SUPPORT_BADGE_PRESETS } from '../utils/presets';
+import { getPartnerShiftStamps, SUPPORT_BADGE_PRESETS } from '../utils/presets';
 
 export type StampDrawerTab = 'partnerA_shift' | 'partnerB_shift' | 'support_badge';
 
@@ -42,7 +42,7 @@ interface StampDrawerProps {
   onToggleSupportBadgeOnSelectedDate: (badge: string) => void;
   activeSupportBadgesOnSelectedDate: string[];
   onOpenDayDetail: () => void;
-  onOpenShiftStampManager: () => void;
+  onOpenShiftStampManager: (partnerId?: PartnerId) => void;
   onOpenVoiceModal: () => void;
   onOpenImageOcrModal: () => void;
   onOpenWidgetModal: () => void;
@@ -75,9 +75,10 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   const partnerA = metadata.partners.partnerA;
   const partnerB = metadata.partners.partnerB;
 
-  const shiftStamps = stamps
-    .filter((s) => s.type === 'shift')
-    .sort((a, b) => a.order - b.order);
+  const currentShiftPartner: PartnerId =
+    activeTab === 'partnerB_shift' ? 'partnerB' : 'partnerA';
+
+  const shiftStamps = getPartnerShiftStamps(stamps, currentShiftPartner);
 
   const formatSelectedDate = (dateStr: string) => {
     const [y, m, d] = dateStr.split('-').map(Number);
@@ -149,9 +150,6 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
     );
   }
 
-  const currentShiftPartner: PartnerId =
-    activeTab === 'partnerB_shift' ? 'partnerB' : 'partnerA';
-
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 bg-white/98 backdrop-blur-md rounded-t-3xl shadow-2xl border-t-2 border-[#FF8FAB] pb-[env(safe-area-inset-bottom)] animate-pop">
       <div className="max-w-xl mx-auto px-3 pt-2.5 pb-3 space-y-2">
@@ -186,11 +184,11 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={onOpenShiftStampManager}
+              onClick={() => onOpenShiftStampManager(currentShiftPartner)}
               className="px-2.5 py-1.5 rounded-2xl bg-[#FFE5EC] hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-xs font-extrabold transition-colors flex items-center gap-1 shadow-2xs"
             >
               <Settings2 className="w-3.5 h-3.5" />
-              <span>シフト種類の追加・編集</span>
+              <span>勤務リストの追加・編集</span>
             </button>
 
             <button
@@ -249,58 +247,76 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
         {/* 3. シフトボタンパレット（1回押すごとに自動で翌日に移動！）＋ バイト＆残業クイック追記バー */}
         {(activeTab === 'partnerA_shift' || activeTab === 'partnerB_shift') && (
           <div className="space-y-1.5">
-            <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5 max-h-36 overflow-y-auto p-0.5">
-              {shiftStamps.map((stamp) => {
-                const isSelected = selectedStampId === stamp.id;
-                return (
-                  <button
-                    key={stamp.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectStamp(stamp.id);
-                      onApplyShiftAndAdvance(stamp, currentShiftPartner);
-                    }}
-                    style={{
-                      backgroundColor: stamp.color,
-                      color: stamp.textColor,
-                    }}
-                    className={`py-2 px-1.5 rounded-2xl font-extrabold text-xs flex flex-col items-center justify-center gap-0.5 shadow-xs active:scale-90 transition-all border-2 ${
-                      isSelected
-                        ? 'border-stone-800 ring-2 ring-stone-800/15'
-                        : 'border-white hover:brightness-95'
-                    }`}
-                  >
-                    <div className="flex items-center gap-0.5">
-                      {stamp.icon && <span className="text-sm">{stamp.icon}</span>}
-                      <span className="truncate">{stamp.label}</span>
-                    </div>
-                    {stamp.startTime ? (
-                      <span className="text-[9px] opacity-80 font-bold">
-                        {stamp.startTime}-{stamp.endTime}
-                      </span>
-                    ) : (
-                      <span className="text-[9px] opacity-65">
-                        {stamp.isHoliday ? '💕休日' : '終日'}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+            {shiftStamps.length === 0 ? (
+              <div className="py-3 px-4 rounded-2xl bg-[#FFFBF7] border border-dashed border-stone-300 flex items-center justify-between gap-2">
+                <div className="text-xs font-extrabold text-stone-600">
+                  {currentShiftPartner === 'partnerA'
+                    ? `${partnerA.avatar} ${partnerA.name}`
+                    : `${partnerB.avatar} ${partnerB.name}`}
+                  の勤務リストは空です
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenShiftStampManager(currentShiftPartner)}
+                  className="px-3 py-1.5 rounded-xl bg-[#B388EB] text-white text-xs font-extrabold shadow-xs shrink-0"
+                >
+                  ＋ 勤務リストを追加
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5 max-h-36 overflow-y-auto p-0.5">
+                {shiftStamps.map((stamp) => {
+                  const isSelected = selectedStampId === stamp.id;
+                  return (
+                    <button
+                      key={stamp.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectStamp(stamp.id);
+                        onApplyShiftAndAdvance(stamp, currentShiftPartner);
+                      }}
+                      style={{
+                        backgroundColor: stamp.color,
+                        color: stamp.textColor,
+                      }}
+                      className={`py-2 px-1.5 rounded-2xl font-extrabold text-xs flex flex-col items-center justify-center gap-0.5 shadow-xs active:scale-90 transition-all border-2 ${
+                        isSelected
+                          ? 'border-stone-800 ring-2 ring-stone-800/15'
+                          : 'border-white hover:brightness-95'
+                      }`}
+                    >
+                      <div className="flex items-center gap-0.5">
+                        {stamp.icon && <span className="text-sm">{stamp.icon}</span>}
+                        <span className="truncate">{stamp.label}</span>
+                      </div>
+                      {stamp.startTime ? (
+                        <span className="text-[9px] opacity-80 font-bold">
+                          {stamp.startTime}-{stamp.endTime}
+                        </span>
+                      ) : (
+                        <span className="text-[9px] opacity-65">
+                          {stamp.isHoliday ? '💕終日(休)' : '終日'}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
 
-              <button
-                type="button"
-                onClick={() => {
-                  onSelectStamp('__ERASER__');
-                  onClearShiftAndAdvance(currentShiftPartner);
-                }}
-                className={`py-2 px-1.5 rounded-2xl font-extrabold text-xs flex flex-col items-center justify-center gap-0.5 bg-stone-100 text-stone-600 hover:bg-rose-50 hover:text-rose-600 border-2 ${
-                  selectedStampId === '__ERASER__' ? 'border-rose-500' : 'border-stone-200'
-                }`}
-              >
-                <Eraser className="w-4 h-4" />
-                <span>消して次へ</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectStamp('__ERASER__');
+                    onClearShiftAndAdvance(currentShiftPartner);
+                  }}
+                  className={`py-2 px-1.5 rounded-2xl font-extrabold text-xs flex flex-col items-center justify-center gap-0.5 bg-stone-100 text-stone-600 hover:bg-rose-50 hover:text-rose-600 border-2 ${
+                    selectedStampId === '__ERASER__' ? 'border-rose-500' : 'border-stone-200'
+                  }`}
+                >
+                  <Eraser className="w-4 h-4" />
+                  <span>消して次へ</span>
+                </button>
+              </div>
+            )}
 
             {/* 選択日の「＋仕事終わり・休日のバイト」＆「⏱️残業・休日出勤」ワンタップ重ね記載バー */}
             <div className="pt-1.5 border-t border-stone-100 flex items-center gap-1 overflow-x-auto no-scrollbar text-[10px]">
