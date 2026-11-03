@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   CalendarDataStore,
   FilterCategoryId,
@@ -20,6 +20,8 @@ interface MonthlyCalendarGridProps {
   selectedDate: string; // "YYYY-MM-DD"
   stampModeActive: boolean;
   onCellClick: (dateStr: string) => void;
+  onSwipePrevMonth?: () => void;
+  onSwipeNextMonth?: () => void;
 }
 
 interface DayCellData {
@@ -31,11 +33,10 @@ interface DayCellData {
   holidayName: string | null;
 }
 
-// 指定年月のカレンダーグリッド用42マス（または必要週数分）を生成
 function buildMonthGrid(year: number, month: number): DayCellData[] {
   const firstDay = new Date(year, month - 1, 1);
   const lastDay = new Date(year, month, 0);
-  const startDayOfWeek = firstDay.getDay(); // 0 (Sun) - 6 (Sat)
+  const startDayOfWeek = firstDay.getDay();
   const daysInMonth = lastDay.getDate();
 
   const now = new Date();
@@ -78,7 +79,7 @@ function buildMonthGrid(year: number, month: number): DayCellData[] {
     });
   }
 
-  // 翌月の埋め草（週の終わり土曜日まで）
+  // 翌月の埋め草
   const remaining = (7 - (cells.length % 7)) % 7;
   for (let d = 1; d <= remaining; d++) {
     const dt = new Date(year, month, d);
@@ -110,9 +111,12 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   selectedDate,
   stampModeActive,
   onCellClick,
+  onSwipePrevMonth,
+  onSwipeNextMonth,
 }) => {
-  // シフト時間をタップでポップ表示するための状態
   const [poppedShiftId, setPoppedShiftId] = useState<string | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
 
   const cells = buildMonthGrid(year, month);
 
@@ -144,7 +148,6 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     });
   }
 
-  // スタンプが「休日（休・有休・公休）」かどうか判定
   const isHolidayShift = (shift?: ShiftEntry): boolean => {
     if (!shift || shift.deletedAt) return false;
     const preset = stampMap.get(shift.stampId);
@@ -153,14 +156,12 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     return /休|有休|公休|夏休|冬休/.test(preset.label);
   };
 
-  // 相手がまだ確認していない（未読）かどうか判定
   const isUnreadByPartner = (updatedAt: string, createdBy: PartnerId): boolean => {
     if (createdBy !== activePartner) return false;
     const updatedMs = Date.parse(updatedAt) || 0;
     return updatedMs > otherLastSeenMs;
   };
 
-  // 自分がまだ確認していない相手からの新着変更か判定
   const myLastSeenMs = Date.parse(store.metadata.partners[activePartner].lastSeenAt || '') || 0;
   const isNewFromPartner = (updatedAt: string, createdBy: PartnerId): boolean => {
     if (createdBy === activePartner) return false;
@@ -169,23 +170,43 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   };
 
   const weekDays = [
-    { label: '日', color: 'text-rose-500 bg-rose-50/60' },
-    { label: '月', color: 'text-stone-600 bg-white/60' },
-    { label: '火', color: 'text-stone-600 bg-white/60' },
-    { label: '水', color: 'text-stone-600 bg-white/60' },
-    { label: '木', color: 'text-stone-600 bg-white/60' },
-    { label: '金', color: 'text-stone-600 bg-white/60' },
-    { label: '土', color: 'text-sky-600 bg-sky-50/60' },
+    { label: '日', color: 'text-rose-500 bg-rose-50/70' },
+    { label: '月', color: 'text-stone-600 bg-white/80' },
+    { label: '火', color: 'text-stone-600 bg-white/80' },
+    { label: '水', color: 'text-stone-600 bg-white/80' },
+    { label: '木', color: 'text-stone-600 bg-white/80' },
+    { label: '金', color: 'text-stone-600 bg-white/80' },
+    { label: '土', color: 'text-sky-600 bg-sky-50/70' },
   ];
 
   return (
-    <div className="max-w-6xl mx-auto px-1.5 sm:px-4 pt-2 pb-28">
+    <div
+      onTouchStart={(e) => {
+        touchStartX.current = e.touches[0].clientX;
+        touchStartY.current = e.touches[0].clientY;
+      }}
+      onTouchEnd={(e) => {
+        if (touchStartX.current === null || touchStartY.current === null) return;
+        const dx = e.changedTouches[0].clientX - touchStartX.current;
+        const dy = e.changedTouches[0].clientY - touchStartY.current;
+        if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+          if (dx > 0) {
+            onSwipePrevMonth?.();
+          } else {
+            onSwipeNextMonth?.();
+          }
+        }
+        touchStartX.current = null;
+        touchStartY.current = null;
+      }}
+      className="max-w-5xl mx-auto px-1 sm:px-4 pt-1.5 pb-28"
+    >
       {/* 曜日ヘッダー */}
-      <div className="grid grid-cols-7 gap-1 sm:gap-1.5 mb-1.5">
+      <div className="grid grid-cols-7 gap-0.5 sm:gap-1.5 mb-1">
         {weekDays.map((w) => (
           <div
             key={w.label}
-            className={`text-center py-1.5 rounded-xl text-xs font-extrabold border border-stone-200/50 shadow-2xs ${w.color}`}
+            className={`text-center py-1 rounded-xl text-[11px] font-extrabold border border-stone-200/50 ${w.color}`}
           >
             {w.label}
           </div>
@@ -193,7 +214,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
       </div>
 
       {/* 月間カレンダーグリッド */}
-      <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
+      <div className="grid grid-cols-7 gap-0.5 sm:gap-1.5">
         {cells.map((cell) => {
           const shiftA = store.shifts[`${cell.dateStr}_partnerA`];
           const shiftB = store.shifts[`${cell.dateStr}_partnerB`];
@@ -203,7 +224,6 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           const stampA = activeShiftA ? stampMap.get(activeShiftA.stampId) : undefined;
           const stampB = activeShiftB ? stampMap.get(activeShiftB.stampId) : undefined;
 
-          // ✨ふたり休日一致判定
           const isBothHoliday = isHolidayShift(activeShiftA) && isHolidayShift(activeShiftB);
           const dayEvents = eventsByDate.get(cell.dateStr) || [];
           const daySupport = store.daySupports?.[cell.dateStr];
@@ -215,7 +235,6 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
 
           const isSelected = selectedDate === cell.dateStr;
 
-          // 日付文字色
           let dateTextColor = 'text-stone-700';
           if (cell.dayOfWeek === 0 || cell.holidayName) {
             dateTextColor = 'text-rose-500';
@@ -227,29 +246,29 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             <div
               key={cell.dateStr}
               onClick={() => onCellClick(cell.dateStr)}
-              className={`group relative flex flex-col rounded-2xl border transition-all cursor-pointer select-none ${
-                isExpandedView ? 'min-h-[116px] sm:min-h-[142px]' : 'h-[112px] sm:h-[132px]'
+              className={`group relative flex flex-col rounded-xl sm:rounded-2xl border transition-all cursor-pointer select-none ${
+                isExpandedView ? 'min-h-[112px] sm:min-h-[140px]' : 'h-[108px] sm:h-[130px]'
               } ${
-                !cell.isCurrentMonth ? 'opacity-45 bg-stone-50/70' : 'bg-white'
+                !cell.isCurrentMonth ? 'opacity-40 bg-stone-50/70' : 'bg-white'
               } ${
                 isBothHoliday && cell.isCurrentMonth
-                  ? 'bg-gradient-to-b from-[#FFF0F5] via-white to-[#FFF9FB] border-[#FFB3C6] shadow-sm'
-                  : 'border-stone-200/80 hover:border-[#FF8FAB]'
+                  ? 'bg-gradient-to-b from-[#FFF0F5] via-white to-[#FFF9FB] border-[#FFB3C6] shadow-xs'
+                  : 'border-stone-200/80 active:scale-[0.98]'
               } ${
                 isSelected
                   ? stampModeActive
-                    ? 'ring-3 ring-[#FF8FAB] border-[#FF8FAB] shadow-md scale-[1.01] z-10'
+                    ? 'ring-2 sm:ring-3 ring-[#FF8FAB] border-[#FF8FAB] shadow-md scale-[1.01] z-10'
                     : 'ring-2 ring-[#B388EB] border-[#B388EB] z-10'
                   : ''
-              } p-1 sm:p-1.5`}
+              } p-0.5 sm:p-1.5`}
             >
-              {/* 1. 日付ヘッダー行（日付数字 ＋ 祝日名 ＋ ✨ふたり休日ハート） */}
-              <div className="flex items-center justify-between gap-0.5 mb-1">
-                <div className="flex items-center gap-1 min-w-0">
+              {/* 1. 日付ヘッダー行 */}
+              <div className="flex items-center justify-between gap-0.5 mb-0.5 px-0.5">
+                <div className="flex items-center gap-0.5 min-w-0">
                   <span
-                    className={`inline-flex items-center justify-center text-xs sm:text-sm font-extrabold leading-none ${
+                    className={`inline-flex items-center justify-center text-[11px] sm:text-sm font-extrabold leading-none ${
                       cell.isToday
-                        ? 'w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#FF8FAB] text-white shadow-xs'
+                        ? 'w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#FF8FAB] text-white shadow-2xs'
                         : dateTextColor
                     }`}
                   >
@@ -257,7 +276,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                   </span>
                   {cell.holidayName && (
                     <span
-                      className="text-[9px] sm:text-[10px] font-bold text-rose-500 truncate max-w-[44px] sm:max-w-[72px]"
+                      className="text-[8px] sm:text-[10px] font-bold text-rose-500 truncate max-w-[34px] sm:max-w-[70px]"
                       title={cell.holidayName}
                     >
                       {cell.holidayName}
@@ -265,20 +284,19 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                   )}
                 </div>
 
-                {/* ふたり休日一致キラキラマーク */}
                 {isBothHoliday && (
                   <span
-                    className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded-full bg-[#FFE5EC] text-[#D63864] text-[9px] sm:text-[10px] font-black shadow-2xs animate-pulse"
+                    className="inline-flex items-center px-1 rounded-full bg-[#FFE5EC] text-[#D63864] text-[8px] sm:text-[10px] font-black"
                     title="✨2人ともお休みの日！"
                   >
-                    💕<span className="hidden md:inline">一致</span>
+                    💕
                   </span>
                 )}
               </div>
 
-              {/* 2. シフト2人並列バー（セル上部固定：左にパートナーA、右にパートナーB） */}
-              <div className="grid grid-cols-2 gap-0.5 sm:gap-1 mb-1 shrink-0">
-                {/* パートナーA シフト枠 */}
+              {/* 2. シフト2人並列バー（セル上部固定） */}
+              <div className="grid grid-cols-2 gap-0.5 mb-0.5 shrink-0">
+                {/* パートナーA */}
                 <div
                   onClick={(e) => {
                     if (activeShiftA && (activeShiftA.startTime || stampA?.startTime)) {
@@ -291,61 +309,43 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                       ? { backgroundColor: stampA.color, color: stampA.textColor }
                       : undefined
                   }
-                  className={`relative rounded-lg px-1 py-0.5 text-[10px] sm:text-[11px] font-extrabold flex flex-col items-center justify-center leading-tight border ${
+                  className={`relative rounded-md sm:rounded-lg px-0.5 py-0.5 text-[9px] sm:text-[11px] font-extrabold flex flex-col items-center justify-center leading-tight border ${
                     stampA
-                      ? 'border-black/5 shadow-2xs'
-                      : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200'
+                      ? 'border-black/5'
+                      : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
                   }`}
-                  title={
-                    activeShiftA && stampA
-                      ? `${partnerA.avatar}${partnerA.name}: ${stampA.label} ${
-                          activeShiftA.startTime || stampA.startTime
-                            ? `(${activeShiftA.startTime || stampA.startTime}〜${
-                                activeShiftA.endTime || stampA.endTime || ''
-                              })`
-                            : ''
-                        }`
-                      : `${partnerA.avatar}${partnerA.name}: シフト未設定`
-                  }
                 >
                   <div className="flex items-center gap-0.5 truncate max-w-full">
-                    <span className="text-[9px] opacity-85">{partnerA.avatar}</span>
                     {stampA ? (
                       <span className="truncate">
                         {activeShiftA?.customLabel || stampA.shortLabel}
                       </span>
                     ) : (
-                      <span className="text-[9px] font-normal">-</span>
+                      <span className="text-[8px] font-normal opacity-60">{partnerA.avatar}</span>
                     )}
                   </div>
-                  {/* 時間常時表示モード時 */}
                   {showShiftTimeInCell &&
                     stampA &&
                     (activeShiftA?.startTime || stampA.startTime) && (
-                      <span className="text-[8px] font-bold opacity-85 tracking-tighter truncate max-w-full">
+                      <span className="text-[7px] sm:text-[8px] font-bold opacity-85 tracking-tighter truncate max-w-full">
                         {activeShiftA?.startTime || stampA.startTime}
                       </span>
                     )}
-                  {/* 未確認ドット */}
                   {activeShiftA &&
                     (isUnreadByPartner(activeShiftA.updatedAt, activeShiftA.createdBy) ||
                       isNewFromPartner(activeShiftA.updatedAt, activeShiftA.createdBy)) && (
-                      <span
-                        className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#FF8FAB] ring-1 ring-white"
-                        title="未確認のシフト変更"
-                      />
+                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[#FF8FAB] ring-1 ring-white" />
                     )}
-                  {/* タップ時の時間ポップオーバー */}
                   {poppedShiftId === activeShiftA?.id &&
                     (activeShiftA?.startTime || stampA?.startTime) && (
-                      <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap bg-stone-800 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg shadow-md">
-                        {activeShiftA?.startTime || stampA?.startTime}〜
+                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap bg-stone-800 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md">
+                        {activeShiftA?.startTime || stampA?.startTime}-
                         {activeShiftA?.endTime || stampA?.endTime}
                       </div>
                     )}
                 </div>
 
-                {/* パートナーB シフト枠 */}
+                {/* パートナーB */}
                 <div
                   onClick={(e) => {
                     if (activeShiftB && (activeShiftB.startTime || stampB?.startTime)) {
@@ -358,69 +358,50 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                       ? { backgroundColor: stampB.color, color: stampB.textColor }
                       : undefined
                   }
-                  className={`relative rounded-lg px-1 py-0.5 text-[10px] sm:text-[11px] font-extrabold flex flex-col items-center justify-center leading-tight border ${
+                  className={`relative rounded-md sm:rounded-lg px-0.5 py-0.5 text-[9px] sm:text-[11px] font-extrabold flex flex-col items-center justify-center leading-tight border ${
                     stampB
-                      ? 'border-black/5 shadow-2xs'
-                      : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200'
+                      ? 'border-black/5'
+                      : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
                   }`}
-                  title={
-                    activeShiftB && stampB
-                      ? `${partnerB.avatar}${partnerB.name}: ${stampB.label} ${
-                          activeShiftB.startTime || stampB.startTime
-                            ? `(${activeShiftB.startTime || stampB.startTime}〜${
-                                activeShiftB.endTime || stampB.endTime || ''
-                              })`
-                            : ''
-                        }`
-                      : `${partnerB.avatar}${partnerB.name}: シフト未設定`
-                  }
                 >
                   <div className="flex items-center gap-0.5 truncate max-w-full">
-                    <span className="text-[9px] opacity-85">{partnerB.avatar}</span>
                     {stampB ? (
                       <span className="truncate">
                         {activeShiftB?.customLabel || stampB.shortLabel}
                       </span>
                     ) : (
-                      <span className="text-[9px] font-normal">-</span>
+                      <span className="text-[8px] font-normal opacity-60">{partnerB.avatar}</span>
                     )}
                   </div>
-                  {/* 時間常時表示モード時 */}
                   {showShiftTimeInCell &&
                     stampB &&
                     (activeShiftB?.startTime || stampB.startTime) && (
-                      <span className="text-[8px] font-bold opacity-85 tracking-tighter truncate max-w-full">
+                      <span className="text-[7px] sm:text-[8px] font-bold opacity-85 tracking-tighter truncate max-w-full">
                         {activeShiftB?.startTime || stampB.startTime}
                       </span>
                     )}
-                  {/* 未確認ドット */}
                   {activeShiftB &&
                     (isUnreadByPartner(activeShiftB.updatedAt, activeShiftB.createdBy) ||
                       isNewFromPartner(activeShiftB.updatedAt, activeShiftB.createdBy)) && (
-                      <span
-                        className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#B388EB] ring-1 ring-white"
-                        title="未確認のシフト変更"
-                      />
+                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[#B388EB] ring-1 ring-white" />
                     )}
-                  {/* タップ時の時間ポップオーバー */}
                   {poppedShiftId === activeShiftB?.id &&
                     (activeShiftB?.startTime || stampB?.startTime) && (
-                      <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap bg-stone-800 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg shadow-md">
-                        {activeShiftB?.startTime || stampB?.startTime}〜
+                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap bg-stone-800 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md">
+                        {activeShiftB?.startTime || stampB?.startTime}-
                         {activeShiftB?.endTime || stampB?.endTime}
                       </div>
                     )}
                 </div>
               </div>
 
-              {/* 3. すれ違いサポートアイコン（🍳夕飯不要・🍱お弁当・🚗お迎え など） */}
+              {/* 3. すれ違いサポートアイコン */}
               {uniqueSupports.length > 0 && (
-                <div className="flex flex-wrap gap-0.5 mb-1 shrink-0">
+                <div className="flex flex-wrap gap-0.5 mb-0.5 shrink-0">
                   {uniqueSupports.map((badge) => (
                     <span
                       key={badge}
-                      className="px-1 py-0.2 rounded-md bg-[#FFF6D6] border border-[#FFE28A] text-[#8A5A00] text-[9px] font-extrabold leading-tight truncate max-w-full"
-                      title={`すれ違いサポート目印: ${badge}`}
+                      className="px-1 py-0.1 rounded bg-[#FFF6D6] border border-[#FFE28A] text-[#8A5A00] text-[8px] sm:text-[9px] font-extrabold leading-tight truncate max-w-full"
                     >
                       {badge}
                     </span>
@@ -428,7 +409,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 </div>
               )}
 
-              {/* 4. 予定リストエリア（セル下部・件数3件制限なし！全件展開 or コンパクトスクロール） */}
+              {/* 4. 予定リストエリア */}
               <div
                 className={`flex-1 flex flex-col gap-0.5 ${
                   isExpandedView ? '' : 'overflow-y-auto no-scrollbar'
@@ -447,32 +428,25 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                         color: cat.textColor,
                         borderLeftColor: ev.color || cat.accentColor,
                       }}
-                      className={`relative rounded-md pl-1.5 pr-1 py-0.5 border-l-3 text-[10px] sm:text-[11px] font-bold leading-snug shadow-2xs ${
+                      className={`relative rounded pl-1 pr-0.5 py-0.5 border-l-2 sm:border-l-3 text-[9px] sm:text-[11px] font-bold leading-tight ${
                         isExpandedView ? 'whitespace-pre-wrap break-words' : 'truncate'
                       }`}
-                      title={`${ev.startTime ? `${ev.startTime} ` : ''}${ev.title}`}
                     >
                       <div className="flex items-start justify-between gap-0.5">
                         <div className={isExpandedView ? 'break-words' : 'truncate'}>
                           {!ev.isAllDay && ev.startTime && (
-                            <span className="text-[9px] font-extrabold opacity-80 mr-0.5">
+                            <span className="text-[8px] font-extrabold opacity-80 mr-0.5">
                               {ev.startTime}
                             </span>
                           )}
                           <span>{ev.title}</span>
                         </div>
 
-                        {/* 相手が見ていない or 自分がまだ見ていない新着予定ドット */}
                         {(unreadForOther || unreadForMe) && (
                           <span
-                            className={`shrink-0 mt-0.5 w-2 h-2 rounded-full ring-1 ring-white ${
+                            className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ring-1 ring-white ${
                               unreadForMe ? 'bg-rose-500 animate-ping' : 'bg-[#FF8FAB]'
                             }`}
-                            title={
-                              unreadForMe
-                                ? 'パートナーが追加・更新した新着予定'
-                                : 'パートナーがまだ見ていない予定'
-                            }
                           />
                         )}
                       </div>
