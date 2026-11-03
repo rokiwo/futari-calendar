@@ -24,6 +24,7 @@ import {
 } from '../types/calendar';
 import {
   DEFAULT_CATEGORIES,
+  EVENT_PATTERN_CATEGORIES,
   getJapaneseHoliday,
   resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
@@ -81,6 +82,9 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 }) => {
   const [showEventForm, setShowEventForm] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [patternTabId, setPatternTabId] = useState<string>(
+    EVENT_PATTERN_CATEGORIES[0].id
+  );
 
   // 新規・編集用フォームステート
   const [title, setTitle] = useState('');
@@ -668,12 +672,104 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   </button>
                 </div>
 
+                {/* パターン別アイコン＆定型予定ワンタップ選択パレット */}
+                <div className="bg-[#FFFBF7] rounded-2xl p-2.5 border border-[#FFE5EC] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-[#9E2A47]">
+                      🎨 パターン別アイコン＆定型予定（1タップ入力）
+                    </span>
+                  </div>
+
+                  {/* パターンカテゴリ切替タブ */}
+                  <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                    {EVENT_PATTERN_CATEGORIES.map((grp) => {
+                      const active = patternTabId === grp.id;
+                      return (
+                        <button
+                          key={grp.id}
+                          type="button"
+                          onClick={() => setPatternTabId(grp.id)}
+                          className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold whitespace-nowrap transition-all ${
+                            active
+                              ? 'bg-[#FF8FAB] text-white shadow-2xs'
+                              : 'bg-white text-stone-600 border border-stone-200/80 hover:bg-stone-50'
+                          }`}
+                        >
+                          {grp.tabLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {(() => {
+                    const currentGrp =
+                      EVENT_PATTERN_CATEGORIES.find((g) => g.id === patternTabId) ||
+                      EVENT_PATTERN_CATEGORIES[0];
+                    return (
+                      <>
+                        {/* ワンタップ定型予定チップ */}
+                        <div className="flex flex-wrap gap-1">
+                          {currentGrp.items.map((item) => (
+                            <button
+                              key={item.label}
+                              type="button"
+                              onClick={() => {
+                                setTitle(item.title);
+                                if (item.startTime) {
+                                  setIsAllDay(false);
+                                  setStartTime(item.startTime);
+                                  if (item.endTime) setEndTime(item.endTime);
+                                }
+                                if (
+                                  item.supportBadge &&
+                                  !eventBadges.includes(item.supportBadge)
+                                ) {
+                                  setEventBadges([...eventBadges, item.supportBadge]);
+                                }
+                              }}
+                              className="px-2 py-1 rounded-xl bg-white hover:bg-[#FFE5EC] border border-stone-200/90 text-[11px] font-extrabold text-stone-700 flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
+                            >
+                              <span>{item.icon}</span>
+                              <span>{item.label}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* アイコン絵文字だけ先頭に付ける／差し替えるボタン群 */}
+                        <div className="pt-1 border-t border-stone-200/60">
+                          <div className="text-[10px] font-bold text-stone-400 mb-1">
+                            👇 アイコンだけ選んでタイトルの先頭に付ける：
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {currentGrp.icons.map((ic) => (
+                              <button
+                                key={ic}
+                                type="button"
+                                onClick={() => {
+                                  const cleaned = title.replace(
+                                    /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/u,
+                                    ''
+                                  );
+                                  setTitle(`${ic} ${cleaned}`);
+                                }}
+                                className="w-7 h-7 rounded-lg bg-white hover:bg-[#FFE5EC] border border-stone-200/80 text-sm flex items-center justify-center active:scale-90 transition-transform"
+                              >
+                                {ic}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
                 <div>
                   <textarea
                     rows={2}
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="予定タイトルを入力（スマホキーボードの🎤マイクでも音声入力できます）"
+                    placeholder="予定タイトルを入力（上のパターンをタップするか、キーボードの🎤でも入力可能）"
                     autoFocus
                     className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-sm font-bold text-stone-800 focus:border-[#FF8FAB] focus:outline-none"
                   />
