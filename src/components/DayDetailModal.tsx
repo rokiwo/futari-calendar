@@ -51,7 +51,8 @@ interface DayDetailModalProps {
   onSetShiftAndAdvance: (
     dateStr: string,
     partnerId: PartnerId,
-    stamp: StampPreset | null
+    stamp: StampPreset | null,
+    advanceDate?: boolean
   ) => void;
   onUpdateShiftDetails: (
     dateStr: string,
@@ -96,10 +97,14 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   onOpenCategoryManager,
 }) => {
   const [showEventForm, setShowEventForm] = useState(initialOpenEventForm);
+  const [formTabMode, setFormTabMode] = useState<'event' | 'task' | 'overtime'>('event');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [patternTabId, setPatternTabId] = useState<string>(
     EVENT_PATTERN_CATEGORIES[0].id
   );
+
+  // 詳細モーダル内でシフトボタンを押した時に翌日へ自動移動するか（デフォはfalse＝同じ日に残業も続けて入れられるようにする）
+  const [advanceOnShiftTap, setAdvanceOnShiftTap] = useState<boolean>(false);
 
   // 新規・編集用フォームステート
   const [title, setTitle] = useState('');
@@ -116,6 +121,15 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const [endTime, setEndTime] = useState('11:00');
   const [memo, setMemo] = useState('');
   const [eventBadges, setEventBadges] = useState<string[]>([]);
+
+  // フォーム内の「⏱️残業・休出登録」タブ用ステート
+  const [otPartner, setOtPartner] = useState<PartnerId>(activePartner);
+  const [otType, setOtType] = useState<'overtime' | 'holidayWork'>('overtime');
+  const [otHoursStr, setOtHoursStr] = useState<string>('2');
+
+  // シフト欄の自由入力用ステート（スマホで0が邪魔して入力しづらくなるのを防ぐ）
+  const [customOtInputA, setCustomOtInputA] = useState<string>('');
+  const [customOtInputB, setCustomOtInputB] = useState<string>('');
 
   useEffect(() => {
     if (initialOpenEventForm) {
@@ -150,6 +164,13 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const rawShiftB = store.shifts[`${dateStr}_partnerB`];
   const shiftA = rawShiftA && !rawShiftA.deletedAt ? rawShiftA : undefined;
   const shiftB = rawShiftB && !rawShiftB.deletedAt ? rawShiftB : undefined;
+
+  useEffect(() => {
+    const valA = Number(shiftA?.holidayWorkHours || shiftA?.overtimeHours || 0);
+    const valB = Number(shiftB?.holidayWorkHours || shiftB?.overtimeHours || 0);
+    setCustomOtInputA(valA > 0 ? String(valA) : '');
+    setCustomOtInputB(valB > 0 ? String(valB) : '');
+  }, [dateStr, shiftA?.holidayWorkHours, shiftA?.overtimeHours, shiftB?.holidayWorkHours, shiftB?.overtimeHours]);
 
   const stampA = shiftA ? stampMap.get(shiftA.stampId) : undefined;
   const stampB = shiftB ? stampMap.get(shiftB.stampId) : undefined;
@@ -216,9 +237,14 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     );
   };
 
-  const handleOpenNewForm = (defaultCatId?: CalendarCategoryId, defaultTaskMode = false) => {
+  const handleOpenNewForm = (
+    defaultCatId?: CalendarCategoryId,
+    mode: 'event' | 'task' | 'overtime' = 'event'
+  ) => {
     setEditingEventId(null);
     setTitle('');
+    setFormTabMode(mode);
+    const defaultTaskMode = mode === 'task';
     const nextCat = defaultCatId || (defaultTaskMode ? activePartner : categories[0]?.id || 'shared');
     setCategoryId(nextCat);
     setIsTask(defaultTaskMode);
@@ -229,6 +255,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     } else {
       setNotifyTarget(defaultTaskMode ? activePartner : 'both');
     }
+    setOtPartner(activePartner);
     setReminderMinutes(30);
     setAutoOpenGoogleCal(defaultTaskMode);
     setIsAllDay(false);
@@ -243,7 +270,9 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     setEditingEventId(ev.id);
     setTitle(ev.title);
     setCategoryId(ev.categoryId);
-    setIsTask(Boolean(ev.isTask));
+    const taskFlag = Boolean(ev.isTask);
+    setIsTask(taskFlag);
+    setFormTabMode(taskFlag ? 'task' : 'event');
     setNotifyTarget(
       ev.notifyTarget ||
         (ev.categoryId === 'partnerA'
@@ -262,8 +291,32 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     setShowEventForm(true);
   };
 
+  // 「⏱️ 残業・休出登録」タブから直接残業時間を保存する処理
+  const handleSaveOvertimeFromForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsedHours = Math.max(0, Number(otHoursStr) || 0);
+    if (otType === 'holidayWork') {
+      onUpdateShiftDetails(dateStr, otPartner, {
+        isHolidayWork: parsedHours > 0,
+        holidayWorkHours: parsedHours,
+        overtimeHours: 0,
+      });
+    } else {
+      onUpdateShiftDetails(dateStr, otPartner, {
+        overtimeHours: parsedHours,
+        isHolidayWork: false,
+        holidayWorkHours: 0,
+      });
+    }
+    setShowEventForm(false);
+  };
+
   const handleSubmitEvent = (e: React.FormEvent) => {
     e.preventDefault();
+    if (formTabMode === 'overtime') {
+      handleSaveOvertimeFromForm(e);
+      return;
+    }
     if (!title.trim()) return;
 
     const nowIso = new Date().toISOString();
@@ -293,8 +346,35 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
     onSaveEvent(newEvent);
 
+    // もし予定タイトルに「残業2時間」「残業 1.5h」「休出8h」などが含まれていたら、シフトの残業時間にも自動反映！
+    const otMatch = title.match(/残業\s*([0-9]+(?:\.[0-9]+)?)\s*(?:時間|h|H)?/);
+    const hwMatch = title.match(/(?:休日出勤|休出)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:時間|h|H)?/);
+    const targetPid: PartnerId =
+      categoryId === 'partnerA'
+        ? 'partnerA'
+        : categoryId === 'partnerB'
+        ? 'partnerB'
+        : activePartner;
+
+    if (hwMatch) {
+      const hrs = Number(hwMatch[1]);
+      if (hrs > 0) {
+        onUpdateShiftDetails(dateStr, targetPid, {
+          isHolidayWork: true,
+          holidayWorkHours: hrs,
+          overtimeHours: 0,
+        });
+      }
+    } else if (otMatch) {
+      const hrs = Number(otMatch[1]);
+      if (hrs > 0) {
+        onUpdateShiftDetails(dateStr, targetPid, {
+          overtimeHours: hrs,
+        });
+      }
+    }
+
     // もし「保存時にGoogleカレンダー通知をセット」がONで、かつ自分の端末が通知対象の場合のみGoogleカレンダーを起動！
-    // （妻のタスクなら妻の端末のみ、夫のタスクなら夫の端末のみで開く安全設計）
     if (autoOpenGoogleCal && shouldNotifyPartner(newEvent, activePartner)) {
       const gcalUrl = buildGoogleCalendarUrl(newEvent, store);
       window.open(gcalUrl, '_blank', 'noopener,noreferrer');
@@ -367,39 +447,48 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
         <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4">
           {/* セクションA（最上部）：この日のすべての予定＆タスク一覧 ＋ 新規追加フォーム（TimeTree風） */}
           <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
               <h3 className="text-sm font-extrabold text-stone-800">
-                📅 この日のすべての予定・タスク ({dayEvents.length}件)
+                📅 この日の予定・タスク ({dayEvents.length}件)
               </h3>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1">
                 <button
                   type="button"
                   onClick={() => {
                     onClose();
                     onOpenVoiceModal();
                   }}
-                  className="px-2.5 py-1.5 rounded-2xl bg-[#B388EB] hover:bg-[#8C5EC7] text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
+                  className="px-2 py-1.5 rounded-2xl bg-[#B388EB] hover:bg-[#8C5EC7] text-white text-[11px] font-extrabold shadow-xs flex items-center gap-1"
                 >
-                  <Mic className="w-3.5 h-3.5" />
+                  <Mic className="w-3 h-3" />
                   <span>声で追加</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleOpenNewForm(activePartner, true)}
-                  className="px-2.5 py-1.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
+                  onClick={() => handleOpenNewForm(activePartner, 'overtime')}
+                  className="px-2.5 py-1.5 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white text-[11px] font-extrabold shadow-xs flex items-center gap-1"
                 >
-                  <CheckSquare className="w-3.5 h-3.5" />
-                  <span>＋タスク(通知)</span>
+                  <Timer className="w-3 h-3" />
+                  <span>＋残業登録</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleOpenNewForm()}
-                  className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
+                  onClick={() => handleOpenNewForm(activePartner, 'task')}
+                  className="px-2.5 py-1.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-extrabold shadow-xs flex items-center gap-1"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>＋予定を追加</span>
+                  <CheckSquare className="w-3 h-3" />
+                  <span>＋タスク</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenNewForm(undefined, 'event')}
+                  className="px-2.5 py-1.5 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white text-[11px] font-extrabold shadow-xs flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>＋予定</span>
                 </button>
               </div>
             </div>
@@ -413,7 +502,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     <button
                       key={cat.id}
                       type="button"
-                      onClick={() => handleOpenNewForm(cat.id, false)}
+                      onClick={() => handleOpenNewForm(cat.id, 'event')}
                       style={{
                         backgroundColor: resolved.bgColor,
                         color: resolved.textColor,
@@ -436,7 +525,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
               </div>
             )}
 
-            {/* 新規・編集フォーム（予定 または Googleカレンダー連携タスク） */}
+            {/* 新規・編集フォーム（予定 ／ Googleカレンダー連携タスク ／ 残業・休出登録） */}
             {showEventForm && (
               <form
                 onSubmit={handleSubmitEvent}
@@ -446,8 +535,10 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   <span className="text-xs font-extrabold text-[#9E2A47]">
                     {editingEventId
                       ? '✏️ 予定・タスクを編集'
+                      : formTabMode === 'overtime'
+                      ? '⏱️ 残業時間・休日出勤時間を登録'
                       : isTask
-                      ? '✅ 新しいタスク（Googleカレンダー通知対応）を追加'
+                      ? '✅ 新しいタスク（Googleカレンダー端末別通知）を追加'
                       : '✨ 新しい予定を追加'}
                   </span>
                   <button
@@ -459,13 +550,16 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   </button>
                 </div>
 
-                {/* 📅予定 ⇔ ✅タスク(ToDo) 切替タブ */}
-                <div className="grid grid-cols-2 gap-1.5 bg-stone-100 p-1 rounded-xl">
+                {/* 📅予定 ⇔ ✅タスク(ToDo) ⇔ ⏱️残業・休出 3タブ切替 */}
+                <div className="grid grid-cols-3 gap-1 bg-stone-100 p-1 rounded-xl">
                   <button
                     type="button"
-                    onClick={() => setIsTask(false)}
-                    className={`py-1.5 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1 transition-all ${
-                      !isTask
+                    onClick={() => {
+                      setFormTabMode('event');
+                      setIsTask(false);
+                    }}
+                    className={`py-1.5 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition-all ${
+                      formTabMode === 'event'
                         ? 'bg-white text-[#9E2A47] shadow-xs'
                         : 'text-stone-500 hover:text-stone-700'
                     }`}
@@ -475,8 +569,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      setFormTabMode('task');
                       setIsTask(true);
-                      // タスクに切り替えた時は操作中のパートナー（妻なら妻、夫なら夫）の端末のみ通知をデフォルトに！
                       if (categoryId === 'partnerA') {
                         setNotifyTarget('partnerA');
                       } else if (categoryId === 'partnerB') {
@@ -485,304 +579,444 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                         setNotifyTarget(activePartner);
                       }
                     }}
-                    className={`py-1.5 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1 transition-all ${
-                      isTask
+                    className={`py-1.5 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition-all ${
+                      formTabMode === 'task'
                         ? 'bg-emerald-500 text-white shadow-xs'
                         : 'text-stone-500 hover:text-stone-700'
                     }`}
                   >
-                    <CheckSquare className="w-3.5 h-3.5" />
-                    <span>✅ タスク（ToDo・通知）</span>
+                    <CheckSquare className="w-3 h-3" />
+                    <span>✅ タスク(通知)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormTabMode('overtime');
+                      setOtPartner(activePartner);
+                    }}
+                    className={`py-1.5 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition-all ${
+                      formTabMode === 'overtime'
+                        ? 'bg-rose-500 text-white shadow-xs'
+                        : 'text-stone-500 hover:text-stone-700'
+                    }`}
+                  >
+                    <Timer className="w-3 h-3" />
+                    <span>⏱️ 残業・休出</span>
                   </button>
                 </div>
 
-                {/* パターン別アイコン＆定型予定ワンタップ選択パレット */}
-                <div className="bg-[#FFFBF7] rounded-2xl p-2.5 border border-[#FFE5EC] space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-extrabold text-[#9E2A47]">
-                      🎨 パターン別アイコン＆定型予定（1タップ入力）
-                    </span>
-                  </div>
+                {/* ⏱️ 残業・休日出勤 専用登録パネル */}
+                {formTabMode === 'overtime' ? (
+                  <div className="bg-rose-50/70 rounded-2xl p-3.5 border border-rose-200 space-y-3">
+                    {/* 1. 誰の残業か */}
+                    <div className="space-y-1">
+                      <span className="text-xs font-extrabold text-stone-700">
+                        1. どちらの残業・休日出勤ですか？
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['partnerA', 'partnerB'] as PartnerId[]).map((pid) => {
+                          const p = store.metadata.partners[pid];
+                          const active = otPartner === pid;
+                          return (
+                            <button
+                              key={pid}
+                              type="button"
+                              onClick={() => setOtPartner(pid)}
+                              className={`py-2 px-3 rounded-xl text-xs font-extrabold border flex items-center justify-center gap-1.5 transition-all ${
+                                active
+                                  ? 'bg-rose-500 text-white border-rose-500 shadow-xs'
+                                  : 'bg-white text-stone-700 border-stone-200'
+                              }`}
+                            >
+                              <span className="text-base">{p.avatar}</span>
+                              <span>{p.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
 
-                  {/* パターンカテゴリ切替タブ */}
-                  <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
-                    {EVENT_PATTERN_CATEGORIES.map((grp) => {
-                      const active = patternTabId === grp.id;
-                      return (
+                    {/* 2. 種類（通常残業 or 休日出勤） */}
+                    <div className="space-y-1">
+                      <span className="text-xs font-extrabold text-stone-700">
+                        2. 種類を選択
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
                         <button
-                          key={grp.id}
                           type="button"
-                          onClick={() => setPatternTabId(grp.id)}
-                          className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold whitespace-nowrap transition-all ${
-                            active
-                              ? 'bg-[#FF8FAB] text-white shadow-2xs'
-                              : 'bg-white text-stone-600 border border-stone-200/80 hover:bg-stone-50'
+                          onClick={() => setOtType('overtime')}
+                          className={`py-2 rounded-xl text-xs font-extrabold border ${
+                            otType === 'overtime'
+                              ? 'bg-rose-500 text-white border-rose-500'
+                              : 'bg-white text-stone-600 border-stone-200'
                           }`}
                         >
-                          {grp.tabLabel}
+                          ⏱️ 通常残業
                         </button>
-                      );
-                    })}
-                  </div>
-
-                  {(() => {
-                    const currentGrp =
-                      EVENT_PATTERN_CATEGORIES.find((g) => g.id === patternTabId) ||
-                      EVENT_PATTERN_CATEGORIES[0];
-                    return (
-                      <>
-                        {/* ワンタップ定型予定チップ */}
-                        <div className="flex flex-wrap gap-1">
-                          {currentGrp.items.map((item) => (
-                            <button
-                              key={item.label}
-                              type="button"
-                              onClick={() => {
-                                setTitle(item.title);
-                                if (item.startTime) {
-                                  setIsAllDay(false);
-                                  setStartTime(item.startTime);
-                                  if (item.endTime) setEndTime(item.endTime);
-                                }
-                                if (
-                                  item.supportBadge &&
-                                  !eventBadges.includes(item.supportBadge)
-                                ) {
-                                  setEventBadges([...eventBadges, item.supportBadge]);
-                                }
-                              }}
-                              className="px-2 py-1 rounded-xl bg-white hover:bg-[#FFE5EC] border border-stone-200/90 text-[11px] font-extrabold text-stone-700 flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
-                            >
-                              <span>{item.icon}</span>
-                              <span>{item.label}</span>
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* アイコン絵文字だけ先頭に付ける／差し替えるボタン群 */}
-                        <div className="pt-1 border-t border-stone-200/60">
-                          <div className="text-[10px] font-bold text-stone-400 mb-1">
-                            👇 アイコンだけ選んでタイトルの先頭に付ける：
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            {currentGrp.icons.map((ic) => (
-                              <button
-                                key={ic}
-                                type="button"
-                                onClick={() => {
-                                  const cleaned = title.replace(
-                                    /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/u,
-                                    ''
-                                  );
-                                  setTitle(`${ic} ${cleaned}`);
-                                }}
-                                className="w-7 h-7 rounded-lg bg-white hover:bg-[#FFE5EC] border border-stone-200/80 text-sm flex items-center justify-center active:scale-90 transition-transform"
-                              >
-                                {ic}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-
-                <div>
-                  <textarea
-                    rows={2}
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={
-                      isTask
-                        ? 'タスク・やることを入力（例：市役所へ行く、振込、買い物など）'
-                        : '予定タイトルを入力（上のパターンをタップするか、キーボードの🎤でも入力可能）'
-                    }
-                    autoFocus
-                    className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-sm font-bold text-stone-800 focus:border-[#FF8FAB] focus:outline-none"
-                  />
-                </div>
-
-                {/* カテゴリ選択（二人予定・夫予定・妻予定＋追加項目） */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {categories.map((c) => {
-                    const cat = resolveCategoryInfo(c.id, store.categories, store.metadata);
-                    const selected = categoryId === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => handleSelectCategory(c.id)}
-                        style={
-                          selected
-                            ? { backgroundColor: cat.accentColor, color: '#fff' }
-                            : { backgroundColor: cat.bgColor, color: cat.textColor }
-                        }
-                        className="px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all"
-                      >
-                        {cat.icon} {cat.shortLabel}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    onClick={onOpenCategoryManager}
-                    className="px-2 py-1 rounded-xl bg-stone-100 text-stone-600 text-[10px] font-bold"
-                  >
-                    ＋項目編集
-                  </button>
-                </div>
-
-                {/* 時間設定 */}
-                <div className="flex flex-wrap items-center gap-3 text-xs">
-                  <label className="flex items-center gap-1.5 font-bold text-stone-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isAllDay}
-                      onChange={(e) => setIsAllDay(e.target.checked)}
-                      className="rounded text-[#FF8FAB]"
-                    />
-                    <span>終日</span>
-                  </label>
-
-                  {!isAllDay && (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold"
-                      />
-                      <span>〜</span>
-                      <input
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold"
-                      />
+                        <button
+                          type="button"
+                          onClick={() => setOtType('holidayWork')}
+                          className={`py-2 rounded-xl text-xs font-extrabold border ${
+                            otType === 'holidayWork'
+                              ? 'bg-amber-600 text-white border-amber-600'
+                              : 'bg-white text-stone-600 border-stone-200'
+                          }`}
+                        >
+                          💼 休日出勤
+                        </button>
+                      </div>
                     </div>
-                  )}
-                </div>
 
-                {/* 🔔 Googleカレンダー連携 ＆ 端末別通知設定（妻なら妻の端末のみ、夫なら夫の端末のみに通知） */}
-                <div className="bg-[#F6F9FF] rounded-2xl p-3 border border-sky-200/90 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-extrabold text-sky-900 flex items-center gap-1">
-                      <Bell className="w-3.5 h-3.5 text-sky-600" />
-                      <span>Googleカレンダー通知対象（端末別通知）</span>
-                    </span>
-                    <span className="text-[10px] font-bold text-sky-700">
-                      ※選んだ人のスマホにだけ通知されます
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setNotifyTarget('partnerA')}
-                      className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
-                        notifyTarget === 'partnerA'
-                          ? 'bg-[#126875] text-white border-[#126875] shadow-2xs'
-                          : 'bg-white text-stone-600 border-stone-200'
-                      }`}
-                    >
-                      {partnerA.avatar} {partnerA.name}の端末のみ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNotifyTarget('partnerB')}
-                      className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
-                        notifyTarget === 'partnerB'
-                          ? 'bg-[#6638A6] text-white border-[#6638A6] shadow-2xs'
-                          : 'bg-white text-stone-600 border-stone-200'
-                      }`}
-                    >
-                      {partnerB.avatar} {partnerB.name}の端末のみ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNotifyTarget('both')}
-                      className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
-                        notifyTarget === 'both'
-                          ? 'bg-[#D63864] text-white border-[#D63864] shadow-2xs'
-                          : 'bg-white text-stone-600 border-stone-200'
-                      }`}
-                    >
-                      💕 2人の端末とも
-                    </button>
-                  </div>
-
-                  {/* 通知タイミング */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span className="text-[11px] font-bold text-stone-600">通知時間:</span>
-                    {REMINDER_PRESETS.map((rm) => (
-                      <button
-                        key={rm.minutes}
-                        type="button"
-                        onClick={() => setReminderMinutes(rm.minutes)}
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border ${
-                          reminderMinutes === rm.minutes
-                            ? 'bg-sky-600 text-white border-sky-600'
-                            : 'bg-white text-stone-600 border-stone-200'
-                        }`}
-                      >
-                        {rm.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* 現在の操作端末（activePartner）が通知対象に含まれている場合のみ、保存時Googleカレンダー起動チェックを表示 */}
-                  { notifyTarget === 'both' || notifyTarget === activePartner ? (
-                    <label className="flex items-center gap-1.5 pt-1 text-[11px] font-extrabold text-sky-900 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={autoOpenGoogleCal}
-                        onChange={(e) => setAutoOpenGoogleCal(e.target.checked)}
-                        className="rounded text-sky-600"
-                      />
-                      <span>
-                        📲 保存と同時にこの端末（{currentPartnerInfo.avatar}{currentPartnerInfo.name}）のGoogleカレンダーを開いて通知セットする
+                    {/* 3. 時間選択（ワンタップ or 自由入力） */}
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-extrabold text-stone-700">
+                        3. 何時間ですか？（ボタン選択または数値入力）
                       </span>
-                    </label>
-                  ) : (
-                    <div className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
-                      💡 この予定・タスクは「{notifyTarget === 'partnerA' ? `${partnerA.avatar}${partnerA.name}` : `${partnerB.avatar}${partnerB.name}`}の端末のみ通知」に設定されています。あなたの端末には通知されず、相手の画面にGoogleカレンダー通知ボタンが表示されます。
+                      <div className="flex flex-wrap gap-1.5">
+                        {[0, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8].map((h) => (
+                          <button
+                            key={h}
+                            type="button"
+                            onClick={() => setOtHoursStr(String(h))}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
+                              Number(otHoursStr) === h
+                                ? 'bg-stone-800 text-white border-stone-800 shadow-xs scale-105'
+                                : 'bg-white text-stone-700 border-stone-200'
+                            }`}
+                          >
+                            {h === 0 ? '0h(解除)' : `+${h}時間`}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="text-xs font-bold text-stone-600">直接入力:</span>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0"
+                          max="24"
+                          value={otHoursStr}
+                          onChange={(e) => setOtHoursStr(e.target.value)}
+                          placeholder="例: 2.5"
+                          className="w-24 px-3 py-1.5 rounded-xl border border-rose-300 bg-white font-black text-sm text-center text-rose-700"
+                        />
+                        <span className="text-xs font-extrabold text-stone-700">時間</span>
+                      </div>
                     </div>
-                  )}
-                </div>
 
-                <div>
-                  <input
-                    type="text"
-                    value={memo}
-                    onChange={(e) => setMemo(e.target.value)}
-                    placeholder="メモ・場所・持ち物など（任意）"
-                    className="w-full px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] text-xs text-stone-700"
-                  />
-                </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowEventForm(false)}
+                        className="px-3.5 py-2 rounded-xl bg-white text-stone-600 text-xs font-bold border border-stone-200"
+                      >
+                        キャンセル
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-extrabold shadow-sm"
+                      >
+                        ⏱️ {m}/{d} の残業時間を保存・反映する
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* パターン別アイコン＆定型予定ワンタップ選択パレット */}
+                    <div className="bg-[#FFFBF7] rounded-2xl p-2.5 border border-[#FFE5EC] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold text-[#9E2A47]">
+                          🎨 パターン別アイコン＆定型予定（1タップ入力）
+                        </span>
+                      </div>
 
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowEventForm(false)}
-                    className="px-3.5 py-1.5 rounded-xl bg-stone-100 text-stone-600 text-xs font-bold"
-                  >
-                    キャンセル
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-xs"
-                  >
-                    {editingEventId ? '更新する' : isTask ? 'タスクを追加する' : '予定を追加する'}
-                  </button>
-                </div>
+                      {/* パターンカテゴリ切替タブ */}
+                      <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                        {EVENT_PATTERN_CATEGORIES.map((grp) => {
+                          const active = patternTabId === grp.id;
+                          return (
+                            <button
+                              key={grp.id}
+                              type="button"
+                              onClick={() => setPatternTabId(grp.id)}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold whitespace-nowrap transition-all ${
+                                active
+                                  ? 'bg-[#FF8FAB] text-white shadow-2xs'
+                                  : 'bg-white text-stone-600 border border-stone-200/80 hover:bg-stone-50'
+                              }`}
+                            >
+                              {grp.tabLabel}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {(() => {
+                        const currentGrp =
+                          EVENT_PATTERN_CATEGORIES.find((g) => g.id === patternTabId) ||
+                          EVENT_PATTERN_CATEGORIES[0];
+                        return (
+                          <>
+                            {/* ワンタップ定型予定チップ */}
+                            <div className="flex flex-wrap gap-1">
+                              {currentGrp.items.map((item) => (
+                                <button
+                                  key={item.label}
+                                  type="button"
+                                  onClick={() => {
+                                    setTitle(item.title);
+                                    if (item.startTime) {
+                                      setIsAllDay(false);
+                                      setStartTime(item.startTime);
+                                      if (item.endTime) setEndTime(item.endTime);
+                                    }
+                                    if (
+                                      item.supportBadge &&
+                                      !eventBadges.includes(item.supportBadge)
+                                    ) {
+                                      setEventBadges([...eventBadges, item.supportBadge]);
+                                    }
+                                  }}
+                                  className="px-2 py-1 rounded-xl bg-white hover:bg-[#FFE5EC] border border-stone-200/90 text-[11px] font-extrabold text-stone-700 flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
+                                >
+                                  <span>{item.icon}</span>
+                                  <span>{item.label}</span>
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* アイコン絵文字だけ先頭に付ける／差し替えるボタン群 */}
+                            <div className="pt-1 border-t border-stone-200/60">
+                              <div className="text-[10px] font-bold text-stone-400 mb-1">
+                                👇 アイコンだけ選んでタイトルの先頭に付ける：
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {currentGrp.icons.map((ic) => (
+                                  <button
+                                    key={ic}
+                                    type="button"
+                                    onClick={() => {
+                                      const cleaned = title.replace(
+                                        /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/u,
+                                        ''
+                                      );
+                                      setTitle(`${ic} ${cleaned}`);
+                                    }}
+                                    className="w-7 h-7 rounded-lg bg-white hover:bg-[#FFE5EC] border border-stone-200/80 text-sm flex items-center justify-center active:scale-90 transition-transform"
+                                  >
+                                    {ic}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    <div>
+                      <textarea
+                        rows={2}
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder={
+                          isTask
+                            ? 'タスク・やることを入力（例：市役所へ行く、振込、牛乳を買うなど）'
+                            : '予定タイトルを入力（上のパターンをタップするか、キーボードの🎤でも入力可能）'
+                        }
+                        autoFocus
+                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-sm font-bold text-stone-800 focus:border-[#FF8FAB] focus:outline-none"
+                      />
+                    </div>
+
+                    {/* カテゴリ選択（二人予定・夫予定・妻予定＋追加項目） */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {categories.map((c) => {
+                        const cat = resolveCategoryInfo(c.id, store.categories, store.metadata);
+                        const selected = categoryId === c.id;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => handleSelectCategory(c.id)}
+                            style={
+                              selected
+                                ? { backgroundColor: cat.accentColor, color: '#fff' }
+                                : { backgroundColor: cat.bgColor, color: cat.textColor }
+                            }
+                            className="px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all"
+                          >
+                            {cat.icon} {cat.shortLabel}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={onOpenCategoryManager}
+                        className="px-2 py-1 rounded-xl bg-stone-100 text-stone-600 text-[10px] font-bold"
+                      >
+                        ＋項目編集
+                      </button>
+                    </div>
+
+                    {/* 時間設定 */}
+                    <div className="flex flex-wrap items-center gap-3 text-xs">
+                      <label className="flex items-center gap-1.5 font-bold text-stone-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isAllDay}
+                          onChange={(e) => setIsAllDay(e.target.checked)}
+                          className="rounded text-[#FF8FAB]"
+                        />
+                        <span>終日</span>
+                      </label>
+
+                      {!isAllDay && (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="time"
+                            value={startTime}
+                            onChange={(e) => setStartTime(e.target.value)}
+                            className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold"
+                          />
+                          <span>〜</span>
+                          <input
+                            type="time"
+                            value={endTime}
+                            onChange={(e) => setEndTime(e.target.value)}
+                            className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 🔔 Googleカレンダー連携 ＆ 端末別通知設定（妻なら妻の端末のみ、夫なら夫の端末のみに通知） */}
+                    <div className="bg-[#F6F9FF] rounded-2xl p-3 border border-sky-200/90 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold text-sky-900 flex items-center gap-1">
+                          <Bell className="w-3.5 h-3.5 text-sky-600" />
+                          <span>Googleカレンダー通知対象（端末別通知）</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-sky-700">
+                          ※選んだ人のスマホにだけ通知されます
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setNotifyTarget('partnerA')}
+                          className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
+                            notifyTarget === 'partnerA'
+                              ? 'bg-[#126875] text-white border-[#126875] shadow-2xs'
+                              : 'bg-white text-stone-600 border-stone-200'
+                          }`}
+                        >
+                          {partnerA.avatar} {partnerA.name}の端末のみ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNotifyTarget('partnerB')}
+                          className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
+                            notifyTarget === 'partnerB'
+                              ? 'bg-[#6638A6] text-white border-[#6638A6] shadow-2xs'
+                              : 'bg-white text-stone-600 border-stone-200'
+                          }`}
+                        >
+                          {partnerB.avatar} {partnerB.name}の端末のみ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNotifyTarget('both')}
+                          className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
+                            notifyTarget === 'both'
+                              ? 'bg-[#D63864] text-white border-[#D63864] shadow-2xs'
+                              : 'bg-white text-stone-600 border-stone-200'
+                          }`}
+                        >
+                          💕 2人の端末とも
+                        </button>
+                      </div>
+
+                      {/* 通知タイミング */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[11px] font-bold text-stone-600">通知時間:</span>
+                        {REMINDER_PRESETS.map((rm) => (
+                          <button
+                            key={rm.minutes}
+                            type="button"
+                            onClick={() => setReminderMinutes(rm.minutes)}
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border ${
+                              reminderMinutes === rm.minutes
+                                ? 'bg-sky-600 text-white border-sky-600'
+                                : 'bg-white text-stone-600 border-stone-200'
+                            }`}
+                          >
+                            {rm.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* 現在の操作端末（activePartner）が通知対象に含まれている場合のみ、保存時Googleカレンダー起動チェックを表示 */}
+                      {notifyTarget === 'both' || notifyTarget === activePartner ? (
+                        <label className="flex items-center gap-1.5 pt-1 text-[11px] font-extrabold text-sky-900 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={autoOpenGoogleCal}
+                            onChange={(e) => setAutoOpenGoogleCal(e.target.checked)}
+                            className="rounded text-sky-600"
+                          />
+                          <span>
+                            📲 保存と同時にこの端末（{currentPartnerInfo.avatar}
+                            {currentPartnerInfo.name}）のGoogleカレンダーを開いて通知セットする
+                          </span>
+                        </label>
+                      ) : (
+                        <div className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
+                          💡 この予定・タスクは「
+                          {notifyTarget === 'partnerA'
+                            ? `${partnerA.avatar}${partnerA.name}`
+                            : `${partnerB.avatar}${partnerB.name}`}
+                          の端末のみ通知」に設定されています。あなたの端末には通知されず、相手の画面にGoogleカレンダー通知ボタンが表示されます。
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <input
+                        type="text"
+                        value={memo}
+                        onChange={(e) => setMemo(e.target.value)}
+                        placeholder="メモ・場所・持ち物など（任意）"
+                        className="w-full px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] text-xs text-stone-700"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowEventForm(false)}
+                        className="px-3.5 py-1.5 rounded-xl bg-stone-100 text-stone-600 text-xs font-bold"
+                      >
+                        キャンセル
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-xs"
+                      >
+                        {editingEventId ? '更新する' : isTask ? 'タスクを追加する' : '予定を追加する'}
+                      </button>
+                    </div>
+                  </>
+                )}
               </form>
             )}
 
             {/* 予定＆タスク一覧表示 */}
             {dayEvents.length === 0 ? (
               <div className="bg-white rounded-2xl p-4 text-center border border-dashed border-stone-200 text-xs text-stone-400">
-                この日の予定・タスクはまだありません🐾 上の「＋予定を追加」「＋タスク(通知)」から登録できます。
+                この日の予定・タスクはまだありません🐾 上の「＋予定」「＋タスク」「＋残業登録」からすぐ登録できます。
               </div>
             ) : (
               <div className="space-y-2">
@@ -913,10 +1147,21 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
           {/* セクションB：ふたりのシフト並列入力欄（本業シフト ＋ 仕事終わり/休日のバイト ＋ 残業・休出時間） */}
           <div className="bg-white rounded-2xl p-3.5 border border-stone-200/90 shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-extrabold text-stone-700">
-                🐾 シフト並列確認・入力（メインを押すと翌日へ進みます⏩）
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-extrabold text-stone-700">
+                  🐾 {m}/{d} のシフト＆残業・バイト入力
+                </span>
+                <label className="flex items-center gap-1 text-[10px] font-bold text-stone-500 cursor-pointer bg-stone-100 px-2 py-0.5 rounded-lg">
+                  <input
+                    type="checkbox"
+                    checked={advanceOnShiftTap}
+                    onChange={(e) => setAdvanceOnShiftTap(e.target.checked)}
+                    className="rounded text-[#FF8FAB]"
+                  />
+                  <span>シフト押下で翌日へ進む⏩</span>
+                </label>
+              </div>
               <button
                 type="button"
                 onClick={onOpenShiftStampManager}
@@ -934,8 +1179,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                 const stamp = pid === 'partnerA' ? stampA : stampB;
 
                 const hasSubWork = Boolean(shift?.subCustomLabel || shift?.subStampId);
-                const overtime = shift?.overtimeHours || 0;
-                const holWork = shift?.holidayWorkHours || 0;
+                const overtime = Number(shift?.overtimeHours || 0);
+                const holWork = Number(shift?.holidayWorkHours || 0);
+                const customInputVal = pid === 'partnerA' ? customOtInputA : customOtInputB;
+                const setCustomInputVal =
+                  pid === 'partnerA' ? setCustomOtInputA : setCustomOtInputB;
 
                 return (
                   <div
@@ -964,11 +1212,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           )}
                         </span>
                       ) : (
-                        <span className="text-[11px] text-stone-400">未設定</span>
+                        <span className="text-[11px] text-stone-400">シフト未設定</span>
                       )}
                     </div>
 
-                    {/* ① メインシフト選択ボタン（タップすると登録して翌日へ移動） */}
+                    {/* ① メインシフト選択ボタン（同じ日に残業も続けて入力できるようデフォは日付維持） */}
                     <div className="grid grid-cols-4 gap-1">
                       {shiftStamps.map((s) => {
                         const isCurrent = shift?.stampId === s.id;
@@ -976,7 +1224,9 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           <button
                             key={s.id}
                             type="button"
-                            onClick={() => onSetShiftAndAdvance(dateStr, pid, s)}
+                            onClick={() =>
+                              onSetShiftAndAdvance(dateStr, pid, s, advanceOnShiftTap)
+                            }
                             style={{ backgroundColor: s.color, color: s.textColor }}
                             className={`py-1.5 px-1 rounded-xl font-extrabold text-[11px] flex items-center justify-center gap-0.5 active:scale-90 transition-all border ${
                               isCurrent ? 'border-stone-800 ring-1 ring-stone-800' : 'border-white'
@@ -990,7 +1240,9 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       {shift && (
                         <button
                           type="button"
-                          onClick={() => onSetShiftAndAdvance(dateStr, pid, null)}
+                          onClick={() =>
+                            onSetShiftAndAdvance(dateStr, pid, null, advanceOnShiftTap)
+                          }
                           className="py-1.5 px-1 rounded-xl font-bold text-[10px] bg-stone-200/70 text-stone-600"
                         >
                           消去
@@ -1100,29 +1352,32 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           <Timer className="w-3 h-3 text-rose-500" />
                           <span>残業・休日出勤時間</span>
                         </span>
-                        {(overtime > 0 || holWork > 0) && (
-                          <span className="px-2 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black">
-                            {holWork > 0 ? `休日出勤 ${holWork}h` : `残業 +${overtime}h`}
+                        {(overtime > 0 || holWork > 0) ? (
+                          <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black shadow-2xs">
+                            {holWork > 0 ? `💼 休日出勤 ${holWork}h 反映中` : `⏱️ 残業 +${overtime}h 反映中`}
                           </span>
+                        ) : (
+                          <span className="text-[10px] text-stone-400 font-bold">0時間</span>
                         )}
                       </div>
 
                       {/* ワンタップ残業・休出ボタン */}
                       <div className="flex flex-wrap gap-1">
-                        {[0, 0.5, 1, 1.5, 2, 3].map((hrs) => (
+                        {[0, 0.5, 1, 1.5, 2, 2.5, 3, 4].map((hrs) => (
                           <button
                             key={hrs}
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              setCustomInputVal(hrs > 0 ? String(hrs) : '');
                               onUpdateShiftDetails(dateStr, pid, {
                                 overtimeHours: hrs,
                                 isHolidayWork: false,
                                 holidayWorkHours: 0,
-                              })
-                            }
-                            className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border ${
+                              });
+                            }}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
                               overtime === hrs && !holWork
-                                ? 'bg-rose-500 border-rose-500 text-white'
+                                ? 'bg-rose-500 border-rose-500 text-white shadow-2xs scale-105'
                                 : 'bg-white border-stone-200 text-stone-600'
                             }`}
                           >
@@ -1133,16 +1388,17 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           <button
                             key={`hol_${hHrs}`}
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              setCustomInputVal(String(hHrs));
                               onUpdateShiftDetails(dateStr, pid, {
                                 isHolidayWork: true,
                                 holidayWorkHours: hHrs,
                                 overtimeHours: 0,
-                              })
-                            }
-                            className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border ${
+                              });
+                            }}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
                               holWork === hHrs
-                                ? 'bg-amber-600 border-amber-600 text-white'
+                                ? 'bg-amber-600 border-amber-600 text-white shadow-2xs scale-105'
                                 : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
                             }`}
                           >
@@ -1151,17 +1407,48 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                         ))}
                       </div>
 
-                      {/* 0.5h単位の微調整入力 */}
-                      <div className="flex items-center gap-2 text-[11px] pt-0.5">
-                        <span className="text-stone-500 font-bold">自由入力:</span>
+                      {/* 0.5h単位の自由入力＋「反映」ボタン */}
+                      <div className="flex items-center gap-1.5 text-[11px] pt-0.5">
+                        <span className="text-stone-500 font-bold shrink-0">自由入力:</span>
                         <input
                           type="number"
                           step="0.5"
                           min="0"
                           max="24"
-                          value={holWork > 0 ? holWork : overtime}
+                          placeholder="例: 2"
+                          value={customInputVal}
                           onChange={(e) => {
-                            const val = Math.max(0, Number(e.target.value));
+                            const raw = e.target.value;
+                            setCustomInputVal(raw);
+                            if (raw === '') {
+                              onUpdateShiftDetails(dateStr, pid, {
+                                overtimeHours: 0,
+                                isHolidayWork: false,
+                                holidayWorkHours: 0,
+                              });
+                              return;
+                            }
+                            const val = Math.max(0, Number(raw));
+                            if (!Number.isNaN(val)) {
+                              if (holWork > 0 || shift?.isHolidayWork) {
+                                onUpdateShiftDetails(dateStr, pid, {
+                                  isHolidayWork: val > 0,
+                                  holidayWorkHours: val,
+                                });
+                              } else {
+                                onUpdateShiftDetails(dateStr, pid, {
+                                  overtimeHours: val,
+                                });
+                              }
+                            }
+                          }}
+                          className="w-16 px-2 py-1 rounded-lg border border-stone-300 bg-white font-extrabold text-center text-rose-600"
+                        />
+                        <span className="font-bold text-stone-600">h</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = Math.max(0, Number(customInputVal) || 0);
                             if (holWork > 0 || shift?.isHolidayWork) {
                               onUpdateShiftDetails(dateStr, pid, {
                                 isHolidayWork: val > 0,
@@ -1173,9 +1460,10 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                               });
                             }
                           }}
-                          className="w-16 px-2 py-0.5 rounded-lg border border-stone-200 bg-white font-extrabold text-center"
-                        />
-                        <span className="font-bold text-stone-600">時間</span>
+                          className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-extrabold text-[10px] shadow-2xs active:scale-95"
+                        >
+                          ⏱️ 反映
+                        </button>
                       </div>
                     </div>
 
