@@ -24,7 +24,7 @@ import {
 } from '../types/calendar';
 import { decryptCalendarStore, encryptCalendarStore } from '../utils/crypto';
 import { exportToIcs, IcsExportTarget, parseIcsEvents } from '../utils/ical';
-import { generatePartnerNotificationIcs } from '../utils/googleCalendar';
+import { generatePartnerNotificationIcs, openOrShareIcsOnDevice } from '../utils/googleCalendar';
 import { createNewSecretGist } from '../utils/storage';
 
 interface SettingsAndSyncModalProps {
@@ -289,19 +289,14 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
     }
   };
 
-  // .ics エクスポート実行
-  const handleExportIcs = () => {
+  // .ics エクスポート実行（iPhone/Android/PCのカレンダーで確実に開ける方式）
+  const handleExportIcs = async () => {
     const icsText = exportToIcs(store, icsExportTarget);
-    const blob = new Blob([icsText], { type: 'text/calendar;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `futarical-${icsExportTarget}-${new Date().toISOString().slice(0, 10)}.ics`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const filename = `futarical-${icsExportTarget}-${new Date().toISOString().slice(0, 10)}.ics`;
+    await openOrShareIcsOnDevice(icsText, filename);
     setStatusMsg({
       type: 'ok',
-      text: 'iCal (.ics) ファイルを書き出しました📅 スマホやPCの標準カレンダーに取り込めます。',
+      text: 'カレンダーファイル (.ics) を開きました📅 そのまま「すべて追加」を押すとスマホのカレンダーに取り込めます✨',
     });
   };
 
@@ -451,7 +446,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
             }`}
           >
             <Cloud className="w-4 h-4" />
-            <span>暗号化・GitHub同期</span>
+            <span>📲 かんたん夫婦共有</span>
           </button>
 
           <button
@@ -467,7 +462,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
             }`}
           >
             <Calendar className="w-4 h-4" />
-            <span>iCal連携・バックアップ</span>
+            <span>📅 カレンダー連携</span>
           </button>
 
           <button
@@ -483,7 +478,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
             }`}
           >
             <Users className="w-4 h-4" />
-            <span>ふたりの設定</span>
+            <span>👫 ふたりの設定</span>
           </button>
         </div>
 
@@ -501,205 +496,107 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
             </div>
           )}
 
-          {/* タブ1：暗号化＆GitHub同期 */}
+          {/* タブ1：超かんたん夫婦共有 ＆ データ削除 */}
           {activeTab === 'sync' && (
             <div className="space-y-4">
-              {/* 合言葉（AES-GCM暗号鍵）設定 */}
-              <div className="bg-white rounded-2xl p-4 border border-stone-200/90 space-y-2.5 shadow-2xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-stone-800 text-sm flex items-center gap-1.5">
-                    <KeyRound className="w-4 h-4 text-[#FF8FAB]" />
-                    1. 夫婦の合言葉（パスワードロック＆暗号鍵）
-                  </span>
-                  <span className="px-2 py-0.5 rounded-full bg-[#FFE5EC] text-[#9E2A47] font-bold text-[10px]">
-                    PBKDF2 + AES-GCM 256bit
-                  </span>
-                </div>
-                <p className="text-stone-500 leading-relaxed">
-                  設定した合言葉で予定データをブラウザ内で暗号化してからGitHubに保存するため、第三者には一切解読できません。
-                </p>
-                <input
-                  type="password"
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="夫婦の合言葉（4文字以上）を入力"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold text-stone-800 text-sm"
-                />
-              </div>
-
-              {/* GitHub 同期設定 */}
-              <div className="bg-white rounded-2xl p-4 border border-stone-200/90 space-y-3 shadow-2xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-stone-800 text-sm flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-[#56CFE1]" />
-                    2. GitHub クラウド永続化（コード更新でも消えない保存先）
-                  </span>
-                </div>
-
-                {/* 保存モード選択：Secret Gist or 専用データファイル */}
-                <div className="grid grid-cols-2 gap-2 bg-[#FFFBF7] p-1 rounded-xl border border-stone-200">
-                  <button
-                    type="button"
-                    onClick={() => setMode('gist')}
-                    className={`py-1.5 rounded-lg font-extrabold text-xs transition-all ${
-                      mode === 'gist'
-                        ? 'bg-[#FF8FAB] text-white shadow-2xs'
-                        : 'text-stone-600 hover:bg-white'
-                    }`}
-                  >
-                    🔒 Secret Gist に保存（推奨）
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMode('repo')}
-                    className={`py-1.5 rounded-lg font-extrabold text-xs transition-all flex items-center justify-center gap-1 ${
-                      mode === 'repo'
-                        ? 'bg-[#56CFE1] text-white shadow-2xs'
-                        : 'text-stone-600 hover:bg-white'
-                    }`}
-                  >
-                    <FolderGit2 className="w-3.5 h-3.5" />
-                    リポジトリ内専用JSON
-                  </button>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-stone-600 mb-1">
-                    GitHub Personal Access Token ({mode === 'gist' ? 'gist権限' : 'repo権限'})
-                  </label>
-                  <input
-                    type="password"
-                    value={githubToken}
-                    onChange={(e) => setGithubToken(e.target.value)}
-                    placeholder="ghp_... または github_pat_..."
-                    className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-mono text-xs"
-                  />
-                </div>
-
-                {mode === 'gist' ? (
-                  <div className="space-y-2">
-                    <label className="block font-bold text-stone-600">
-                      保存先 Secret Gist ID
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={gistId}
-                        onChange={(e) => setGistId(e.target.value)}
-                        placeholder="Gist ID（空欄なら右のボタンで自動作成！）"
-                        className="flex-1 px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-mono text-xs"
-                      />
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={handleCreateSecretGist}
-                        className="px-3 py-2 rounded-xl bg-[#F3EAFF] hover:bg-[#B388EB] text-[#59318F] hover:text-white font-extrabold text-xs transition-colors shrink-0 flex items-center gap-1"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>新しいGistを自動作成</span>
-                      </button>
-                    </div>
+              {/* 💑 設定不要！URLを送るだけの超かんたん夫婦共有カード */}
+              <div className="bg-white rounded-3xl p-4 border-2 border-[#FF8FAB] space-y-3 shadow-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-extrabold text-stone-800 text-sm flex items-center gap-1.5">
+                    <span>💑</span>
+                    <span>パートナーとの共有方法（設定不要！）</span>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block font-bold text-stone-600 mb-1">GitHub Owner (ID)</label>
-                      <input
-                        type="text"
-                        value={repoOwner}
-                        onChange={(e) => setRepoOwner(e.target.value)}
-                        placeholder="例: rokiwo"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-stone-600 mb-1">リポジトリ名</label>
-                      <input
-                        type="text"
-                        value={repoName}
-                        onChange={(e) => setRepoName(e.target.value)}
-                        placeholder="futari-calendar"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-stone-600 mb-1">データ保存ブランチ</label>
-                      <input
-                        type="text"
-                        value={repoBranch}
-                        onChange={(e) => setRepoBranch(e.target.value)}
-                        placeholder="main"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-stone-600 mb-1">暗号化データファイルパス</label>
-                      <input
-                        type="text"
-                        value={repoFilePath}
-                        onChange={(e) => setRepoFilePath(e.target.value)}
-                        placeholder="data/calendar-encrypted.json"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7]"
-                      />
-                    </div>
+                  <span className="px-2.5 py-0.5 rounded-full bg-[#E6F7EF] text-[#1E6645] font-extrabold text-[10px]">
+                    ✅ クラウド自動同期 ON
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-[#FFF0F5] border border-[#FFC2D1] text-stone-700 space-y-1.5 leading-relaxed">
+                  <div className="font-extrabold text-[#9E2A47] text-xs">
+                    🎉 難しいトークンやIDの設定はすべて自動で完了しています！
                   </div>
-                )}
+                  <p className="text-[11px] font-bold">
+                    ① 下のボタンで<strong>パートナーにLINEでURLを送る</strong>（またはQRコードを読み取ってもらう）
+                    <br />
+                    ② パートナーが自分のスマホで開き、上のスイッチを<strong>「🐰 妻（または🐻 夫）」</strong>に切り替えるだけ！
+                    <br />
+                    これだけで、2人が入れたシフト・残業・予定・タスクがずっと自動で同期されます✨
+                  </p>
+                </div>
 
-                <label className="flex items-center gap-2 pt-1 font-bold text-stone-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoSync}
-                    onChange={(e) => setAutoSync(e.target.checked)}
-                    className="rounded text-[#FF8FAB]"
-                  />
-                  <span>予定やシフトを変更した時に自動でクラウド同期する</span>
-                </label>
-
-                <div className="flex flex-wrap items-center gap-2 pt-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={handleSaveAndSync}
-                    className="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white font-extrabold text-xs sm:text-sm shadow-md hover:opacity-95 flex items-center justify-center gap-2"
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <a
+                    href={`https://line.me/R/share?text=${encodeURIComponent(
+                      `🐻💕🐰 ふたりの共有シフト＆予定カレンダー「ふたりカレ」\nここを開いてホーム画面に追加してね👇\nhttps://rokiwo.github.io/futari-calendar/`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="py-3 px-4 rounded-2xl bg-[#06C755] hover:bg-[#05b04b] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-sm"
                   >
-                    <RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
-                    <span>設定を保存して今すぐ暗号化マージ同期</span>
-                  </button>
+                    <span>💚 LINEでパートナーにURLを送る</span>
+                  </a>
 
                   <button
                     type="button"
-                    onClick={handleCopyPartnerShareText}
-                    className="py-3 px-3.5 rounded-2xl bg-[#FFFBF7] hover:bg-[#FFE5EC] border border-[#FFC2D1] text-[#9E2A47] font-extrabold text-xs flex items-center gap-1"
-                    title="LINE等でパートナーに共有するための設定メモをコピーします"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(
+                          'https://rokiwo.github.io/futari-calendar/'
+                        );
+                        setCopiedShare(true);
+                        setTimeout(() => setCopiedShare(false), 2500);
+                        setStatusMsg({
+                          type: 'ok',
+                          text: 'アプリのURL（https://rokiwo.github.io/futari-calendar/）をコピーしました📋 パートナーに送ってください💕',
+                        });
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    className="py-3 px-4 rounded-2xl bg-[#FF8FAB] hover:bg-[#e57393] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-sm"
                   >
                     {copiedShare ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    <span>{copiedShare ? 'コピー完了!' : 'パートナー共有用コピー'}</span>
+                    <span>{copiedShare ? 'URLをコピーしました！' : '📋 アプリのURLをコピー'}</span>
                   </button>
                 </div>
 
-                {/* パートナーから送られてきた共有設定を1タップで貼り付け反映 */}
-                <div className="mt-3 pt-3 border-t border-stone-200/80 space-y-2">
-                  <div className="font-extrabold text-stone-700 text-xs flex items-center gap-1">
-                    <span>📥 パートナーから送られた「共有設定テキスト」を貼り付けて自動連携</span>
-                  </div>
-                  <p className="text-[11px] text-stone-500">
-                    パートナーが上の「パートナー共有用コピー」でLINE等に送ってくれたメッセージをそのまま下に貼り付けるだけで、合言葉・Gist ID・Tokenが自動入力されて同期されます。
-                  </p>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <textarea
-                      rows={2}
-                      value={sharePasteText}
-                      onChange={(e) => setSharePasteText(e.target.value)}
-                      placeholder="【ふたりカレ (FutariCal) 共有設定💕】... をここに貼り付け"
-                      className="flex-1 px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-[11px] font-mono resize-none"
-                    />
+                {/* 隣のパートナーがスマホカメラで1秒で開けるQRコード */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 p-3 rounded-2xl bg-[#FFFBF7] border border-stone-200/80">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(
+                      'https://rokiwo.github.io/futari-calendar/'
+                    )}`}
+                    alt="ふたりカレ共有QRコード"
+                    className="w-24 h-24 rounded-xl border border-stone-200 bg-white p-1 shrink-0"
+                  />
+                  <div className="space-y-1.5 text-center sm:text-left flex-1">
+                    <div className="font-extrabold text-stone-800 text-xs">
+                      📱 隣にいるならカメラでQR読み取りでもOK！
+                    </div>
+                    <p className="text-[11px] text-stone-500">
+                      パートナーのスマホのカメラでこのQRコードを読み取るだけで、同じカレンダーがすぐ開きます。
+                    </p>
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={handleApplyPastedShareText}
-                      className="px-3.5 py-2 rounded-xl bg-[#126875] hover:bg-[#0E515C] text-white font-extrabold text-xs shrink-0"
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          await onTriggerCloudSync();
+                          setStatusMsg({
+                            type: 'ok',
+                            text: '✨ 夫婦クラウドと最新のシフト・予定を同期しました！',
+                          });
+                        } catch {
+                          // ignore
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#136370] hover:text-white font-extrabold text-xs inline-flex items-center gap-1 transition-colors"
                     >
-                      ✨ 貼り付けた設定で自動連携
+                      <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+                      <span>🔄 今すぐ手動で最新同期する</span>
                     </button>
                   </div>
                 </div>
@@ -757,85 +654,184 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* 🔧 上級者向け詳細設定（通常は変更不要） */}
+              <details className="bg-white rounded-2xl p-3.5 border border-stone-200/80">
+                <summary className="font-bold text-stone-500 cursor-pointer flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-[#56CFE1]" />
+                  <span>🔧 上級者向け詳細設定：パスワードロックや独自GitHub保存先（通常は変更不要）</span>
+                </summary>
+                <div className="mt-3 pt-3 border-t border-stone-100 space-y-3">
+                  <div>
+                    <label className="block font-bold text-stone-600 mb-1">
+                      <KeyRound className="w-3.5 h-3.5 inline text-[#FF8FAB] mr-1" />
+                      アプリ起動時の合言葉ロック（任意・4文字以上）
+                    </label>
+                    <input
+                      type="password"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      placeholder="未設定でもデフォルト暗号化で安全に同期されます"
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold text-stone-800 text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 bg-[#FFFBF7] p-1 rounded-xl border border-stone-200">
+                    <button
+                      type="button"
+                      onClick={() => setMode('gist')}
+                      className={`py-1.5 rounded-lg font-extrabold text-xs transition-all ${
+                        mode === 'gist'
+                          ? 'bg-[#FF8FAB] text-white shadow-2xs'
+                          : 'text-stone-600 hover:bg-white'
+                      }`}
+                    >
+                      🔒 Secret Gist 保存
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMode('repo')}
+                      className={`py-1.5 rounded-lg font-extrabold text-xs transition-all flex items-center justify-center gap-1 ${
+                        mode === 'repo'
+                          ? 'bg-[#56CFE1] text-white shadow-2xs'
+                          : 'text-stone-600 hover:bg-white'
+                      }`}
+                    >
+                      <FolderGit2 className="w-3.5 h-3.5" />
+                      リポジトリ内JSON
+                    </button>
+                  </div>
+
+                  {mode === 'gist' && (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={gistId}
+                        onChange={(e) => setGistId(e.target.value)}
+                        placeholder="Gist ID（自動設定済み）"
+                        className="flex-1 px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-mono text-xs"
+                      />
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={handleCreateSecretGist}
+                        className="px-3 py-2 rounded-xl bg-[#F3EAFF] text-[#59318F] font-extrabold text-xs shrink-0 flex items-center gap-1"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>新規Gist作成</span>
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleSaveAndSync}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-stone-800 text-white font-extrabold text-xs"
+                    >
+                      詳細設定を保存して同期
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopyPartnerShareText}
+                      className="py-2.5 px-3 rounded-xl border border-stone-300 text-stone-700 font-bold text-xs"
+                    >
+                      設定テキストコピー
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={sharePasteText}
+                      onChange={(e) => setSharePasteText(e.target.value)}
+                      placeholder="共有設定テキストを貼り付け"
+                      className="flex-1 px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyPastedShareText}
+                      className="px-3 py-1.5 rounded-xl bg-[#126875] text-white font-bold text-xs"
+                    >
+                      反映
+                    </button>
+                  </div>
+                </div>
+              </details>
             </div>
           )}
 
           {/* タブ2：iCal (.ics) カレンダー連携 ＆ JSONバックアップ */}
           {activeTab === 'ical_backup' && (
             <div className="space-y-4">
-              {/* 🔔 Googleカレンダー端末別通知出力（妻の端末には妻の通知のみ、夫の端末には夫の通知のみ） */}
+              {/* 🔔 スマホのカレンダー＆Googleカレンダー通知連携（夫の端末専用 ／ 妻の端末専用） */}
               <div className="bg-[#F6F9FF] rounded-2xl p-4 border border-sky-200/90 space-y-2.5 shadow-2xs">
                 <h3 className="text-sm font-extrabold text-sky-900 flex items-center gap-1.5">
-                  🔔 Googleカレンダー 端末別通知連携（夫の端末専用 ／ 妻の端末専用）
+                  🔔 スマホのカレンダーに通知付きで取り込む（夫専用 ／ 妻専用）
                 </h3>
                 <p className="text-stone-600 leading-relaxed">
-                  妻の予定・タスクは妻の端末のみに、夫の予定・タスクは夫の端末のみにアラーム通知（VALARM）が入る専用カレンダーファイルを取り込めます。ご自身のスマホのボタンを押してGoogleカレンダーへ追加してください。
+                  下のボタンを押すと、<strong>夫のボタンなら夫のシフト・予定・タスクだけ</strong>、<strong>妻のボタンなら妻のシフト・予定・タスクだけ</strong>に通知アラーム（VALARM）が入ったカレンダーがスマホで直接開きます！
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       const icsText = generatePartnerNotificationIcs(store, 'partnerA');
-                      const blob = new Blob([icsText], { type: 'text/calendar;charset=utf-8' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `futarical-notify-partnerA-${new Date().toISOString().slice(0, 10)}.ics`;
-                      a.click();
-                      URL.revokeObjectURL(url);
+                      const fname = `futarical-notify-partnerA-${new Date().toISOString().slice(0, 10)}.ics`;
+                      await openOrShareIcsOnDevice(icsText, fname);
                       setStatusMsg({
                         type: 'ok',
-                        text: `${store.metadata.partners.partnerA.avatar}${store.metadata.partners.partnerA.name}の端末専用の通知付きカレンダー(.ics)を書き出しました🔔`,
+                        text: `${store.metadata.partners.partnerA.avatar}${store.metadata.partners.partnerA.name}の端末専用の通知付きカレンダーを開きました🔔「すべて追加」を押すとカレンダーに登録されます！`,
                       });
                     }}
-                    className="py-2.5 px-3 rounded-xl bg-[#126875] hover:bg-[#0D4F59] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs"
+                    className="py-3 px-3 rounded-xl bg-[#126875] hover:bg-[#0D4F59] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs"
                   >
-                    <Download className="w-4 h-4" />
+                    <Calendar className="w-4 h-4" />
                     <span>
                       {store.metadata.partners.partnerA.avatar}{' '}
-                      {store.metadata.partners.partnerA.name}の端末専用 通知カレンダー
+                      {store.metadata.partners.partnerA.name}のスマホに通知カレンダーを追加
                     </span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       const icsText = generatePartnerNotificationIcs(store, 'partnerB');
-                      const blob = new Blob([icsText], { type: 'text/calendar;charset=utf-8' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `futarical-notify-partnerB-${new Date().toISOString().slice(0, 10)}.ics`;
-                      a.click();
-                      URL.revokeObjectURL(url);
+                      const fname = `futarical-notify-partnerB-${new Date().toISOString().slice(0, 10)}.ics`;
+                      await openOrShareIcsOnDevice(icsText, fname);
                       setStatusMsg({
                         type: 'ok',
-                        text: `${store.metadata.partners.partnerB.avatar}${store.metadata.partners.partnerB.name}の端末専用の通知付きカレンダー(.ics)を書き出しました🔔`,
+                        text: `${store.metadata.partners.partnerB.avatar}${store.metadata.partners.partnerB.name}の端末専用の通知付きカレンダーを開きました🔔「すべて追加」を押すとカレンダーに登録されます！`,
                       });
                     }}
-                    className="py-2.5 px-3 rounded-xl bg-[#6638A6] hover:bg-[#4F2A82] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs"
+                    className="py-3 px-3 rounded-xl bg-[#6638A6] hover:bg-[#4F2A82] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs"
                   >
-                    <Download className="w-4 h-4" />
+                    <Calendar className="w-4 h-4" />
                     <span>
                       {store.metadata.partners.partnerB.avatar}{' '}
-                      {store.metadata.partners.partnerB.name}の端末専用 通知カレンダー
+                      {store.metadata.partners.partnerB.name}のスマホに通知カレンダーを追加
                     </span>
                   </button>
+                </div>
+
+                <div className="pt-1 text-[11px] text-stone-500">
+                  💡 <strong>1件ずつGoogleカレンダーアプリへ直接通知を入れる場合</strong>は、各予定やタスクの横にある <strong>「🔔 Googleカレンダー通知登録」</strong> ボタンを押すとGoogleカレンダーアプリが直接開きます！
                 </div>
               </div>
 
               {/* iCal (.ics) エクスポート＆インポート */}
               <div className="bg-white rounded-2xl p-4 border border-stone-200/90 space-y-3 shadow-2xs">
                 <h3 className="text-sm font-extrabold text-stone-800 flex items-center gap-1.5">
-                  📅 外部カレンダー連携（.ics インポート＆エクスポート）
+                  📅 カレンダーファイル（.ics）の書き出し＆取り込み
                 </h3>
                 <p className="text-stone-500">
-                  Appleカレンダー・Googleカレンダー・ナスカレ等と標準iCal（.ics）形式で予定やシフトを入出力できます。
+                  iPhone標準カレンダー・Googleカレンダー・ナスカレ等とカレンダーデータを入出力できます。
                 </p>
 
                 <div className="p-3 rounded-xl bg-[#FFFBF7] border border-stone-200/80 space-y-2">
                   <label className="block font-bold text-stone-700">
-                    📤 ふたりカレのシフト・予定を .ics ファイルとして書き出す
+                    📤 ふたりカレのシフト・予定をスマホのカレンダーで開く
                   </label>
                   <div className="flex flex-wrap gap-2">
                     <select
@@ -860,14 +856,14 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                       className="px-4 py-2 rounded-xl bg-[#56CFE1] hover:bg-[#2EA8BA] text-white font-extrabold flex items-center gap-1.5 shadow-xs"
                     >
                       <Download className="w-4 h-4" />
-                      <span>.ics エクスポート</span>
+                      <span>カレンダーで開く(.ics)</span>
                     </button>
                   </div>
                 </div>
 
                 <div className="p-3 rounded-xl bg-[#FFFBF7] border border-stone-200/80 space-y-2">
                   <label className="block font-bold text-stone-700">
-                    📥 外部の .ics ファイルをふたりカレにインポート
+                    📥 外部の .ics ファイルをふたりカレに取り込む
                   </label>
                   <div className="flex flex-wrap gap-2">
                     <select
@@ -892,7 +888,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     <input
                       ref={icsFileInputRef}
                       type="file"
-                      accept=".ics,text/calendar"
+                      accept=".ics,.txt,text/calendar,application/octet-stream,*/*"
                       onChange={handleImportIcsFile}
                       className="hidden"
                     />
