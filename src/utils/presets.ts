@@ -270,10 +270,128 @@ export const PASTEL_COLOR_PALETTE = [
   { name: 'ピーチコーラル', hex: '#FF9E7D', bg: '#FFECE5', text: '#9C3D1C', border: '#FFD0BF' },
 ];
 
-// シフト用アイコン絵文字のクイック選択リスト
+// シフト用アイコン絵文字のクイック選択リスト（フラット互換用）
 export const SHIFT_ICON_CHOICES = [
   '☀️', '🌙', '🌆', '🌅', '⏰', '🏠', '🌴', '🍵', '💻', '🏪',
   '💼', '🚄', '🏥', '🏢', '🩺', '🚑', '🍳', '✨', '💤', '🎉',
+];
+
+// パターン別・シフト用アイコン絵文字グループ
+export const SHIFT_ICON_PATTERNS: {
+  category: string;
+  icons: string[];
+}[] = [
+  {
+    category: '☀️ 時間帯・基本シフト',
+    icons: ['☀️', '🌤️', '🌅', '🌆', '🌙', '🌌', '⏰', '⏱️', '🍵', '💤', '🛌', '🔥', '⚡', '🌈'],
+  },
+  {
+    category: '🏥 医療・オフィス・現場',
+    icons: ['🏥', '🩺', '💉', '🚑', '💊', '🏢', '💻', '💼', '📊', '📝', '📞', '✈️', '🚄', '🚗'],
+  },
+  {
+    category: '🏪 バイト・副業・店舗',
+    icons: ['🏪', '☕', '🍽️', '🍔', '🍰', '🛒', '📦', '🚚', '🛵', '🍳', '🍺', '💇‍♀️', '📚', '🎵'],
+  },
+  {
+    category: '🌴 休日・休暇・暮らし',
+    icons: ['🏠', '🌴', '🌸', '🌻', '🍁', '⛄', '🎉', '🎂', '👶', '🏫', '🐶', '🐱', '💕', '✨'],
+  },
+];
+
+// カレンダー予定追加時の「パターン別アイコン＆ワンタップ予定プリセット」
+export interface EventPatternPresetItem {
+  icon: string;
+  label: string;       // ボタン表示名
+  title: string;       // 自動入力される予定タイトル
+  startTime?: string;  // 推奨開始時間
+  endTime?: string;    // 推奨終了時間
+  supportBadge?: string;
+}
+
+export interface EventPatternCategory {
+  id: string;
+  tabLabel: string;
+  items: EventPatternPresetItem[];
+  icons: string[];     // アイコンだけ選びたい時用の絵文字一覧
+}
+
+export const EVENT_PATTERN_CATEGORIES: EventPatternCategory[] = [
+  {
+    id: 'date_out',
+    tabLabel: '💕 デート・外食',
+    icons: ['💕', '💑', '🍽️', '☕', '🍰', '🍻', '🍷', '🎬', '🛍️', '🚗', '♨️', '✈️', '🎡', '🏕️', '🎂', '💐'],
+    items: [
+      { icon: '🍽️', label: '外食ディナー', title: '🍽️ 外食ディナー', startTime: '19:00', endTime: '21:00' },
+      { icon: '☕', label: 'カフェ・ランチ', title: '☕ カフェ・ランチ', startTime: '12:00', endTime: '14:00' },
+      { icon: '🎬', label: '映画デート', title: '🎬 映画デート' },
+      { icon: '🛍️', label: 'お買い物', title: '🛍️ ショッピング・お買い物' },
+      { icon: '🚗', label: 'ドライブ', title: '🚗 ドライブお出かけ' },
+      { icon: '♨️', label: '温泉・サウナ', title: '♨️ 温泉・サウナ' },
+      { icon: '✈️', label: '旅行・お泊まり', title: '✈️ 旅行' },
+      { icon: '🎂', label: '記念日・誕生日', title: '🎂 記念日お祝い' },
+      { icon: '🍻', label: '飲み会', title: '🍻 飲み会', startTime: '19:00', endTime: '22:00', supportBadge: '🍳夜ごはん不要' },
+      { icon: '🎡', label: 'レジャー', title: '🎡 テーマパーク・お出かけ' },
+    ],
+  },
+  {
+    id: 'medical_beauty',
+    tabLabel: '🏥 通院・美容',
+    icons: ['🏥', '🦷', '💇‍♀️', '💅', '💆‍♀️', '🏋️', '🧘‍♀️', '💉', '💊', '🩺', '👓', '🧖‍♀️', '🌿', '✨'],
+    items: [
+      { icon: '🏥', label: '病院・通院', title: '🏥 病院・通院', startTime: '10:00', endTime: '11:30' },
+      { icon: '🦷', label: '歯医者', title: '🦷 歯医者・歯科検診', startTime: '14:00', endTime: '15:00' },
+      { icon: '💇‍♀️', label: '美容院', title: '💇‍♀️ 美容院・ヘアサロン', startTime: '11:00', endTime: '13:00' },
+      { icon: '💅', label: 'ネイル・まつパ', title: '💅 ネイル・まつげサロン', startTime: '13:00', endTime: '15:00' },
+      { icon: '💆‍♀️', label: '整体・エステ', title: '💆‍♀️ 整体・マッサージ' },
+      { icon: '🏋️', label: 'ジム・運動', title: '🏋️ ジム・ピラティス' },
+      { icon: '💉', label: '健診・予防接種', title: '💉 健康診断・予防接種' },
+      { icon: '💊', label: '薬局・処方箋', title: '💊 薬受け取り' },
+    ],
+  },
+  {
+    id: 'chore_life',
+    tabLabel: '🏠 家事・暮らし',
+    icons: ['🛒', '📦', '🗑️', '🧹', '🧺', '🍚', '🍱', '🍳', '🏦', '💰', '🔧', '📮', '💡', '🪴'],
+    items: [
+      { icon: '🛒', label: 'まとめ買い', title: '🛒 スーパー買い出し' },
+      { icon: '📦', label: '宅配受取', title: '📦 宅配便・荷物受け取り' },
+      { icon: '🗑️', label: '資源・粗大ごみ', title: '🗑️ 資源ごみ・粗大ごみ出し' },
+      { icon: '🧹', label: '掃除・片付け', title: '🧹 大掃除・片付け' },
+      { icon: '🏦', label: '銀行・役所', title: '🏦 銀行・役所手続き' },
+      { icon: '🔧', label: '車検・点検', title: '🔧 車の点検・メンテナンス' },
+      { icon: '💰', label: '給料日・振込', title: '💰 給料日・振込手続き' },
+      { icon: '🍱', label: '作り置き', title: '🍱 作り置き・料理' },
+    ],
+  },
+  {
+    id: 'work_sub',
+    tabLabel: '🏪 バイト・仕事',
+    icons: ['🏪', '💼', '⏱️', '🏢', '💻', '📝', '📊', '✈️', '🚄', '🤝', '📞', '🎓', '📚', '🔥'],
+    items: [
+      { icon: '🏪', label: 'バイト', title: '🏪 バイト', startTime: '18:00', endTime: '22:00' },
+      { icon: '💼', label: '休日出勤', title: '💼 休日出勤', startTime: '09:00', endTime: '17:00' },
+      { icon: '⏱️', label: '残業予定', title: '⏱️ 残業予定（帰りが遅くなります）', supportBadge: '🔑遅くなります' },
+      { icon: '✈️', label: '出張', title: '✈️ 出張' },
+      { icon: '📝', label: '研修・勉強会', title: '📝 研修・資格勉強' },
+      { icon: '💻', label: 'オンライン会議', title: '💻 オンライン打ち合わせ' },
+      { icon: '🤝', label: '職場飲み会', title: '🤝 職場会食・歓送迎会', startTime: '19:00', endTime: '22:00', supportBadge: '🍳夜ごはん不要' },
+    ],
+  },
+  {
+    id: 'family_pet',
+    tabLabel: '👨‍👩‍👧 家族・実家',
+    icons: ['🏠', '👵', '👴', '👶', '🏫', '🎒', '🐶', '🐱', '🐾', '🎁', '📸', '💐', '⛩️', '🎎'],
+    items: [
+      { icon: '🏠', label: '実家へ帰省', title: '🏠 実家へ帰省' },
+      { icon: '👵', label: '親と食事', title: '👵 両親と食事' },
+      { icon: '👶', label: '子ども行事', title: '👶 保育園・学校行事' },
+      { icon: '🐶', label: '動物病院・ペット', title: '🐶 動物病院・トリミング' },
+      { icon: '🎁', label: 'プレゼント準備', title: '🎁 プレゼント・お祝い準備' },
+      { icon: '📸', label: '写真撮影', title: '📸 スタジオ写真撮影' },
+      { icon: '💐', label: '冠婚葬祭', title: '💐 結婚式・法事' },
+    ],
+  },
 ];
 
 // シフト時間のワンタッププリセット
