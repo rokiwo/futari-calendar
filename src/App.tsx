@@ -8,7 +8,7 @@ import {
   ShiftEntry,
   StampPreset,
 } from './types/calendar';
-import { createInitialDataStore } from './utils/presets';
+import { createInitialDataStore, DEFAULT_CATEGORIES } from './utils/presets';
 import { hashPasscode } from './utils/crypto';
 import {
   getActivePartnerId,
@@ -22,7 +22,7 @@ import {
   setSavedPassHash,
   syncWithGitHub,
 } from './utils/storage';
-import { TopHeader } from './components/TopHeader';
+import { MonthlyOvertimeSummary, TopHeader } from './components/TopHeader';
 import { MonthlyCalendarGrid } from './components/MonthlyCalendarGrid';
 import { StampDrawer, StampDrawerTab } from './components/StampDrawer';
 import { DayDetailModal } from './components/DayDetailModal';
@@ -32,6 +32,7 @@ import { ShiftStampManagerModal } from './components/ShiftStampManagerModal';
 import { ShiftImageOcrModal } from './components/ShiftImageOcrModal';
 import { VoiceEventModal } from './components/VoiceEventModal';
 import { WidgetCompactView, WidgetGuideModal } from './components/WidgetModalAndView';
+import { CategoryManagerModal } from './components/CategoryManagerModal';
 
 // 日付文字列 "YYYY-MM-DD" に deltaDays 日を加算した "YYYY-MM-DD" を返す
 function addDaysToDateStr(dateStr: string, deltaDays: number): string {
@@ -81,6 +82,7 @@ export const App: React.FC = () => {
   const [dayDetailOpen, setDayDetailOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [shiftManagerOpen, setShiftManagerOpen] = useState<boolean>(false);
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState<boolean>(false);
   const [imageOcrOpen, setImageOcrOpen] = useState<boolean>(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState<boolean>(false);
   const [widgetGuideOpen, setWidgetGuideOpen] = useState<boolean>(false);
@@ -105,15 +107,30 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [toastText]);
 
-  // 初回ロード（IndexedDB / localStorage から復元し、不要になったeventスタンプを除外）
+  // 初回ロード（IndexedDB / localStorage から復元し、バイト・休出スタンプやデフォルト項目を補完）
   useEffect(() => {
     let mounted = true;
     loadLocalStore().then((loaded) => {
       if (!mounted) return;
+      const defaultStore = createInitialDataStore();
       const shiftOnlyStamps = (loaded.stamps || []).filter((s) => s.type === 'shift');
+      const mergedStamps =
+        shiftOnlyStamps.length > 0 ? [...shiftOnlyStamps] : [...defaultStore.stamps];
+
+      for (const reqId of ['shift_part', 'shift_hol_work']) {
+        if (!mergedStamps.some((s) => s.id === reqId)) {
+          const found = defaultStore.stamps.find((s) => s.id === reqId);
+          if (found) mergedStamps.push(found);
+        }
+      }
+
       setStore({
         ...loaded,
-        stamps: shiftOnlyStamps.length > 0 ? shiftOnlyStamps : createInitialDataStore().stamps,
+        categories:
+          loaded.categories && loaded.categories.length > 0
+            ? loaded.categories
+            : DEFAULT_CATEGORIES,
+        stamps: mergedStamps,
       });
       setIsLoaded(true);
     });
@@ -192,13 +209,14 @@ export const App: React.FC = () => {
         };
       } else {
         nextShift = {
+          ...(existing && !existing.deletedAt ? existing : {}),
           id: shiftId,
           date: dateStr,
           partnerId,
           stampId: stamp.id,
           startTime: customStartTime ?? stamp.startTime,
           endTime: customEndTime ?? stamp.endTime,
-          memo,
+          memo: memo ?? existing?.memo,
           createdBy: activePartner,
           createdAt: existing?.createdAt || nowIso,
           updatedAt: nowIso,
@@ -221,6 +239,49 @@ export const App: React.FC = () => {
       const [ny, nm] = nextDate.split('-').map(Number);
       setYear(ny);
       setMonth(nm);
+    },
+    [activePartner, commitStore, store]
+  );
+
+  // 指定日のサブシフト（仕事終わり・休日のバイト）や残業・休日出勤時間を更新（日付は移動しない）
+  const handleUpdateShiftDetails = useCallback(
+    (dateStr: string, partnerId: PartnerId, patch: Partial<ShiftEntry>) => {
+      const shiftId = `${dateStr}_${partnerId}`;
+      const nowIso = new Date().toISOString();
+      const existing = store.shifts[shiftId];
+
+      // まだメインシフトが入っていない日にバイトや残業だけ先に入れる場合は「日勤」または先頭スタンプをベースにする
+      const fallbackStamp =
+        store.stamps.find((s) => s.id === 'shift_day') || store.stamps[0];
+
+      const nextShift: ShiftEntry = {
+        ...(existing && !existing.deletedAt
+          ? existing
+          : {
+              id: shiftId,
+              date: dateStr,
+              partnerId,
+              stampId: fallbackStamp ? fallbackStamp.id : 'shift_day',
+              startTime: fallbackStamp?.startTime,
+              endTime: fallbackStamp?.endTime,
+              createdBy: activePartner,
+              createdAt: nowIso,
+            }),
+        ...patch,
+        id: shiftId,
+        date: dateStr,
+        partnerId,
+        updatedAt: nowIso,
+        deletedAt: null,
+      };
+
+      commitStore({
+        ...store,
+        shifts: {
+          ...store.shifts,
+          [shiftId]: nextShift,
+        },
+      });
     },
     [activePartner, commitStore, store]
   );
@@ -416,6 +477,55 @@ export const App: React.FC = () => {
     return matched;
   }, [month, store.shifts, store.stamps, year]);
 
+  // 今月の「⏱️残業・休日出勤・バイト集計」を自動算出
+  const overtimeSummary: MonthlyOvertimeSummary = useMemo(() => {
+    const prefix = `${year}-${String(month).padStart(2, '0')}-`;
+    const calcFor = (pid: PartnerId) => {
+      let overtimeHours = 0;
+      let holidayWorkHours = 0;
+      let partTimeCount = 0;
+      const entries: ShiftEntry[] = [];
+
+      for (const s of Object.values(store.shifts)) {
+        if (s.deletedAt || s.partnerId !== pid || !s.date.startsWith(prefix)) continue;
+        const ot = Number(s.overtimeHours || 0);
+        const hw = Number(s.holidayWorkHours || 0);
+        const hasSub = Boolean(s.subCustomLabel || s.subStampId || s.stampId === 'shift_part');
+
+        if (ot > 0) overtimeHours = Math.round((overtimeHours + ot) * 10) / 10;
+        if (hw > 0) holidayWorkHours = Math.round((holidayWorkHours + hw) * 10) / 10;
+        if (hasSub) partTimeCount += 1;
+
+        if (ot > 0 || hw > 0 || s.isHolidayWork || hasSub) {
+          entries.push(s);
+        }
+      }
+
+      entries.sort((a, b) => a.date.localeCompare(b.date));
+      return {
+        overtimeHours,
+        holidayWorkHours,
+        totalExtraHours: Math.round((overtimeHours + holidayWorkHours) * 10) / 10,
+        partTimeCount,
+        entries,
+      };
+    };
+
+    return {
+      partnerA: calcFor('partnerA'),
+      partnerB: calcFor('partnerB'),
+    };
+  }, [month, store.shifts, year]);
+
+  // カレンダー予定項目リスト（未設定時はデフォルト：二人予定・夫予定・妻予定）
+  const activeCategories = useMemo(
+    () =>
+      store.categories && store.categories.length > 0
+        ? store.categories
+        : DEFAULT_CATEGORIES,
+    [store.categories]
+  );
+
   // パートナーがまだ見ていない変更（未確認件数）をカウント
   const unreadCountForPartner = useMemo(() => {
     const otherId: PartnerId = activePartner === 'partnerA' ? 'partnerB' : 'partnerA';
@@ -506,6 +616,14 @@ export const App: React.FC = () => {
     );
   }
 
+  const currentDrawerPartner: PartnerId =
+    stampDrawerTab === 'partnerB_shift' ? 'partnerB' : 'partnerA';
+  const currentShiftOnSelectedDate = store.shifts[
+    `${selectedDate}_${currentDrawerPartner}`
+  ]?.deletedAt
+    ? undefined
+    : store.shifts[`${selectedDate}_${currentDrawerPartner}`];
+
   return (
     <div className="min-h-screen bg-[#FFFBF7] text-stone-700 flex flex-col">
       {/* パスワードロック画面 */}
@@ -567,8 +685,11 @@ export const App: React.FC = () => {
         activePartner={activePartner}
         onToggleActivePartner={handleToggleActivePartner}
         metadata={store.metadata}
+        categories={activeCategories}
+        onOpenCategoryManager={() => setCategoryManagerOpen(true)}
         onMarkSeenNow={handleMarkSeenNow}
         matchedHolidays={matchedHolidays}
+        overtimeSummary={overtimeSummary}
         onSelectDate={(dateStr) => {
           setSelectedDate(dateStr);
           setDayDetailOpen(true);
@@ -622,6 +743,12 @@ export const App: React.FC = () => {
         onClearShiftAndAdvance={(targetPartner) =>
           handleSetShiftAndAdvance(selectedDate, targetPartner, null)
         }
+        onUpdateShiftDetailsOnSelectedDate={(targetPartner, patch) => {
+          handleUpdateShiftDetails(selectedDate, targetPartner, patch);
+          const [, m, d] = selectedDate.split('-').map(Number);
+          showToast(`✨ ${m}/${d} のシフト詳細（バイト・残業）を更新しました`);
+        }}
+        currentShiftOnSelectedDate={currentShiftOnSelectedDate}
         onToggleSupportBadgeOnSelectedDate={(badge) =>
           handleToggleDaySupportBadge(selectedDate, badge)
         }
@@ -643,11 +770,35 @@ export const App: React.FC = () => {
           onClose={() => setDayDetailOpen(false)}
           onMoveDate={moveSelectedDate}
           onSetShiftAndAdvance={handleSetShiftAndAdvance}
+          onUpdateShiftDetails={handleUpdateShiftDetails}
           onToggleDaySupportBadge={handleToggleDaySupportBadge}
           onSaveEvent={handleSaveEvent}
           onDeleteEvent={handleDeleteEvent}
           onOpenVoiceModal={() => setVoiceModalOpen(true)}
           onOpenShiftStampManager={() => setShiftManagerOpen(true)}
+          onOpenCategoryManager={() => setCategoryManagerOpen(true)}
+        />
+      )}
+
+      {/* 🗂️ カレンダー予定項目の追加・削除モーダル（デフォ：二人予定・夫予定・妻予定） */}
+      {categoryManagerOpen && (
+        <CategoryManagerModal
+          categories={activeCategories}
+          metadata={store.metadata}
+          onClose={() => setCategoryManagerOpen(false)}
+          onUpdateCategories={(nextCats) => {
+            commitStore({
+              ...store,
+              categories: nextCats,
+            });
+            if (
+              filterCategory !== 'all' &&
+              !nextCats.some((c) => c.id === filterCategory)
+            ) {
+              setFilterCategory('all');
+            }
+            showToast('カレンダーの予定項目を更新しました🗂️');
+          }}
         />
       )}
 
@@ -685,6 +836,7 @@ export const App: React.FC = () => {
           selectedDate={selectedDate}
           activePartner={activePartner}
           metadata={store.metadata}
+          categories={activeCategories}
           onClose={() => setVoiceModalOpen(false)}
           onSaveEvent={handleSaveEvent}
         />
