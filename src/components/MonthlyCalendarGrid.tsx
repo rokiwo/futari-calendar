@@ -176,6 +176,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     { label: '土', color: 'text-sky-600 bg-sky-50/70' },
   ];
 
+  // スマホ用のカレンダー表示スタイル切替（'grid' = 7列マス目 / 'list' = 縦1列くっきりリスト）
+  const [mobileLayout, setMobileLayout] = useState<'grid' | 'list'>('grid');
+
   // 各パートナーのシフト枠（メインシフト＋仕事終わり/休日のバイト＋残業時間バッジ）を描画
   const renderPartnerShiftBox = (
     shift: ShiftEntry | undefined,
@@ -203,34 +206,34 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             ? { backgroundColor: stamp.color, color: stamp.textColor }
             : undefined
         }
-        className={`relative rounded-md sm:rounded-lg px-0.5 py-0.5 text-[9px] sm:text-[10px] font-extrabold flex flex-col items-center justify-center leading-tight border ${
+        className={`relative rounded sm:rounded-lg px-0.5 py-0.5 sm:py-0.5 text-[10px] sm:text-[10px] font-black flex flex-col items-center justify-center leading-none sm:leading-tight border ${
           stamp
             ? 'border-black/5'
             : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
         }`}
       >
-        {/* メインシフト行 */}
-        <div className="flex items-center justify-center gap-0.5 truncate max-w-full">
+        {/* メインシフト行（スマホでも大きく太字でくっきり表示） */}
+        <div className="flex items-center justify-center truncate max-w-full py-[1px]">
           {stamp ? (
-            <span className="truncate">
+            <span className="truncate tracking-tighter sm:tracking-normal">
               {shift?.customLabel || stamp.shortLabel}
             </span>
           ) : (
-            <span className="text-[8px] font-normal opacity-60">{partnerAvatar}</span>
+            <span className="text-[8.5px] font-normal opacity-55">{partnerAvatar}</span>
           )}
         </div>
 
         {/* 仕事終わりや休日のバイト（サブシフト）がある場合の2段目表示 */}
         {hasSubWork && (
-          <div className="w-full mt-0.5 px-0.5 rounded bg-amber-100/90 text-amber-900 text-[7.5px] sm:text-[9px] font-black text-center truncate leading-tight">
-            +{subLabel}
+          <div className="w-full mt-[1px] px-0.5 rounded-xs bg-amber-100 text-amber-950 text-[8.5px] sm:text-[9px] font-black text-center truncate leading-tight">
+            +{subLabel.slice(0, 2)}
           </div>
         )}
 
         {/* 残業時間・休日出勤時間のバッジ表示 */}
         {(overtime > 0 || holWork > 0) && (
-          <div className="w-full mt-0.5 px-0.5 rounded bg-rose-500/90 text-white text-[7.5px] sm:text-[8.5px] font-black text-center truncate leading-tight">
-            {holWork > 0 ? `休出${holWork}h` : `+${overtime}h`}
+          <div className="w-full mt-[1px] px-0.5 rounded-xs bg-rose-500 text-white text-[8.5px] sm:text-[8.5px] font-black text-center truncate leading-tight">
+            {holWork > 0 ? `休${holWork}h` : `+${overtime}h`}
           </div>
         )}
 
@@ -238,7 +241,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         {showShiftTimeInCell &&
           stamp &&
           (shift?.startTime || stamp.startTime) && (
-            <span className="text-[7px] sm:text-[8px] font-bold opacity-85 tracking-tighter truncate max-w-full">
+            <span className="text-[7.5px] sm:text-[8px] font-bold opacity-90 tracking-tighter truncate max-w-full">
               {shift?.startTime || stamp.startTime}
             </span>
           )}
@@ -264,6 +267,16 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     );
   };
 
+  // 現在選択されている日付のデータ（スマホ7列カレンダー下部の大文字プレビューバー用）
+  const selectedCell = cells.find((c) => c.dateStr === selectedDate);
+  const selShiftA = store.shifts[`${selectedDate}_partnerA`];
+  const selShiftB = store.shifts[`${selectedDate}_partnerB`];
+  const activeSelShiftA = selShiftA && !selShiftA.deletedAt ? selShiftA : undefined;
+  const activeSelShiftB = selShiftB && !selShiftB.deletedAt ? selShiftB : undefined;
+  const selStampA = activeSelShiftA ? stampMap.get(activeSelShiftA.stampId) : undefined;
+  const selStampB = activeSelShiftB ? stampMap.get(activeSelShiftB.stampId) : undefined;
+  const selEvents = eventsByDate.get(selectedDate) || [];
+
   return (
     <div
       onTouchStart={(e) => {
@@ -284,176 +297,509 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         touchStartX.current = null;
         touchStartY.current = null;
       }}
-      className="max-w-5xl mx-auto px-1 sm:px-4 pt-1.5 pb-28"
+      className="max-w-5xl mx-auto px-0.5 sm:px-4 pt-1 pb-28"
     >
-      {/* 曜日ヘッダー */}
-      <div className="grid grid-cols-7 gap-0.5 sm:gap-1.5 mb-1">
-        {weekDays.map((w) => (
-          <div
-            key={w.label}
-            className={`text-center py-1 rounded-xl text-[11px] font-extrabold border border-stone-200/50 ${w.color}`}
+      {/* スマホ専用：7列カレンダー ⇔ 縦1列くっきりリスト 1タップ切替バー ＆ 凡例 */}
+      <div className="flex items-center justify-between gap-1 px-1.5 mb-1.5 sm:hidden">
+        <div className="flex items-center gap-1.5 text-[10px] font-extrabold text-stone-500">
+          <span className="px-1.5 py-0.5 rounded bg-[#E2F9FC] text-[#126875]">
+            左:{partnerA.avatar}{partnerA.name}
+          </span>
+          <span className="px-1.5 py-0.5 rounded bg-[#F3EAFF] text-[#6638A6]">
+            右:{partnerB.avatar}{partnerB.name}
+          </span>
+        </div>
+
+        <div className="flex items-center bg-stone-200/70 p-0.5 rounded-xl text-[11px] font-extrabold">
+          <button
+            type="button"
+            onClick={() => setMobileLayout('grid')}
+            className={`px-2.5 py-1 rounded-lg transition-all ${
+              mobileLayout === 'grid'
+                ? 'bg-white text-[#9E2A47] shadow-2xs'
+                : 'text-stone-600'
+            }`}
           >
-            {w.label}
-          </div>
-        ))}
+            📅 7列マス目
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileLayout('list')}
+            className={`px-2.5 py-1 rounded-lg transition-all ${
+              mobileLayout === 'list'
+                ? 'bg-white text-[#9E2A47] shadow-2xs'
+                : 'text-stone-600'
+            }`}
+          >
+            📋 縦1列(大文字)
+          </button>
+        </div>
       </div>
 
-      {/* 月間カレンダーグリッド */}
-      <div className="grid grid-cols-7 gap-0.5 sm:gap-1.5">
-        {cells.map((cell) => {
-          const shiftA = store.shifts[`${cell.dateStr}_partnerA`];
-          const shiftB = store.shifts[`${cell.dateStr}_partnerB`];
-          const activeShiftA = shiftA && !shiftA.deletedAt ? shiftA : undefined;
-          const activeShiftB = shiftB && !shiftB.deletedAt ? shiftB : undefined;
+      {/* 📋 スマホ縦1列リストモード（スマホの縦長画面で1日1行・大文字で全部読めるモード） */}
+      {mobileLayout === 'list' && (
+        <div className="space-y-1.5 px-1 sm:hidden">
+          {cells
+            .filter((c) => c.isCurrentMonth)
+            .map((cell) => {
+              const sA = store.shifts[`${cell.dateStr}_partnerA`];
+              const sB = store.shifts[`${cell.dateStr}_partnerB`];
+              const actA = sA && !sA.deletedAt ? sA : undefined;
+              const actB = sB && !sB.deletedAt ? sB : undefined;
+              const stA = actA ? stampMap.get(actA.stampId) : undefined;
+              const stB = actB ? stampMap.get(actB.stampId) : undefined;
+              const isBothHol = isHolidayShift(actA) && isHolidayShift(actB);
+              const dayEvents = eventsByDate.get(cell.dateStr) || [];
+              const visibleEvs = isExpandedView ? dayEvents : dayEvents.slice(0, 3);
+              const hiddenCnt = isExpandedView ? 0 : Math.max(0, dayEvents.length - 3);
+              const supports = [
+                ...(store.daySupports?.[cell.dateStr]?.badges || []),
+                ...dayEvents.flatMap((e) => e.supportBadges || []),
+              ];
+              const uniqSupports = Array.from(new Set(supports));
+              const isSelected = selectedDate === cell.dateStr;
+              const wLabel = ['日', '月', '火', '水', '木', '金', '土'][cell.dayOfWeek];
 
-          const isBothHoliday = isHolidayShift(activeShiftA) && isHolidayShift(activeShiftB);
-          const dayEvents = eventsByDate.get(cell.dateStr) || [];
+              return (
+                <div
+                  key={cell.dateStr}
+                  onClick={() => onCellClick(cell.dateStr)}
+                  className={`rounded-2xl p-2.5 border transition-all cursor-pointer ${
+                    isBothHol
+                      ? 'bg-gradient-to-r from-[#FFF0F5] via-white to-[#FFF9FB] border-[#FFB3C6]'
+                      : 'bg-white border-stone-200/90'
+                  } ${
+                    isSelected
+                      ? 'ring-2 ring-[#FF8FAB] border-[#FF8FAB] shadow-sm'
+                      : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    {/* 左：日付・曜日 */}
+                    <div className="flex items-center gap-1.5 min-w-[78px]">
+                      <span
+                        className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-black ${
+                          cell.isToday
+                            ? 'bg-[#FF8FAB] text-white'
+                            : cell.dayOfWeek === 0 || cell.holidayName
+                            ? 'bg-rose-50 text-rose-500'
+                            : cell.dayOfWeek === 6
+                            ? 'bg-sky-50 text-sky-600'
+                            : 'bg-stone-100 text-stone-800'
+                        }`}
+                      >
+                        {cell.dayNumber}
+                      </span>
+                      <div>
+                        <div
+                          className={`text-xs font-extrabold leading-tight ${
+                            cell.dayOfWeek === 0 || cell.holidayName
+                              ? 'text-rose-500'
+                              : cell.dayOfWeek === 6
+                              ? 'text-sky-600'
+                              : 'text-stone-700'
+                          }`}
+                        >
+                          {wLabel}曜
+                        </div>
+                        {cell.holidayName && (
+                          <div className="text-[9px] font-bold text-rose-500 leading-none">
+                            {cell.holidayName}
+                          </div>
+                        )}
+                      </div>
+                      {isBothHol && <span className="text-xs">💕</span>}
+                    </div>
 
-          // コンパクトモード時は最大3件までに制限し、4件以上ある場合は「＋他〇件」を表示！
-          const visibleEvents = isExpandedView ? dayEvents : dayEvents.slice(0, 3);
-          const hiddenEventsCount = isExpandedView
-            ? 0
-            : Math.max(0, dayEvents.length - 3);
+                    {/* 右：2人のシフト並列（大文字表示） */}
+                    <div className="grid grid-cols-2 gap-1.5 flex-1">
+                      <div
+                        style={
+                          stA ? { backgroundColor: stA.color, color: stA.textColor } : undefined
+                        }
+                        className={`px-2 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center justify-center gap-1 ${
+                          stA ? '' : 'bg-stone-50 text-stone-300 border border-dashed border-stone-200'
+                        }`}
+                      >
+                        <span>{partnerA.avatar}</span>
+                        <span>{stA ? `${stA.icon || ''}${actA?.customLabel || stA.label}` : '-'}</span>
+                        {(actA?.subCustomLabel || actA?.subStampId) && (
+                          <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
+                            +🏪{actA.subCustomLabel || 'バイト'}
+                          </span>
+                        )}
+                        {((actA?.overtimeHours || 0) > 0 || (actA?.holidayWorkHours || 0) > 0) && (
+                          <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
+                            {(actA?.holidayWorkHours || 0) > 0
+                              ? `休出${actA?.holidayWorkHours}h`
+                              : `+${actA?.overtimeHours}h`}
+                          </span>
+                        )}
+                      </div>
 
-          const daySupport = store.daySupports?.[cell.dateStr];
-          const supportBadges = [
-            ...(daySupport?.badges || []),
-            ...dayEvents.flatMap((e) => e.supportBadges || []),
-          ];
-          const uniqueSupports = Array.from(new Set(supportBadges));
+                      <div
+                        style={
+                          stB ? { backgroundColor: stB.color, color: stB.textColor } : undefined
+                        }
+                        className={`px-2 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center justify-center gap-1 ${
+                          stB ? '' : 'bg-stone-50 text-stone-300 border border-dashed border-stone-200'
+                        }`}
+                      >
+                        <span>{partnerB.avatar}</span>
+                        <span>{stB ? `${stB.icon || ''}${actB?.customLabel || stB.label}` : '-'}</span>
+                        {(actB?.subCustomLabel || actB?.subStampId) && (
+                          <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
+                            +🏪{actB.subCustomLabel || 'バイト'}
+                          </span>
+                        )}
+                        {((actB?.overtimeHours || 0) > 0 || (actB?.holidayWorkHours || 0) > 0) && (
+                          <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
+                            {(actB?.holidayWorkHours || 0) > 0
+                              ? `休出${actB?.holidayWorkHours}h`
+                              : `+${actB?.overtimeHours}h`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-          const isSelected = selectedDate === cell.dateStr;
+                  {/* 予定＆サポートバッジ */}
+                  {(visibleEvs.length > 0 || uniqSupports.length > 0) && (
+                    <div className="mt-1.5 pt-1.5 border-t border-stone-100 space-y-1">
+                      {uniqSupports.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {uniqSupports.map((b) => (
+                            <span
+                              key={b}
+                              className="px-1.5 py-0.5 rounded bg-[#FFF6D6] text-[#8A5A00] text-[10px] font-extrabold"
+                            >
+                              {b}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {visibleEvs.map((ev) => {
+                        const cat = resolveCategoryInfo(
+                          ev.categoryId,
+                          store.categories,
+                          store.metadata
+                        );
+                        return (
+                          <div
+                            key={ev.id}
+                            style={{
+                              backgroundColor: cat.bgColor,
+                              color: cat.textColor,
+                              borderLeftColor: ev.color || cat.accentColor,
+                            }}
+                            className="px-2.5 py-1 rounded-lg border-l-4 text-xs font-extrabold flex items-center gap-1.5"
+                          >
+                            <span className="text-[10px] opacity-85 shrink-0">
+                              {cat.icon}{cat.shortLabel}
+                            </span>
+                            {!ev.isAllDay && ev.startTime && (
+                              <span className="text-[11px] font-black shrink-0">
+                                {ev.startTime}
+                              </span>
+                            )}
+                            <span className="break-words">{ev.title}</span>
+                          </div>
+                        );
+                      })}
+                      {hiddenCnt > 0 && (
+                        <div className="text-[11px] font-extrabold text-[#9E2A47]">
+                          ＋他{hiddenCnt}件の予定
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      )}
 
-          let dateTextColor = 'text-stone-700';
-          if (cell.dayOfWeek === 0 || cell.holidayName) {
-            dateTextColor = 'text-rose-500';
-          } else if (cell.dayOfWeek === 6) {
-            dateTextColor = 'text-sky-600';
-          }
-
-          return (
+      {/* 📅 7列月間カレンダーグリッド（PCでは常時表示、スマホでは 'grid' 選択時に表示） */}
+      <div className={mobileLayout === 'list' ? 'hidden sm:block' : 'block'}>
+        {/* 曜日ヘッダー */}
+        <div className="grid grid-cols-7 gap-[1.5px] sm:gap-1.5 mb-1">
+          {weekDays.map((w) => (
             <div
-              key={cell.dateStr}
-              onClick={() => onCellClick(cell.dateStr)}
-              className={`group relative flex flex-col rounded-xl sm:rounded-2xl border transition-all cursor-pointer select-none ${
-                isExpandedView ? 'min-h-[118px] sm:min-h-[146px]' : 'min-h-[112px] sm:min-h-[136px]'
-              } ${
-                !cell.isCurrentMonth ? 'opacity-40 bg-stone-50/70' : 'bg-white'
-              } ${
-                isBothHoliday && cell.isCurrentMonth
-                  ? 'bg-gradient-to-b from-[#FFF0F5] via-white to-[#FFF9FB] border-[#FFB3C6] shadow-xs'
-                  : 'border-stone-200/80 active:scale-[0.98]'
-              } ${
-                isSelected
-                  ? stampModeActive
-                    ? 'ring-2 sm:ring-3 ring-[#FF8FAB] border-[#FF8FAB] shadow-md scale-[1.01] z-10'
-                    : 'ring-2 ring-[#B388EB] border-[#B388EB] z-10'
-                  : ''
-              } p-0.5 sm:p-1.5`}
+              key={w.label}
+              className={`text-center py-1 rounded-lg sm:rounded-xl text-[11px] font-extrabold border border-stone-200/50 ${w.color}`}
             >
-              {/* 1. 日付ヘッダー行 */}
-              <div className="flex items-center justify-between gap-0.5 mb-0.5 px-0.5">
-                <div className="flex items-center gap-0.5 min-w-0">
-                  <span
-                    className={`inline-flex items-center justify-center text-[11px] sm:text-sm font-extrabold leading-none ${
-                      cell.isToday
-                        ? 'w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#FF8FAB] text-white shadow-2xs'
-                        : dateTextColor
-                    }`}
-                  >
-                    {cell.dayNumber}
-                  </span>
-                  {cell.holidayName && (
+              {w.label}
+            </div>
+          ))}
+        </div>
+
+        {/* 月間カレンダーグリッド */}
+        <div className="grid grid-cols-7 gap-[1.5px] sm:gap-1.5">
+          {cells.map((cell) => {
+            const shiftA = store.shifts[`${cell.dateStr}_partnerA`];
+            const shiftB = store.shifts[`${cell.dateStr}_partnerB`];
+            const activeShiftA = shiftA && !shiftA.deletedAt ? shiftA : undefined;
+            const activeShiftB = shiftB && !shiftB.deletedAt ? shiftB : undefined;
+
+            const isBothHoliday = isHolidayShift(activeShiftA) && isHolidayShift(activeShiftB);
+            const dayEvents = eventsByDate.get(cell.dateStr) || [];
+
+            // コンパクトモード時は最大3件までに制限し、4件以上ある場合は「＋他〇件」を表示！
+            const visibleEvents = isExpandedView ? dayEvents : dayEvents.slice(0, 3);
+            const hiddenEventsCount = isExpandedView
+              ? 0
+              : Math.max(0, dayEvents.length - 3);
+
+            const daySupport = store.daySupports?.[cell.dateStr];
+            const supportBadges = [
+              ...(daySupport?.badges || []),
+              ...dayEvents.flatMap((e) => e.supportBadges || []),
+            ];
+            const uniqueSupports = Array.from(new Set(supportBadges));
+
+            const isSelected = selectedDate === cell.dateStr;
+
+            let dateTextColor = 'text-stone-700';
+            if (cell.dayOfWeek === 0 || cell.holidayName) {
+              dateTextColor = 'text-rose-500';
+            } else if (cell.dayOfWeek === 6) {
+              dateTextColor = 'text-sky-600';
+            }
+
+            return (
+              <div
+                key={cell.dateStr}
+                onClick={() => onCellClick(cell.dateStr)}
+                className={`group relative flex flex-col rounded-lg sm:rounded-2xl border transition-all cursor-pointer select-none overflow-hidden ${
+                  isExpandedView ? 'min-h-[118px] sm:min-h-[146px]' : 'min-h-[112px] sm:min-h-[136px]'
+                } ${
+                  !cell.isCurrentMonth ? 'opacity-40 bg-stone-50/70' : 'bg-white'
+                } ${
+                  isBothHoliday && cell.isCurrentMonth
+                    ? 'bg-gradient-to-b from-[#FFF0F5] via-white to-[#FFF9FB] border-[#FFB3C6] shadow-xs'
+                    : 'border-stone-200/80 active:scale-[0.98]'
+                } ${
+                  isSelected
+                    ? stampModeActive
+                      ? 'ring-2 sm:ring-3 ring-[#FF8FAB] border-[#FF8FAB] shadow-md z-10'
+                      : 'ring-2 ring-[#B388EB] border-[#B388EB] z-10'
+                    : ''
+                } p-[2px] sm:p-1.5`}
+              >
+                {/* 1. 日付ヘッダー行 */}
+                <div className="flex items-center justify-between gap-0.5 mb-0.5 px-0.5">
+                  <div className="flex items-center gap-0.5 min-w-0">
                     <span
-                      className="text-[8px] sm:text-[10px] font-bold text-rose-500 truncate max-w-[34px] sm:max-w-[70px]"
-                      title={cell.holidayName}
+                      className={`inline-flex items-center justify-center text-[11px] sm:text-sm font-black leading-none ${
+                        cell.isToday
+                          ? 'w-4.5 h-4.5 sm:w-6 sm:h-6 rounded-full bg-[#FF8FAB] text-white shadow-2xs'
+                          : dateTextColor
+                      }`}
                     >
-                      {cell.holidayName}
+                      {cell.dayNumber}
+                    </span>
+                    {cell.holidayName && (
+                      <span
+                        className="text-[8px] sm:text-[10px] font-bold text-rose-500 truncate max-w-[28px] sm:max-w-[70px]"
+                        title={cell.holidayName}
+                      >
+                        {cell.holidayName}
+                      </span>
+                    )}
+                  </div>
+
+                  {isBothHoliday && (
+                    <span
+                      className="inline-flex items-center text-[9px] sm:text-[10px] leading-none"
+                      title="✨2人ともお休みの日！"
+                    >
+                      💕
                     </span>
                   )}
                 </div>
 
-                {isBothHoliday && (
-                  <span
-                    className="inline-flex items-center px-1 rounded-full bg-[#FFE5EC] text-[#D63864] text-[8px] sm:text-[10px] font-black"
-                    title="✨2人ともお休みの日！"
-                  >
-                    💕
+                {/* 2. シフト2人並列バー（夫・妻横並び＋バイト＋残業表示） */}
+                <div className="grid grid-cols-2 gap-[1.5px] sm:gap-0.5 mb-0.5 shrink-0">
+                  {renderPartnerShiftBox(activeShiftA, partnerA.avatar, 'bg-[#FF8FAB]')}
+                  {renderPartnerShiftBox(activeShiftB, partnerB.avatar, 'bg-[#B388EB]')}
+                </div>
+
+                {/* 3. すれ違いサポートアイコン */}
+                {uniqueSupports.length > 0 && (
+                  <div className="flex flex-wrap gap-0.5 mb-0.5 shrink-0">
+                    {uniqueSupports.slice(0, isExpandedView ? undefined : 1).map((badge) => (
+                      <span
+                        key={badge}
+                        className="px-0.5 py-0.1 rounded-xs bg-[#FFF6D6] border border-[#FFE28A] text-[#8A5A00] text-[8.5px] sm:text-[9px] font-extrabold leading-tight truncate max-w-full"
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* 4. 予定リストエリア（スマホでも文字が潰れないよう横幅100%＆2行折り返し対応、コンパクト時は最大3件） */}
+                <div className="flex-1 flex flex-col gap-[2px]">
+                  {visibleEvents.map((ev) => {
+                    const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
+                    const unreadForOther = isUnreadByPartner(ev.updatedAt, ev.createdBy);
+                    const unreadForMe = isNewFromPartner(ev.updatedAt, ev.createdBy);
+
+                    return (
+                      <div
+                        key={ev.id}
+                        style={{
+                          backgroundColor: cat.bgColor,
+                          color: cat.textColor,
+                          borderLeftColor: ev.color || cat.accentColor,
+                        }}
+                        className={`relative rounded-xs sm:rounded px-[2.5px] sm:pl-1 sm:pr-0.5 py-[1.5px] sm:py-0.5 border-l-2 sm:border-l-3 text-[10px] sm:text-[11px] font-extrabold leading-[1.15] tracking-tighter sm:tracking-normal ${
+                          isExpandedView
+                            ? 'whitespace-pre-wrap break-all sm:break-words'
+                            : 'line-clamp-2 sm:truncate break-all'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-0.5">
+                          <div className="min-w-0 flex-1">
+                            {/* PCでは開始時刻もセル内に表示、スマホ7列ではタイトル文字数を最大化するため時刻は選択日バー＆詳細に表示 */}
+                            {!ev.isAllDay && ev.startTime && (
+                              <span className="hidden sm:inline text-[8px] font-extrabold opacity-80 mr-0.5">
+                                {ev.startTime}
+                              </span>
+                            )}
+                            <span>{ev.title}</span>
+                          </div>
+
+                          {(unreadForOther || unreadForMe) && (
+                            <span
+                              className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ring-1 ring-white ${
+                                unreadForMe ? 'bg-rose-500 animate-ping' : 'bg-[#FF8FAB]'
+                              }`}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* コンパクトモードで4件以上予定がある場合の「＋他〇件」表示 */}
+                  {hiddenEventsCount > 0 && (
+                    <div className="text-[9px] sm:text-[10px] font-extrabold text-[#9E2A47] bg-[#FFF0F5] rounded-xs px-0.5 py-0.2 text-center leading-tight">
+                      ＋他{hiddenEventsCount}件
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* スマホ専用：7列カレンダーのすぐ下に「選択中の日の大文字詳細カード」を常時表示 */}
+        {selectedCell && (
+          <div
+            onClick={() => onCellClick(selectedDate)}
+            className="mt-2 mx-1 p-3 rounded-2xl bg-white border-2 border-[#FF8FAB] shadow-sm sm:hidden cursor-pointer"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="font-extrabold text-sm text-stone-800 flex items-center gap-1.5">
+                <span className="px-2 py-0.5 rounded-lg bg-[#FFE5EC] text-[#9E2A47] text-xs">
+                  選択中
+                </span>
+                <span>
+                  {month}月{selectedCell.dayNumber}日(
+                  {['日', '月', '火', '水', '木', '金', '土'][selectedCell.dayOfWeek]})
+                </span>
+                {selectedCell.holidayName && (
+                  <span className="text-xs text-rose-500">{selectedCell.holidayName}</span>
+                )}
+              </div>
+              <span className="px-2.5 py-1 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold">
+                ✏️ タップで詳細・追加
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+              <div
+                style={
+                  selStampA
+                    ? { backgroundColor: selStampA.color, color: selStampA.textColor }
+                    : undefined
+                }
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
+                  selStampA ? '' : 'bg-stone-100 text-stone-400'
+                }`}
+              >
+                <span>{partnerA.avatar}{partnerA.name}:</span>
+                <span>
+                  {selStampA
+                    ? `${selStampA.icon || ''}${activeSelShiftA?.customLabel || selStampA.label}`
+                    : '未登録'}
+                </span>
+                {activeSelShiftA?.subCustomLabel && (
+                  <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
+                    +🏪{activeSelShiftA.subCustomLabel}
+                  </span>
+                )}
+                {(activeSelShiftA?.overtimeHours || 0) > 0 && (
+                  <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
+                    残業+{activeSelShiftA?.overtimeHours}h
                   </span>
                 )}
               </div>
 
-              {/* 2. シフト2人並列バー（夫・妻横並び＋バイト＋残業表示） */}
-              <div className="grid grid-cols-2 gap-0.5 mb-0.5 shrink-0">
-                {renderPartnerShiftBox(activeShiftA, partnerA.avatar, 'bg-[#FF8FAB]')}
-                {renderPartnerShiftBox(activeShiftB, partnerB.avatar, 'bg-[#B388EB]')}
-              </div>
-
-              {/* 3. すれ違いサポートアイコン */}
-              {uniqueSupports.length > 0 && (
-                <div className="flex flex-wrap gap-0.5 mb-0.5 shrink-0">
-                  {uniqueSupports.slice(0, isExpandedView ? undefined : 2).map((badge) => (
-                    <span
-                      key={badge}
-                      className="px-1 py-0.1 rounded bg-[#FFF6D6] border border-[#FFE28A] text-[#8A5A00] text-[8px] sm:text-[9px] font-extrabold leading-tight truncate max-w-full"
-                    >
-                      {badge}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* 4. 予定リストエリア（コンパクト時は3件まで＋他〇件、全件表示時は無制限） */}
-              <div className="flex-1 flex flex-col gap-0.5">
-                {visibleEvents.map((ev) => {
-                  const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
-                  const unreadForOther = isUnreadByPartner(ev.updatedAt, ev.createdBy);
-                  const unreadForMe = isNewFromPartner(ev.updatedAt, ev.createdBy);
-
-                  return (
-                    <div
-                      key={ev.id}
-                      style={{
-                        backgroundColor: cat.bgColor,
-                        color: cat.textColor,
-                        borderLeftColor: ev.color || cat.accentColor,
-                      }}
-                      className={`relative rounded pl-1 pr-0.5 py-0.5 border-l-2 sm:border-l-3 text-[9px] sm:text-[11px] font-bold leading-tight ${
-                        isExpandedView ? 'whitespace-pre-wrap break-words' : 'truncate'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-0.5">
-                        <div className={isExpandedView ? 'break-words' : 'truncate'}>
-                          {!ev.isAllDay && ev.startTime && (
-                            <span className="text-[8px] font-extrabold opacity-80 mr-0.5">
-                              {ev.startTime}
-                            </span>
-                          )}
-                          <span>{ev.title}</span>
-                        </div>
-
-                        {(unreadForOther || unreadForMe) && (
-                          <span
-                            className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ring-1 ring-white ${
-                              unreadForMe ? 'bg-rose-500 animate-ping' : 'bg-[#FF8FAB]'
-                            }`}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* コンパクトモードで4件以上予定がある場合の「＋他〇件」表示 */}
-                {hiddenEventsCount > 0 && (
-                  <div className="text-[8.5px] sm:text-[10px] font-extrabold text-[#9E2A47] bg-[#FFF0F5] rounded px-1 py-0.2 text-center">
-                    ＋他{hiddenEventsCount}件
-                  </div>
+              <div
+                style={
+                  selStampB
+                    ? { backgroundColor: selStampB.color, color: selStampB.textColor }
+                    : undefined
+                }
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
+                  selStampB ? '' : 'bg-stone-100 text-stone-400'
+                }`}
+              >
+                <span>{partnerB.avatar}{partnerB.name}:</span>
+                <span>
+                  {selStampB
+                    ? `${selStampB.icon || ''}${activeSelShiftB?.customLabel || selStampB.label}`
+                    : '未登録'}
+                </span>
+                {activeSelShiftB?.subCustomLabel && (
+                  <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
+                    +🏪{activeSelShiftB.subCustomLabel}
+                  </span>
+                )}
+                {(activeSelShiftB?.overtimeHours || 0) > 0 && (
+                  <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
+                    残業+{activeSelShiftB?.overtimeHours}h
+                  </span>
                 )}
               </div>
             </div>
-          );
-        })}
+
+            {selEvents.length > 0 ? (
+              <div className="space-y-1">
+                {selEvents.map((ev) => {
+                  const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
+                  return (
+                    <div
+                      key={ev.id}
+                      style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
+                      className="px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5"
+                    >
+                      <span>{cat.icon}{cat.shortLabel}</span>
+                      {!ev.isAllDay && ev.startTime && <span>{ev.startTime}</span>}
+                      <span className="break-words">{ev.title}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-stone-400 font-bold">
+                この日の予定はまだありません（タップして予定やシフトを入力）
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
