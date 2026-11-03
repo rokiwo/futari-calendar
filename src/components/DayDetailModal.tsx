@@ -8,8 +8,9 @@ import {
   Trash2,
   Edit3,
   CheckCircle2,
-  Sparkles,
   Heart,
+  Mic,
+  Settings2,
 } from 'lucide-react';
 import {
   CalendarCategoryId,
@@ -31,21 +32,18 @@ interface DayDetailModalProps {
   activePartner: PartnerId;
   onClose: () => void;
   onMoveDate: (deltaDays: number) => void;
-  onSetShift: (
+  onSetShiftAndAdvance: (
     dateStr: string,
     partnerId: PartnerId,
-    stamp: StampPreset | null,
-    customStartTime?: string,
-    customEndTime?: string,
-    memo?: string
+    stamp: StampPreset | null
   ) => void;
   onToggleDaySupportBadge: (dateStr: string, badge: string) => void;
-  onQuickAddEventFromStamp: (dateStr: string, stamp: StampPreset) => void;
   onSaveEvent: (event: ScheduleEvent) => void;
   onDeleteEvent: (eventId: string) => void;
+  onOpenVoiceModal: () => void;
+  onOpenShiftStampManager: () => void;
 }
 
-// 日時を「11/03 18:20」形式にフォーマット
 function formatShortDateTime(isoStr?: string): string {
   if (!isoStr) return '';
   const dt = new Date(isoStr);
@@ -63,13 +61,13 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   activePartner,
   onClose,
   onMoveDate,
-  onSetShift,
+  onSetShiftAndAdvance,
   onToggleDaySupportBadge,
-  onQuickAddEventFromStamp,
   onSaveEvent,
   onDeleteEvent,
+  onOpenVoiceModal,
+  onOpenShiftStampManager,
 }) => {
-  const [editingShiftPartner, setEditingShiftPartner] = useState<PartnerId | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
@@ -95,8 +93,9 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     stampMap.set(s.id, s);
   }
 
-  const shiftStamps = store.stamps.filter((s) => s.type === 'shift');
-  const eventStamps = store.stamps.filter((s) => s.type === 'event');
+  const shiftStamps = store.stamps
+    .filter((s) => s.type === 'shift')
+    .sort((a, b) => a.order - b.order);
 
   const rawShiftA = store.shifts[`${dateStr}_partnerA`];
   const rawShiftB = store.shifts[`${dateStr}_partnerB`];
@@ -157,7 +156,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     );
   };
 
-  // 新規作成フォームを開く
   const handleOpenNewForm = () => {
     setEditingEventId(null);
     setTitle('');
@@ -170,7 +168,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     setShowEventForm(true);
   };
 
-  // 既存予定の編集フォームを開く
   const handleStartEditEvent = (ev: ScheduleEvent) => {
     setEditingEventId(ev.id);
     setTitle(ev.title);
@@ -219,7 +216,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl max-h-[90vh] bg-[#FFFBF7] rounded-t-3xl sm:rounded-3xl shadow-2xl border-2 border-[#FFE5EC] flex flex-col overflow-hidden animate-pop"
+        className="w-full max-w-xl max-h-[92vh] bg-[#FFFBF7] rounded-t-3xl sm:rounded-3xl shadow-2xl border-2 border-[#FFE5EC] flex flex-col overflow-hidden animate-pop"
       >
         {/* 1. モーダルヘッダー：日付切替＆ふたり休日バッジ */}
         <div className="bg-white px-4 py-3 border-b border-[#FFE5EC] flex items-center justify-between">
@@ -234,7 +231,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
             </button>
 
             <div className="px-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg sm:text-xl font-extrabold text-stone-800">
                   {m}月{d}日({weekDay})
                 </h2>
@@ -271,103 +268,102 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
           </button>
         </div>
 
-        {/* 2. モーダル本文（スクロール領域） */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* セクションA：ふたりのシフト並列カード（タップで即変更＆既読ログ表示） */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {(['partnerA', 'partnerB'] as PartnerId[]).map((pid) => {
-              const pInfo = store.metadata.partners[pid];
-              const shift = pid === 'partnerA' ? shiftA : shiftB;
-              const stamp = pid === 'partnerA' ? stampA : stampB;
-              const isEditingThis = editingShiftPartner === pid;
+        {/* 2. モーダル本文 */}
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4">
+          {/* セクションA：ふたりのシフト（タップで登録＆自動的に翌日へ移動！） */}
+          <div className="bg-white rounded-2xl p-3.5 border border-stone-200/90 shadow-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold text-stone-700">
+                🐾 シフトをタップで登録（1つ入れると自動で次の日へ進みます⏩）
+              </span>
+              <button
+                type="button"
+                onClick={onOpenShiftStampManager}
+                className="px-2.5 py-1 rounded-xl bg-[#FFE5EC] text-[#9E2A47] text-[11px] font-extrabold flex items-center gap-1"
+              >
+                <Settings2 className="w-3 h-3" />
+                <span>シフト種類の追加・編集</span>
+              </button>
+            </div>
 
-              return (
-                <div
-                  key={pid}
-                  className="bg-white rounded-2xl p-3 border border-stone-200/90 shadow-xs"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-extrabold text-stone-700 flex items-center gap-1">
-                      <span className="text-base">{pInfo.avatar}</span>
-                      <span>{pInfo.name}のシフト</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEditingShiftPartner(isEditingThis ? null : pid)
-                      }
-                      className="px-2.5 py-1 rounded-xl bg-[#FFFBF7] hover:bg-[#FFE5EC] border border-stone-200 text-[11px] font-extrabold text-stone-700 transition-colors"
-                    >
-                      {isEditingThis ? '閉じる' : 'スタンプ変更'}
-                    </button>
-                  </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {(['partnerA', 'partnerB'] as PartnerId[]).map((pid) => {
+                const pInfo = store.metadata.partners[pid];
+                const shift = pid === 'partnerA' ? shiftA : shiftB;
+                const stamp = pid === 'partnerA' ? stampA : stampB;
 
-                  {shift && stamp ? (
-                    <div>
-                      <div
-                        style={{ backgroundColor: stamp.color, color: stamp.textColor }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl font-extrabold text-sm"
-                      >
-                        <span>{stamp.icon}</span>
-                        <span>{shift.customLabel || stamp.label}</span>
-                        {(shift.startTime || stamp.startTime) && (
-                          <span className="text-xs opacity-85 flex items-center gap-0.5 ml-1">
-                            <Clock className="w-3 h-3" />
-                            {shift.startTime || stamp.startTime}〜
-                            {shift.endTime || stamp.endTime}
-                          </span>
-                        )}
-                      </div>
-                      {renderAuditAndReadStatus(shift.createdBy, shift.createdAt, shift.updatedAt)}
+                return (
+                  <div
+                    key={pid}
+                    className="bg-[#FFFBF7] rounded-2xl p-2.5 border border-stone-200/80 space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-stone-700 flex items-center gap-1">
+                        <span className="text-base">{pInfo.avatar}</span>
+                        <span>{pInfo.name}</span>
+                      </span>
+
+                      {shift && stamp ? (
+                        <span
+                          style={{ backgroundColor: stamp.color, color: stamp.textColor }}
+                          className="px-2.5 py-0.5 rounded-xl font-extrabold text-xs flex items-center gap-1"
+                        >
+                          <span>{stamp.icon}</span>
+                          <span>{shift.customLabel || stamp.label}</span>
+                          {(shift.startTime || stamp.startTime) && (
+                            <span className="text-[10px] opacity-80">
+                              {shift.startTime || stamp.startTime}〜
+                              {shift.endTime || stamp.endTime}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-stone-400">未設定</span>
+                      )}
                     </div>
-                  ) : (
-                    <p className="text-xs text-stone-400 py-1">シフト未登録（タップして登録）</p>
-                  )}
 
-                  {/* その場でシフトスタンプ変更パレット */}
-                  {isEditingThis && (
-                    <div className="mt-2.5 pt-2.5 border-t border-stone-100 space-y-2">
-                      <div className="grid grid-cols-3 gap-1">
-                        {shiftStamps.map((s) => (
+                    {/* 常時表示のワンタップシフトボタン群（押すと入って次の日へ！） */}
+                    <div className="grid grid-cols-4 gap-1">
+                      {shiftStamps.map((s) => {
+                        const isCurrent = shift?.stampId === s.id;
+                        return (
                           <button
                             key={s.id}
                             type="button"
-                            onClick={() => {
-                              onSetShift(dateStr, pid, s, s.startTime, s.endTime);
-                              setEditingShiftPartner(null);
-                            }}
+                            onClick={() => onSetShiftAndAdvance(dateStr, pid, s)}
                             style={{ backgroundColor: s.color, color: s.textColor }}
-                            className="py-1.5 px-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1 shadow-2xs hover:brightness-95"
+                            className={`py-1.5 px-1 rounded-xl font-extrabold text-[11px] flex items-center justify-center gap-0.5 active:scale-90 transition-all border ${
+                              isCurrent ? 'border-stone-800 ring-1 ring-stone-800' : 'border-white'
+                            }`}
                           >
                             <span>{s.icon}</span>
-                            <span>{s.label}</span>
+                            <span className="truncate">{s.label}</span>
                           </button>
-                        ))}
+                        );
+                      })}
+                      {shift && (
                         <button
                           type="button"
-                          onClick={() => {
-                            onSetShift(dateStr, pid, null);
-                            setEditingShiftPartner(null);
-                          }}
-                          className="py-1.5 px-2 rounded-xl font-bold text-xs bg-stone-100 text-stone-600 hover:bg-rose-50 hover:text-rose-600"
+                          onClick={() => onSetShiftAndAdvance(dateStr, pid, null)}
+                          className="py-1.5 px-1 rounded-xl font-bold text-[10px] bg-stone-200/70 text-stone-600"
                         >
                           消去
                         </button>
-                      </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+
+                    {shift &&
+                      renderAuditAndReadStatus(shift.createdBy, shift.createdAt, shift.updatedAt)}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* セクションB：🍳すれ違いサポートアイコン（1タップでごはん・お迎え目印） */}
           <div className="bg-white rounded-2xl p-3 border border-stone-200/90 shadow-xs">
             <div className="text-xs font-extrabold text-stone-700 mb-2 flex items-center justify-between">
-              <span>🍳 すれ違いサポート目印（1タップで日付に表示）</span>
-              <span className="text-[10px] text-stone-400 font-normal">
-                夜勤・飲み会・お迎えの連絡に
-              </span>
+              <span>🍳 ごはん・お迎え目印（1タップで日付に表示）</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {SUPPORT_BADGE_PRESETS.map((b) => {
@@ -380,7 +376,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     className={`px-2.5 py-1 rounded-xl text-xs font-extrabold border transition-all ${
                       isOn
                         ? 'bg-[#FFF6D6] border-[#FFB703] text-[#8A5A00] shadow-2xs scale-[1.02]'
-                        : 'bg-[#FFFBF7] border-stone-200 text-stone-600 hover:bg-stone-100'
+                        : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
                     }`}
                   >
                     {b.label}
@@ -390,40 +386,34 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
             </div>
           </div>
 
-          {/* セクションC：⚡よく使う予定チップ（文字入力なしでワンタップ追加） */}
-          <div className="bg-white rounded-2xl p-3 border border-stone-200/90 shadow-xs">
-            <div className="text-xs font-extrabold text-stone-700 mb-2 flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-[#FF8FAB]" />
-              <span>ワンタップ予定追加（タップするだけで即追加！）</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {eventStamps.map((stamp) => (
-                <button
-                  key={stamp.id}
-                  type="button"
-                  onClick={() => onQuickAddEventFromStamp(dateStr, stamp)}
-                  className="px-2.5 py-1.5 rounded-xl bg-[#FFFBF7] hover:bg-[#FFE5EC] border border-[#FFE5EC] text-stone-700 hover:text-[#9E2A47] text-xs font-extrabold transition-all active:scale-95 flex items-center gap-1 shadow-2xs"
-                >
-                  <span>＋ {stamp.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* セクションD：この日の予定リスト（件数無制限・複数行表示・作成者＆既読日時明記） */}
+          {/* セクションC：この日の予定リスト ＆ 音声入力・自由入力ボタン */}
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-extrabold text-stone-800">
-                📅 この日の予定一覧 ({dayEvents.length}件)
+                📅 この日の予定 ({dayEvents.length}件)
               </h3>
-              <button
-                type="button"
-                onClick={handleOpenNewForm}
-                className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white text-xs font-extrabold shadow-xs flex items-center gap-1 transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>自由入力で予定を追加</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenVoiceModal();
+                  }}
+                  className="px-3 py-1.5 rounded-2xl bg-[#B388EB] hover:bg-[#8C5EC7] text-white text-xs font-extrabold shadow-xs flex items-center gap-1 transition-colors"
+                >
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>声で予定を入れる</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenNewForm}
+                  className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white text-xs font-extrabold shadow-xs flex items-center gap-1 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>文字で予定を追加</span>
+                </button>
+              </div>
             </div>
 
             {/* 新規・編集フォーム */}
@@ -450,7 +440,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     rows={2}
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="予定タイトル（複数行もそのまま表示されます✨）"
+                    placeholder="予定タイトルを入力（スマホキーボードの🎤マイクでも音声入力できます）"
                     autoFocus
                     className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-sm font-bold text-stone-800 focus:border-[#FF8FAB] focus:outline-none"
                   />
@@ -516,7 +506,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   )}
                 </div>
 
-                {/* メモ欄 */}
                 <div>
                   <input
                     type="text"
@@ -547,8 +536,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
             {/* 予定リスト表示 */}
             {dayEvents.length === 0 ? (
-              <div className="bg-white rounded-2xl p-6 text-center border border-dashed border-stone-200 text-xs text-stone-400">
-                この日の予定はまだありません🐾 上の「ワンタップ予定追加」または「予定を追加」から登録できます。
+              <div className="bg-white rounded-2xl p-5 text-center border border-dashed border-stone-200 text-xs text-stone-400">
+                予定はまだありません🐾 「🎙️声で予定を入れる」または「＋文字で予定を追加」から登録できます。
               </div>
             ) : (
               <div className="space-y-2">
@@ -612,7 +601,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           )}
                         </div>
 
-                        {/* 編集・削除ボタン */}
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
@@ -633,7 +621,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                         </div>
                       </div>
 
-                      {/* いつ誰が入れたか ＆ 相手がいつ確認したかログ */}
                       {renderAuditAndReadStatus(ev.createdBy, ev.createdAt, ev.updatedAt)}
                     </div>
                   );
