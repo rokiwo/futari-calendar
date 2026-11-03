@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { Plus } from 'lucide-react';
 import {
   CalendarDataStore,
   FilterCategoryId,
@@ -19,7 +20,9 @@ interface MonthlyCalendarGridProps {
   showShiftTimeInCell: boolean;
   selectedDate: string; // "YYYY-MM-DD"
   stampModeActive: boolean;
-  onCellClick: (dateStr: string) => void;
+  onCellSingleTap: (dateStr: string) => void;
+  onCellDoubleTap: (dateStr: string) => void;
+  onQuickAddForSelectedDate: () => void;
   onSwipePrevMonth?: () => void;
   onSwipeNextMonth?: () => void;
 }
@@ -107,13 +110,38 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   showShiftTimeInCell,
   selectedDate,
   stampModeActive,
-  onCellClick,
+  onCellSingleTap,
+  onCellDoubleTap,
+  onQuickAddForSelectedDate,
   onSwipePrevMonth,
   onSwipeNextMonth,
 }) => {
   const [poppedShiftId, setPoppedShiftId] = useState<string | null>(null);
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
+  const lastTapRef = useRef<{ dateStr: string; time: number } | null>(null);
+
+  // シングルタップ＝その日に移動、ダブルタップ＝その日のすべての予定一覧（DayDetailModal）を表示
+  const handleDateCellTap = (dateStr: string) => {
+    if (stampModeActive) {
+      onCellSingleTap(dateStr);
+      return;
+    }
+
+    const nowMs = Date.now();
+    if (
+      lastTapRef.current &&
+      lastTapRef.current.dateStr === dateStr &&
+      nowMs - lastTapRef.current.time < 400
+    ) {
+      lastTapRef.current = null;
+      onCellDoubleTap(dateStr);
+      return;
+    }
+
+    lastTapRef.current = { dateStr, time: nowMs };
+    onCellSingleTap(dateStr);
+  };
 
   const cells = buildMonthGrid(year, month);
 
@@ -336,6 +364,12 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         </div>
       </div>
 
+      {/* 操作ガイドバー（シングルタップ移動・ダブルタップ一覧・右下＋追加） */}
+      <div className="mx-1 sm:mx-0 mb-1.5 px-2.5 py-1 rounded-xl bg-[#FFF9FB] border border-pink-200/80 flex items-center justify-between text-[10px] sm:text-xs font-extrabold text-[#9E2A47]">
+        <span>👆 1タップ: 日付移動 ／ 2タップ: その日の全予定表示</span>
+        <span className="hidden sm:inline text-stone-500">右下の「＋」ボタンから選択日に予定・タスク追加</span>
+      </div>
+
       {/* 📋 スマホ縦1列リストモード（スマホの縦長画面で1日1行・大文字で全部読めるモード） */}
       {mobileLayout === 'list' && (
         <div className="space-y-1.5 px-1 sm:hidden">
@@ -363,8 +397,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
               return (
                 <div
                   key={cell.dateStr}
-                  onClick={() => onCellClick(cell.dateStr)}
-                  className={`rounded-2xl p-2.5 border transition-all cursor-pointer ${
+                  onClick={() => handleDateCellTap(cell.dateStr)}
+                  onDoubleClick={() => onCellDoubleTap(cell.dateStr)}
+                  className={`rounded-2xl p-2.5 border transition-all cursor-pointer select-none ${
                     isBothHol
                       ? 'bg-gradient-to-r from-[#FFF0F5] via-white to-[#FFF9FB] border-[#FFB3C6]'
                       : 'bg-white border-stone-200/90'
@@ -463,7 +498,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                     </div>
                   </div>
 
-                  {/* 予定＆サポートバッジ */}
+                  {/* 予定＆サポートバッジ（2行以上になりそうな場合は1行で省略） */}
                   {(visibleEvs.length > 0 || uniqSupports.length > 0) && (
                     <div className="mt-1.5 pt-1.5 border-t border-stone-100 space-y-1">
                       {uniqSupports.length > 0 && (
@@ -492,23 +527,27 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                               color: cat.textColor,
                               borderLeftColor: ev.color || cat.accentColor,
                             }}
-                            className="px-2.5 py-1 rounded-lg border-l-4 text-xs font-extrabold flex items-center gap-1.5"
+                            className={`px-2.5 py-1 rounded-lg border-l-4 text-xs font-extrabold flex items-center gap-1.5 overflow-hidden ${
+                              ev.isTask && ev.isCompleted ? 'opacity-65 line-through' : ''
+                            }`}
                           >
                             <span className="text-[10px] opacity-85 shrink-0">
-                              {cat.icon}{cat.shortLabel}
+                              {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
                             </span>
                             {!ev.isAllDay && ev.startTime && (
                               <span className="text-[11px] font-black shrink-0">
                                 {ev.startTime}
                               </span>
                             )}
-                            <span className="break-words">{ev.title}</span>
+                            <span className="truncate whitespace-nowrap overflow-hidden flex-1">
+                              {ev.title}
+                            </span>
                           </div>
                         );
                       })}
                       {hiddenCnt > 0 && (
                         <div className="text-[11px] font-extrabold text-[#9E2A47]">
-                          ＋他{hiddenCnt}件の予定
+                          ＋他{hiddenCnt}件の予定（ダブルタップで全件表示）
                         </div>
                       )}
                     </div>
@@ -569,7 +608,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             return (
               <div
                 key={cell.dateStr}
-                onClick={() => onCellClick(cell.dateStr)}
+                onClick={() => handleDateCellTap(cell.dateStr)}
+                onDoubleClick={() => onCellDoubleTap(cell.dateStr)}
                 className={`group relative flex flex-col rounded-lg sm:rounded-2xl border transition-all cursor-pointer select-none overflow-hidden ${
                   isExpandedView ? 'min-h-[118px] sm:min-h-[146px]' : 'min-h-[112px] sm:min-h-[136px]'
                 } ${
@@ -582,7 +622,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                   isSelected
                     ? stampModeActive
                       ? 'ring-2 sm:ring-3 ring-[#FF8FAB] border-[#FF8FAB] shadow-md z-10'
-                      : 'ring-2 ring-[#B388EB] border-[#B388EB] z-10'
+                      : 'ring-2 ring-[#FF8FAB] border-[#FF8FAB] bg-[#FFFDFD] shadow-sm z-10'
                     : ''
                 } p-[2px] sm:p-1.5`}
               >
@@ -593,6 +633,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                       className={`inline-flex items-center justify-center text-[11px] sm:text-sm font-black leading-none ${
                         cell.isToday
                           ? 'w-4.5 h-4.5 sm:w-6 sm:h-6 rounded-full bg-[#FF8FAB] text-white shadow-2xs'
+                          : isSelected
+                          ? 'w-4.5 h-4.5 sm:w-6 sm:h-6 rounded-full bg-[#FFE5EC] text-[#9E2A47]'
                           : dateTextColor
                       }`}
                     >
@@ -638,8 +680,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                   </div>
                 )}
 
-                {/* 4. 予定リストエリア（スマホでも文字が潰れないよう横幅100%＆2行折り返し対応、コンパクト時は最大3件） */}
-                <div className="flex-1 flex flex-col gap-[2px]">
+                {/* 4. 予定リストエリア（2行以上になりそうな場合は記載せず1行でピシッと省略！） */}
+                <div className="flex-1 flex flex-col gap-[2px] min-w-0">
                   {visibleEvents.map((ev) => {
                     const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
                     const unreadForOther = isUnreadByPartner(ev.updatedAt, ev.createdBy);
@@ -653,15 +695,17 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                           color: cat.textColor,
                           borderLeftColor: ev.color || cat.accentColor,
                         }}
-                        className={`relative rounded-xs sm:rounded px-[2.5px] sm:pl-1 sm:pr-0.5 py-[1.5px] sm:py-0.5 border-l-2 sm:border-l-3 text-[10px] sm:text-[11px] font-extrabold leading-[1.15] tracking-tighter sm:tracking-normal ${
-                          isExpandedView
-                            ? 'whitespace-pre-wrap break-all sm:break-words'
-                            : 'line-clamp-2 sm:truncate break-all'
+                        className={`relative rounded-xs sm:rounded px-[2.5px] sm:pl-1 sm:pr-0.5 py-[1.5px] sm:py-0.5 border-l-2 sm:border-l-3 text-[10px] sm:text-[11px] font-extrabold leading-[1.2] tracking-tighter sm:tracking-normal overflow-hidden ${
+                          ev.isTask && ev.isCompleted ? 'opacity-65 line-through' : ''
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-0.5">
-                          <div className="min-w-0 flex-1">
-                            {/* PCでは開始時刻もセル内に表示、スマホ7列ではタイトル文字数を最大化するため時刻は選択日バー＆詳細に表示 */}
+                        <div className="flex items-center justify-between gap-0.5 min-w-0">
+                          <div className="min-w-0 flex-1 truncate whitespace-nowrap overflow-hidden">
+                            {ev.isTask && (
+                              <span className="mr-0.5 text-[9px]">
+                                {ev.isCompleted ? '✅' : '⬜'}
+                              </span>
+                            )}
                             {!ev.isAllDay && ev.startTime && (
                               <span className="hidden sm:inline text-[8px] font-extrabold opacity-80 mr-0.5">
                                 {ev.startTime}
@@ -672,7 +716,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
 
                           {(unreadForOther || unreadForMe) && (
                             <span
-                              className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ring-1 ring-white ${
+                              className={`shrink-0 w-1.5 h-1.5 rounded-full ring-1 ring-white ${
                                 unreadForMe ? 'bg-rose-500 animate-ping' : 'bg-[#FF8FAB]'
                               }`}
                             />
@@ -684,7 +728,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
 
                   {/* コンパクトモードで4件以上予定がある場合の「＋他〇件」表示 */}
                   {hiddenEventsCount > 0 && (
-                    <div className="text-[9px] sm:text-[10px] font-extrabold text-[#9E2A47] bg-[#FFF0F5] rounded-xs px-0.5 py-0.2 text-center leading-tight">
+                    <div className="text-[9px] sm:text-[10px] font-extrabold text-[#9E2A47] bg-[#FFF0F5] rounded-xs px-0.5 py-0.2 text-center leading-tight truncate">
                       ＋他{hiddenEventsCount}件
                     </div>
                   )}
@@ -694,11 +738,11 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           })}
         </div>
 
-        {/* スマホ専用：7列カレンダーのすぐ下に「選択中の日の大文字詳細カード」を常時表示 */}
+        {/* 7列カレンダーの下に「選択中の日の大文字プレビューカード」を常時表示（タップでその日の全予定を表示） */}
         {selectedCell && (
           <div
-            onClick={() => onCellClick(selectedDate)}
-            className="mt-2 mx-1 p-3 rounded-2xl bg-white border-2 border-[#FF8FAB] shadow-sm sm:hidden cursor-pointer"
+            onClick={() => onCellDoubleTap(selectedDate)}
+            className="mt-2.5 mx-1 sm:mx-0 p-3 rounded-2xl bg-white border-2 border-[#FF8FAB] shadow-sm cursor-pointer hover:bg-[#FFF9FB] transition-all"
           >
             <div className="flex items-center justify-between mb-1.5">
               <div className="font-extrabold text-sm text-stone-800 flex items-center gap-1.5">
@@ -713,9 +757,21 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                   <span className="text-xs text-rose-500">{selectedCell.holidayName}</span>
                 )}
               </div>
-              <span className="px-2.5 py-1 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold">
-                ✏️ タップで詳細・追加
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="px-2.5 py-1 rounded-xl bg-stone-100 text-stone-700 text-xs font-extrabold">
+                  📋 全予定を見る ({selEvents.length}件)
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onQuickAddForSelectedDate();
+                  }}
+                  className="px-2.5 py-1 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-2xs"
+                >
+                  ＋ 予定・タスク追加
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-1.5 mb-1.5">
@@ -784,23 +840,40 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                     <div
                       key={ev.id}
                       style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
-                      className="px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5"
+                      className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5 ${
+                        ev.isTask && ev.isCompleted ? 'opacity-65 line-through' : ''
+                      }`}
                     >
-                      <span>{cat.icon}{cat.shortLabel}</span>
-                      {!ev.isAllDay && ev.startTime && <span>{ev.startTime}</span>}
-                      <span className="break-words">{ev.title}</span>
+                      <span className="shrink-0">
+                        {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
+                      </span>
+                      {!ev.isAllDay && ev.startTime && <span className="shrink-0">{ev.startTime}</span>}
+                      <span className="truncate whitespace-nowrap overflow-hidden flex-1">{ev.title}</span>
                     </div>
                   );
                 })}
               </div>
             ) : (
               <div className="text-xs text-stone-400 font-bold">
-                この日の予定はまだありません（タップして予定やシフトを入力）
+                この日の予定はまだありません（ダブルタップで詳細、右下の「＋」で予定追加）
               </div>
             )}
           </div>
         )}
       </div>
+
+      {/* ➕ 右下フローティング「＋」ボタン（選択中の日にすぐ予定・タスクを追加！） */}
+      <button
+        type="button"
+        onClick={onQuickAddForSelectedDate}
+        title="選択中の日に予定・タスクを追加"
+        className="fixed right-4 bottom-20 z-40 flex items-center gap-1.5 px-4 py-3.5 rounded-full bg-gradient-to-tr from-[#FF8FAB] to-[#B388EB] text-white font-black shadow-xl hover:scale-105 active:scale-95 transition-all border-2 border-white"
+      >
+        <span className="text-xl leading-none">＋</span>
+        <span className="text-xs">
+          {selectedCell ? `${month}/${selectedCell.dayNumber}に予定追加` : '予定追加'}
+        </span>
+      </button>
     </div>
   );
 };
