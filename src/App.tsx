@@ -8,7 +8,12 @@ import {
   ShiftEntry,
   StampPreset,
 } from './types/calendar';
-import { createInitialDataStore, DEFAULT_CATEGORIES } from './utils/presets';
+import {
+  createInitialDataStore,
+  DEFAULT_CATEGORIES,
+  DEFAULT_STAMP_PRESETS,
+  LEGACY_DEFAULT_STAMP_IDS,
+} from './utils/presets';
 import { hashPasscode } from './utils/crypto';
 import {
   getActivePartnerId,
@@ -76,13 +81,14 @@ export const App: React.FC = () => {
   // シフト連続入力ドロワー状態
   const [stampDrawerOpen, setStampDrawerOpen] = useState<boolean>(false);
   const [stampDrawerTab, setStampDrawerTab] = useState<StampDrawerTab>('partnerA_shift');
-  const [selectedStampId, setSelectedStampId] = useState<string | null>('shift_day');
+  const [selectedStampId, setSelectedStampId] = useState<string | null>('shift_a_day');
 
   // 各種モーダル開閉状態
   const [dayDetailOpen, setDayDetailOpen] = useState<boolean>(false);
   const [openEventFormDirectly, setOpenEventFormDirectly] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [shiftManagerOpen, setShiftManagerOpen] = useState<boolean>(false);
+  const [shiftManagerPartner, setShiftManagerPartner] = useState<PartnerId>('partnerA');
   const [categoryManagerOpen, setCategoryManagerOpen] = useState<boolean>(false);
   const [imageOcrOpen, setImageOcrOpen] = useState<boolean>(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState<boolean>(false);
@@ -108,27 +114,57 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [toastText]);
 
-  // 初回ロード（IndexedDB / localStorage から復元＋「いったん今登録してある全部の予定削除」マイグレーション実行）
+  // 初回ロード（IndexedDB / localStorage から復元＋夫の12種シフトプリセット＆妻の空リスト自動適用＋#key招待リンク自動解除）
   useEffect(() => {
     let mounted = true;
+
+    // 1. URLハッシュに #key=... が含まれていれば、パートナー招待リンクとして自動ロック解除＆保存しURL欄から消去
+    let inviteKeyFromHash = '';
+    if (window.location.hash.startsWith('#key=')) {
+      try {
+        inviteKeyFromHash = decodeURIComponent(window.location.hash.slice(5)).trim();
+        window.history.replaceState(
+          null,
+          '',
+          window.location.pathname + window.location.search
+        );
+      } catch {
+        // ignore
+      }
+    }
+
     loadLocalStore().then(async (loaded) => {
       if (!mounted) return;
-      const defaultStore = createInitialDataStore();
-      const shiftOnlyStamps = (loaded.stamps || []).filter((s) => s.type === 'shift');
-      const mergedStamps =
-        shiftOnlyStamps.length > 0 ? [...shiftOnlyStamps] : [...defaultStore.stamps];
 
-      for (const reqId of ['shift_part', 'shift_hol_work']) {
-        if (!mergedStamps.some((s) => s.id === reqId)) {
-          const found = defaultStore.stamps.find((s) => s.id === reqId);
-          if (found) mergedStamps.push(found);
-        }
+      let activeSessionPass = '';
+      if (inviteKeyFromHash && inviteKeyFromHash.length >= 4) {
+        const h = await hashPasscode(inviteKeyFromHash);
+        setSavedPassHash(h);
+        setSavedPassHashState(h);
+        setSessionPassword(inviteKeyFromHash);
+        setIsLocked(false);
+        activeSessionPass = inviteKeyFromHash;
       }
 
       // ご要望：「既存の予定データとシフトデータを削除しておいてほしい」を自動適用
       const CLEAR_SHIFTS_AND_EVENTS_FLAG = 'futarical_clear_all_shifts_and_events_20261103_v2';
       const shouldClearAll = localStorage.getItem(CLEAR_SHIFTS_AND_EVENTS_FLAG) !== '1';
 
+      // ご要望：「夫の方の12種の勤務リストを登録し、妻の方は空にしておく」を自動適用
+      const HUSBAND_12_SHIFTS_FLAG = 'futarical_husband_shifts_preset_20261104_v3';
+      const shouldApplyHusband12Presets =
+        localStorage.getItem(HUSBAND_12_SHIFTS_FLAG) !== '1';
+
+      const cleanedLoadedStamps = (loaded.stamps || [])
+        .filter((s) => s.type === 'shift' && !LEGACY_DEFAULT_STAMP_IDS.has(s.id))
+        .map((s) => ({ ...s, partnerId: s.partnerId || 'partnerA' }));
+
+      const nextStamps =
+        shouldApplyHusband12Presets || cleanedLoadedStamps.length === 0
+          ? [...DEFAULT_STAMP_PRESETS]
+          : cleanedLoadedStamps;
+
+      const nowIso = new Date().toISOString();
       const nextStore: CalendarDataStore = {
         ...loaded,
         shifts: shouldClearAll ? {} : loaded.shifts || {},
@@ -138,12 +174,18 @@ export const App: React.FC = () => {
           loaded.categories && loaded.categories.length > 0
             ? loaded.categories
             : DEFAULT_CATEGORIES,
-        stamps: mergedStamps,
+        stamps: nextStamps,
+        updatedAt: shouldApplyHusband12Presets ? nowIso : loaded.updatedAt || nowIso,
       };
 
       if (shouldClearAll) {
         localStorage.setItem(CLEAR_SHIFTS_AND_EVENTS_FLAG, '1');
-        await saveLocalStore(nextStore);
+      }
+      if (shouldApplyHusband12Presets) {
+        localStorage.setItem(HUSBAND_12_SHIFTS_FLAG, '1');
+      }
+      if (shouldClearAll || shouldApplyHusband12Presets) {
+        await saveLocalStore(nextStore, activeSessionPass || undefined);
       }
 
       setStore(nextStore);
@@ -154,7 +196,11 @@ export const App: React.FC = () => {
       if (initialCfg.enabled && initialCfg.githubToken) {
         try {
           setIsSyncing(true);
-          const { mergedStore } = await syncWithGitHub(nextStore, initialCfg);
+          const { mergedStore } = await syncWithGitHub(
+            nextStore,
+            initialCfg,
+            activeSessionPass || undefined
+          );
           if (mounted) {
             setStore(mergedStore);
           }
@@ -969,7 +1015,10 @@ export const App: React.FC = () => {
               setOpenEventFormDirectly(true);
               setDayDetailOpen(true);
             }}
-            onOpenShiftStampManager={() => setShiftManagerOpen(true)}
+            onOpenShiftStampManager={(pid) => {
+              setShiftManagerPartner(pid || currentDrawerPartner);
+              setShiftManagerOpen(true);
+            }}
             onOpenVoiceModal={() => setVoiceModalOpen(true)}
             onOpenImageOcrModal={() => setImageOcrOpen(true)}
             onOpenWidgetModal={() => setIsWidgetMode(true)}
@@ -997,7 +1046,10 @@ export const App: React.FC = () => {
           onToggleTaskComplete={handleToggleTaskComplete}
           onDeleteEvent={handleDeleteEvent}
           onOpenVoiceModal={() => setVoiceModalOpen(true)}
-          onOpenShiftStampManager={() => setShiftManagerOpen(true)}
+          onOpenShiftStampManager={(pid) => {
+            setShiftManagerPartner(pid || activePartner);
+            setShiftManagerOpen(true);
+          }}
           onOpenCategoryManager={() => setCategoryManagerOpen(true)}
         />
       )}
@@ -1028,13 +1080,15 @@ export const App: React.FC = () => {
       {shiftManagerOpen && (
         <ShiftStampManagerModal
           stamps={store.stamps}
+          initialPartnerId={shiftManagerPartner}
+          metadata={store.metadata}
           onClose={() => setShiftManagerOpen(false)}
           onUpdateStamps={(nextStamps) => {
             commitStore({
               ...store,
               stamps: nextStamps,
             });
-            showToast('シフト種類を更新しました🎨');
+            showToast('勤務リストを更新しました🎨');
           }}
         />
       )}
