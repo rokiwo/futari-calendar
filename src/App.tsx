@@ -54,10 +54,10 @@ export const App: React.FC = () => {
   const [store, setStore] = useState<CalendarDataStore>(() => createInitialDataStore());
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // URLクエリ ?widget=1 の場合はスマホウィジェット専用コンパクト画面で起動
+  // デフォルトで「🏠ウィジェット（ふたりホーム）」画面で起動し、そこから月間カレンダーへ飛べる構成
   const [isWidgetMode, setIsWidgetMode] = useState<boolean>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('widget') === '1';
+    return params.get('view') !== 'calendar';
   });
 
   // 表示中の年月・選択日
@@ -68,9 +68,9 @@ export const App: React.FC = () => {
   // 操作中のパートナー（夫 / 妻）
   const [activePartner, setActivePartner] = useState<PartnerId>(() => getActivePartnerId());
 
-  // フィルタ＆表示モード
+  // フィルタ＆表示モード（コンパクト3件表示をデフォルトにし、ヘッダーから全件表示へ切替可能）
   const [filterCategory, setFilterCategory] = useState<FilterCategoryId>('all');
-  const [isExpandedView, setIsExpandedView] = useState<boolean>(true);
+  const [isExpandedView, setIsExpandedView] = useState<boolean>(false);
   const [showShiftTimeInCell, setShowShiftTimeInCell] = useState<boolean>(false);
 
   // シフト連続入力ドロワー状態
@@ -597,25 +597,6 @@ export const App: React.FC = () => {
     );
   }
 
-  // スマホ用ウィジェットコンパクト画面モード時
-  if (isWidgetMode && !isLocked) {
-    return (
-      <WidgetCompactView
-        store={store}
-        matchedHolidaysCount={matchedHolidays.length}
-        onExitWidgetMode={() => setIsWidgetMode(false)}
-        onSelectDateInFullCalendar={(dateStr) => {
-          setIsWidgetMode(false);
-          setSelectedDate(dateStr);
-          const [ny, nm] = dateStr.split('-').map(Number);
-          setYear(ny);
-          setMonth(nm);
-          setDayDetailOpen(true);
-        }}
-      />
-    );
-  }
-
   const currentDrawerPartner: PartnerId =
     stampDrawerTab === 'partnerB_shift' ? 'partnerB' : 'partnerA';
   const currentShiftOnSelectedDate = store.shifts[
@@ -662,104 +643,144 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* トップヘッダー */}
-      <TopHeader
-        year={year}
-        month={month}
-        onPrevMonth={handlePrevMonth}
-        onNextMonth={handleNextMonth}
-        onToday={() => {
-          const t = new Date();
-          setYear(t.getFullYear());
-          setMonth(t.getMonth() + 1);
-          setSelectedDate(
-            `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(
-              t.getDate()
-            ).padStart(2, '0')}`
-          );
-        }}
-        onSelectYearMonth={(y, m) => {
-          setYear(y);
-          setMonth(m);
-        }}
-        activePartner={activePartner}
-        onToggleActivePartner={handleToggleActivePartner}
-        metadata={store.metadata}
-        categories={activeCategories}
-        onOpenCategoryManager={() => setCategoryManagerOpen(true)}
-        onMarkSeenNow={handleMarkSeenNow}
-        matchedHolidays={matchedHolidays}
-        overtimeSummary={overtimeSummary}
-        onSelectDate={(dateStr) => {
-          setSelectedDate(dateStr);
-          setDayDetailOpen(true);
-        }}
-        filterCategory={filterCategory}
-        onChangeFilter={setFilterCategory}
-        isExpandedView={isExpandedView}
-        onToggleExpandedView={() => setIsExpandedView(!isExpandedView)}
-        showShiftTimeInCell={showShiftTimeInCell}
-        onToggleShowShiftTime={() => setShowShiftTimeInCell(!showShiftTimeInCell)}
-        unreadCountForPartner={unreadCountForPartner}
-        isSyncing={isSyncing}
-        syncEnabled={syncConfig.enabled}
-        onTriggerSync={() => handleTriggerCloudSync()}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onLockScreen={() => setIsLocked(true)}
-      />
-
-      {/* 月間カレンダーグリッド（左右スワイプで前月・次月移動対応） */}
-      <main className="flex-1">
-        <MonthlyCalendarGrid
-          year={year}
-          month={month}
+      {/* 🏠 デフォルト画面：ウィジェット（ふたりホーム）モード */}
+      {isWidgetMode ? (
+        <WidgetCompactView
           store={store}
           activePartner={activePartner}
-          filterCategory={filterCategory}
-          isExpandedView={isExpandedView}
-          showShiftTimeInCell={showShiftTimeInCell}
-          selectedDate={selectedDate}
-          stampModeActive={stampDrawerOpen}
-          onCellClick={handleCellClick}
-          onSwipePrevMonth={handlePrevMonth}
-          onSwipeNextMonth={handleNextMonth}
+          onToggleActivePartner={handleToggleActivePartner}
+          onMarkSeenNow={handleMarkSeenNow}
+          matchedHolidays={matchedHolidays}
+          overtimeSummary={overtimeSummary}
+          onExitWidgetMode={() => setIsWidgetMode(false)}
+          onOpenCalendarWithStampDrawer={() => {
+            setIsWidgetMode(false);
+            setStampDrawerOpen(true);
+          }}
+          onOpenDayDetail={(dateStr) => {
+            setSelectedDate(dateStr);
+            const [ny, nm] = dateStr.split('-').map(Number);
+            setYear(ny);
+            setMonth(nm);
+            setDayDetailOpen(true);
+          }}
+          onSelectDateInFullCalendar={(dateStr) => {
+            setIsWidgetMode(false);
+            setSelectedDate(dateStr);
+            const [ny, nm] = dateStr.split('-').map(Number);
+            setYear(ny);
+            setMonth(nm);
+          }}
+          onOpenVoiceModal={(dateStr) => {
+            setSelectedDate(dateStr);
+            setVoiceModalOpen(true);
+          }}
+          onOpenImageOcrModal={() => setImageOcrOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
-      </main>
+      ) : (
+        <>
+          {/* トップヘッダー */}
+          <TopHeader
+            year={year}
+            month={month}
+            onPrevMonth={handlePrevMonth}
+            onNextMonth={handleNextMonth}
+            onToday={() => {
+              const t = new Date();
+              setYear(t.getFullYear());
+              setMonth(t.getMonth() + 1);
+              setSelectedDate(
+                `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(
+                  t.getDate()
+                ).padStart(2, '0')}`
+              );
+            }}
+            onSelectYearMonth={(y, m) => {
+              setYear(y);
+              setMonth(m);
+            }}
+            activePartner={activePartner}
+            onToggleActivePartner={handleToggleActivePartner}
+            metadata={store.metadata}
+            categories={activeCategories}
+            onOpenCategoryManager={() => setCategoryManagerOpen(true)}
+            onMarkSeenNow={handleMarkSeenNow}
+            matchedHolidays={matchedHolidays}
+            overtimeSummary={overtimeSummary}
+            onSelectDate={(dateStr) => {
+              setSelectedDate(dateStr);
+              setDayDetailOpen(true);
+            }}
+            filterCategory={filterCategory}
+            onChangeFilter={setFilterCategory}
+            isExpandedView={isExpandedView}
+            onToggleExpandedView={() => setIsExpandedView(!isExpandedView)}
+            showShiftTimeInCell={showShiftTimeInCell}
+            onToggleShowShiftTime={() => setShowShiftTimeInCell(!showShiftTimeInCell)}
+            unreadCountForPartner={unreadCountForPartner}
+            isSyncing={isSyncing}
+            syncEnabled={syncConfig.enabled}
+            onTriggerSync={() => handleTriggerCloudSync()}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onLockScreen={() => setIsLocked(true)}
+            onOpenWidgetHome={() => setIsWidgetMode(true)}
+          />
 
-      {/* ボトム「シフト連続入力ドロワー ＆ スマホ用下部5ボタンアクションドック」 */}
-      <StampDrawer
-        isOpen={stampDrawerOpen}
-        onToggleOpen={setStampDrawerOpen}
-        activeTab={stampDrawerTab}
-        onChangeTab={setStampDrawerTab}
-        stamps={store.stamps}
-        selectedStampId={selectedStampId}
-        onSelectStamp={setSelectedStampId}
-        selectedDate={selectedDate}
-        onMoveDate={moveSelectedDate}
-        onApplyShiftAndAdvance={(stamp, targetPartner) =>
-          handleSetShiftAndAdvance(selectedDate, targetPartner, stamp)
-        }
-        onClearShiftAndAdvance={(targetPartner) =>
-          handleSetShiftAndAdvance(selectedDate, targetPartner, null)
-        }
-        onUpdateShiftDetailsOnSelectedDate={(targetPartner, patch) => {
-          handleUpdateShiftDetails(selectedDate, targetPartner, patch);
-          const [, m, d] = selectedDate.split('-').map(Number);
-          showToast(`✨ ${m}/${d} のシフト詳細（バイト・残業）を更新しました`);
-        }}
-        currentShiftOnSelectedDate={currentShiftOnSelectedDate}
-        onToggleSupportBadgeOnSelectedDate={(badge) =>
-          handleToggleDaySupportBadge(selectedDate, badge)
-        }
-        activeSupportBadgesOnSelectedDate={store.daySupports?.[selectedDate]?.badges || []}
-        onOpenDayDetail={() => setDayDetailOpen(true)}
-        onOpenShiftStampManager={() => setShiftManagerOpen(true)}
-        onOpenVoiceModal={() => setVoiceModalOpen(true)}
-        onOpenImageOcrModal={() => setImageOcrOpen(true)}
-        onOpenWidgetModal={() => setWidgetGuideOpen(true)}
-        metadata={store.metadata}
-      />
+          {/* 月間カレンダーグリッド（左右スワイプで前月・次月移動対応） */}
+          <main className="flex-1">
+            <MonthlyCalendarGrid
+              year={year}
+              month={month}
+              store={store}
+              activePartner={activePartner}
+              filterCategory={filterCategory}
+              isExpandedView={isExpandedView}
+              showShiftTimeInCell={showShiftTimeInCell}
+              selectedDate={selectedDate}
+              stampModeActive={stampDrawerOpen}
+              onCellClick={handleCellClick}
+              onSwipePrevMonth={handlePrevMonth}
+              onSwipeNextMonth={handleNextMonth}
+            />
+          </main>
+
+          {/* ボトム「シフト連続入力ドロワー ＆ スマホ用下部5ボタンアクションドック」 */}
+          <StampDrawer
+            isOpen={stampDrawerOpen}
+            onToggleOpen={setStampDrawerOpen}
+            activeTab={stampDrawerTab}
+            onChangeTab={setStampDrawerTab}
+            stamps={store.stamps}
+            selectedStampId={selectedStampId}
+            onSelectStamp={setSelectedStampId}
+            selectedDate={selectedDate}
+            onMoveDate={moveSelectedDate}
+            onApplyShiftAndAdvance={(stamp, targetPartner) =>
+              handleSetShiftAndAdvance(selectedDate, targetPartner, stamp)
+            }
+            onClearShiftAndAdvance={(targetPartner) =>
+              handleSetShiftAndAdvance(selectedDate, targetPartner, null)
+            }
+            onUpdateShiftDetailsOnSelectedDate={(targetPartner, patch) => {
+              handleUpdateShiftDetails(selectedDate, targetPartner, patch);
+              const [, m, d] = selectedDate.split('-').map(Number);
+              showToast(`✨ ${m}/${d} のシフト詳細（バイト・残業）を更新しました`);
+            }}
+            currentShiftOnSelectedDate={currentShiftOnSelectedDate}
+            onToggleSupportBadgeOnSelectedDate={(badge) =>
+              handleToggleDaySupportBadge(selectedDate, badge)
+            }
+            activeSupportBadgesOnSelectedDate={store.daySupports?.[selectedDate]?.badges || []}
+            onOpenDayDetail={() => setDayDetailOpen(true)}
+            onOpenShiftStampManager={() => setShiftManagerOpen(true)}
+            onOpenVoiceModal={() => setVoiceModalOpen(true)}
+            onOpenImageOcrModal={() => setImageOcrOpen(true)}
+            onOpenWidgetModal={() => setIsWidgetMode(true)}
+            metadata={store.metadata}
+          />
+        </>
+      )}
 
       {/* 日付詳細＆シフト・予定モーダル */}
       {dayDetailOpen && (
