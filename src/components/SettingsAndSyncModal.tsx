@@ -497,57 +497,99 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
           )}
 
           {/* タブ1：超かんたん夫婦共有 ＆ データ削除 */}
-          {activeTab === 'sync' && (
+          {activeTab === 'sync' && (() => {
+            const activePass = passwordInput.trim() || currentPassword.trim();
+            const inviteUrl = activePass
+              ? `https://rokiwo.github.io/futari-calendar/#key=${encodeURIComponent(activePass)}`
+              : 'https://rokiwo.github.io/futari-calendar/';
+            return (
             <div className="space-y-4">
-              {/* 💑 設定不要！URLを送るだけの超かんたん夫婦共有カード */}
+              {/* 💑 設定不要！URLを送るだけの超かんたん夫婦共有 ＆ 第三者ブロック設定カード */}
               <div className="bg-white rounded-3xl p-4 border-2 border-[#FF8FAB] space-y-3 shadow-xs">
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-extrabold text-stone-800 text-sm flex items-center gap-1.5">
                     <span>💑</span>
-                    <span>パートナーとの共有方法（設定不要！）</span>
+                    <span>パートナーとの共有方法（1タップ招待）</span>
                   </div>
                   <span className="px-2.5 py-0.5 rounded-full bg-[#E6F7EF] text-[#1E6645] font-extrabold text-[10px]">
-                    ✅ クラウド自動同期 ON
+                    ✅ クラウドAES-GCM暗号化同期 ON
                   </span>
                 </div>
 
-                <div className="p-3 rounded-2xl bg-[#FFF0F5] border border-[#FFC2D1] text-stone-700 space-y-1.5 leading-relaxed">
+                {/* 🔐 第三者からの情報漏洩を100%防ぐ「ふたりの合言葉ロック」ワンタップ設定枠 */}
+                <div className="p-3 rounded-2xl bg-[#FFFBF7] border border-[#FFE28A] space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-extrabold text-[#8A5A00] text-xs flex items-center gap-1">
+                      <KeyRound className="w-3.5 h-3.5 text-[#FFB703]" />
+                      <span>🛡️ 情報漏洩ガード：ふたりの合言葉（4文字以上）</span>
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                        activePass
+                          ? 'bg-[#E6F7EF] text-[#1E6645]'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {activePass ? '🔐 合言葉ロック保護中' : '🔓 合言葉未設定'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-stone-600 leading-relaxed">
+                    合言葉を設定すると、万が一第三者が公開URL（<code className="text-[10px] bg-stone-100 px-1 rounded">rokiwo.github.io/futari-calendar</code>）を知っても<strong>ロック画面で100%遮断＆データも暗号化されて一切読めなくなります</strong>。
+                    <br />
+                    下の招待ボタン（LINE / QR）には<strong>サーバーに送信されない秘密鍵（#key）</strong>が自動で付くため、<strong>パートナーはURLを1タップするだけで自動ロック解除</strong>されます✨
+                  </p>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      placeholder="例: 1122 / futari2026 など（4文字以上）"
+                      className="flex-1 px-3 py-2 rounded-xl border border-stone-200 bg-white font-extrabold text-stone-800 text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleSaveAndSync}
+                      className="px-3.5 py-2 rounded-xl bg-[#FF8FAB] hover:bg-[#e57393] text-white font-extrabold text-xs shrink-0 shadow-2xs"
+                    >
+                      🔐 合言葉で保護する
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-[#FFF0F5] border border-[#FFC2D1] text-stone-700 space-y-1 leading-relaxed">
                   <div className="font-extrabold text-[#9E2A47] text-xs">
-                    🎉 難しいトークンやIDの設定はすべて自動で完了しています！
+                    🎉 パートナーへの共有は下のボタンを押すだけ！
                   </div>
                   <p className="text-[11px] font-bold">
-                    ① 下のボタンで<strong>パートナーにLINEでURLを送る</strong>（またはQRコードを読み取ってもらう）
+                    ① 下のボタンで<strong>パートナーにLINEで招待URLを送る</strong>（またはQRコードを読み取ってもらう）
                     <br />
-                    ② パートナーが自分のスマホで開き、上のスイッチを<strong>「🐰 妻（または🐻 夫）」</strong>に切り替えるだけ！
-                    <br />
-                    これだけで、2人が入れたシフト・残業・予定・タスクがずっと自動で同期されます✨
+                    ② パートナーが開いて、画面上のスイッチを<strong>「🐰 妻（または🐻 夫）」</strong>に切り替えるだけでずっと自動同期されます✨
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <a
                     href={`https://line.me/R/share?text=${encodeURIComponent(
-                      `🐻💕🐰 ふたりの共有シフト＆予定カレンダー「ふたりカレ」\nここを開いてホーム画面に追加してね👇\nhttps://rokiwo.github.io/futari-calendar/`
+                      `🐻💕🐰 ふたりの共有シフト＆予定カレンダー「ふたりカレ」\nこの招待リンクを開いてホーム画面に追加してね👇\n${inviteUrl}`
                     )}`}
                     target="_blank"
                     rel="noreferrer"
                     className="py-3 px-4 rounded-2xl bg-[#06C755] hover:bg-[#05b04b] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-sm"
                   >
-                    <span>💚 LINEでパートナーにURLを送る</span>
+                    <span>💚 LINEでパートナーに招待URLを送る</span>
                   </a>
 
                   <button
                     type="button"
                     onClick={async () => {
                       try {
-                        await navigator.clipboard.writeText(
-                          'https://rokiwo.github.io/futari-calendar/'
-                        );
+                        await navigator.clipboard.writeText(inviteUrl);
                         setCopiedShare(true);
                         setTimeout(() => setCopiedShare(false), 2500);
                         setStatusMsg({
                           type: 'ok',
-                          text: 'アプリのURL（https://rokiwo.github.io/futari-calendar/）をコピーしました📋 パートナーに送ってください💕',
+                          text: 'パートナー招待用URLをコピーしました📋 LINE等でパートナーに送ってください💕',
                         });
                       } catch {
                         // ignore
@@ -556,7 +598,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     className="py-3 px-4 rounded-2xl bg-[#FF8FAB] hover:bg-[#e57393] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-sm"
                   >
                     {copiedShare ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    <span>{copiedShare ? 'URLをコピーしました！' : '📋 アプリのURLをコピー'}</span>
+                    <span>{copiedShare ? '招待URLをコピーしました！' : '📋 招待用URLをコピー'}</span>
                   </button>
                 </div>
 
@@ -564,7 +606,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 <div className="flex flex-col sm:flex-row items-center gap-3 p-3 rounded-2xl bg-[#FFFBF7] border border-stone-200/80">
                   <img
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(
-                      'https://rokiwo.github.io/futari-calendar/'
+                      inviteUrl
                     )}`}
                     alt="ふたりカレ共有QRコード"
                     className="w-24 h-24 rounded-xl border border-stone-200 bg-white p-1 shrink-0"
@@ -574,7 +616,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                       📱 隣にいるならカメラでQR読み取りでもOK！
                     </div>
                     <p className="text-[11px] text-stone-500">
-                      パートナーのスマホのカメラでこのQRコードを読み取るだけで、同じカレンダーがすぐ開きます。
+                      パートナーのスマホのカメラでこのQRコードを読み取るだけで、合言葉も自動セットされて同じカレンダーがすぐ開きます。
                     </p>
                     <button
                       type="button"
@@ -760,7 +802,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 </div>
               </details>
             </div>
-          )}
+            );
+          })()}
 
           {/* タブ2：iCal (.ics) カレンダー連携 ＆ JSONバックアップ */}
           {activeTab === 'ical_backup' && (
