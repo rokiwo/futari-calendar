@@ -10,8 +10,10 @@ import {
   Sparkles,
   Heart,
 } from 'lucide-react';
-import { StampPreset } from '../types/calendar';
+import { CoupleMetadata, PartnerId, StampPreset } from '../types/calendar';
 import {
+  DEFAULT_STAMP_PRESETS,
+  getPartnerShiftStamps,
   PASTEL_COLOR_PALETTE,
   SHIFT_ICON_PATTERNS,
   SHIFT_TIME_PRESETS,
@@ -19,6 +21,8 @@ import {
 
 interface ShiftStampManagerModalProps {
   stamps: StampPreset[];
+  initialPartnerId?: PartnerId;
+  metadata?: CoupleMetadata;
   onClose: () => void;
   onUpdateStamps: (nextStamps: StampPreset[]) => void;
 }
@@ -31,6 +35,9 @@ const QUICK_SHIFT_TEMPLATES: {
   isHoliday: boolean;
   paletteIndex: number;
 }[] = [
+  { label: '日勤', icon: '☀️', startTime: '09:00', endTime: '18:05', isHoliday: false, paletteIndex: 2 },
+  { label: '休み', icon: '🏠', isHoliday: true, paletteIndex: 0 },
+  { label: '年休', icon: '🌴', isHoliday: true, paletteIndex: 6 },
   { label: '当直', icon: '🏥', startTime: '17:00', endTime: '09:00', isHoliday: false, paletteIndex: 4 },
   { label: '午前半休', icon: '🌤️', startTime: '13:00', endTime: '17:30', isHoliday: false, paletteIndex: 0 },
   { label: '午後半休', icon: '🌆', startTime: '08:30', endTime: '12:30', isHoliday: false, paletteIndex: 5 },
@@ -38,23 +45,48 @@ const QUICK_SHIFT_TEMPLATES: {
   { label: '昼バイト', icon: '☕', startTime: '10:00', endTime: '15:00', isHoliday: false, paletteIndex: 5 },
   { label: '休日出勤', icon: '💼', startTime: '09:00', endTime: '17:00', isHoliday: false, paletteIndex: 7 },
   { label: '在宅勤務', icon: '💻', startTime: '09:00', endTime: '18:00', isHoliday: false, paletteIndex: 6 },
-  { label: '出張', icon: '✈️', startTime: '08:00', endTime: '19:00', isHoliday: false, paletteIndex: 2 },
-  { label: '研修', icon: '📝', startTime: '09:00', endTime: '17:00', isHoliday: false, paletteIndex: 3 },
   { label: '公休', icon: '🌸', isHoliday: true, paletteIndex: 1 },
-  { label: '夏休', icon: '🌻', isHoliday: true, paletteIndex: 5 },
-  { label: '看護・育休', icon: '👶', isHoliday: true, paletteIndex: 0 },
-  { label: '夜勤入り', icon: '🌙', startTime: '16:30', endTime: '09:00', isHoliday: false, paletteIndex: 3 },
-  { label: '夜勤明け', icon: '🍵', isHoliday: false, paletteIndex: 6 },
+  { label: '夜勤入り', icon: '🌙', startTime: '16:45', endTime: '23:59', isHoliday: false, paletteIndex: 3 },
+  { label: '明け', icon: '🍵', startTime: '00:00', endTime: '09:45', isHoliday: false, paletteIndex: 4 },
 ];
 
 export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
   stamps,
+  initialPartnerId = 'partnerA',
+  metadata,
   onClose,
   onUpdateStamps,
 }) => {
-  const shiftStamps = stamps
-    .filter((s) => s.type === 'shift')
-    .sort((a, b) => a.order - b.order);
+  const [targetPartner, setTargetPartner] = useState<PartnerId>(initialPartnerId);
+
+  const partnerAName = metadata?.partners.partnerA.name || '夫';
+  const partnerAAvatar = metadata?.partners.partnerA.avatar || '🐻';
+  const partnerBName = metadata?.partners.partnerB.name || '妻';
+  const partnerBAvatar = metadata?.partners.partnerB.avatar || '🐰';
+
+  // 現在選択中のパートナーのシフトリスト
+  const shiftStamps = getPartnerShiftStamps(stamps, targetPartner);
+  // もう一方のパートナーのシフトリスト（保存時に維持する）
+  const otherPartnerId: PartnerId = targetPartner === 'partnerA' ? 'partnerB' : 'partnerA';
+  const otherPartnerStamps = getPartnerShiftStamps(stamps, otherPartnerId);
+
+  const commitPartnerStamps = (nextForTarget: StampPreset[]) => {
+    const normalizedTarget = nextForTarget.map((s, idx) => ({
+      ...s,
+      partnerId: targetPartner,
+      order: idx + 1,
+    }));
+    const normalizedOther = otherPartnerStamps.map((s, idx) => ({
+      ...s,
+      partnerId: otherPartnerId,
+      order: idx + 1,
+    }));
+    onUpdateStamps(
+      targetPartner === 'partnerA'
+        ? [...normalizedTarget, ...normalizedOther]
+        : [...normalizedOther, ...normalizedTarget]
+    );
+  };
 
   // どのシフトカードを展開編集しているか（nullなら新規追加または閉じた状態）
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -63,8 +95,8 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
   // 新規追加フォーム状態
   const [newLabel, setNewLabel] = useState('');
   const [newIcon, setNewIcon] = useState('☀️');
-  const [newStartTime, setNewStartTime] = useState('08:30');
-  const [newEndTime, setNewEndTime] = useState('17:30');
+  const [newStartTime, setNewStartTime] = useState('09:00');
+  const [newEndTime, setNewEndTime] = useState('18:05');
   const [newHasTime, setNewHasTime] = useState(true);
   const [newPaletteIdx, setNewPaletteIdx] = useState(0);
   const [newIsHoliday, setNewIsHoliday] = useState(false);
@@ -77,7 +109,8 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
 
     const pal = PASTEL_COLOR_PALETTE[newPaletteIdx] || PASTEL_COLOR_PALETTE[0];
     const created: StampPreset = {
-      id: `shift_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `shift_${targetPartner}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      partnerId: targetPartner,
       label: clean,
       shortLabel: clean.slice(0, 3),
       type: 'shift',
@@ -90,7 +123,7 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
       order: shiftStamps.length + 1,
     };
 
-    onUpdateStamps([...shiftStamps, created]);
+    commitPartnerStamps([...shiftStamps, created]);
     setNewLabel('');
   };
 
@@ -98,7 +131,8 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
   const handleAddFromTemplate = (tpl: (typeof QUICK_SHIFT_TEMPLATES)[number]) => {
     const pal = PASTEL_COLOR_PALETTE[tpl.paletteIndex] || PASTEL_COLOR_PALETTE[0];
     const created: StampPreset = {
-      id: `shift_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `shift_${targetPartner}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      partnerId: targetPartner,
       label: tpl.label,
       shortLabel: tpl.label.slice(0, 3),
       type: 'shift',
@@ -110,20 +144,20 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
       isHoliday: tpl.isHoliday,
       order: shiftStamps.length + 1,
     };
-    onUpdateStamps([...shiftStamps, created]);
+    commitPartnerStamps([...shiftStamps, created]);
   };
 
   // 既存スタンプのフィールドをインライン更新
   const handleUpdateOne = (id: string, patch: Partial<StampPreset>) => {
     const next = shiftStamps.map((s) => {
       if (s.id !== id) return s;
-      const updated = { ...s, ...patch };
+      const updated = { ...s, ...patch, partnerId: targetPartner };
       if (patch.label !== undefined) {
         updated.shortLabel = patch.label.slice(0, 3) || updated.shortLabel;
       }
       return updated;
     });
-    onUpdateStamps(next);
+    commitPartnerStamps(next);
   };
 
   // 並び順変更
@@ -134,18 +168,17 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
     const temp = cloned[index];
     cloned[index] = cloned[targetIdx];
     cloned[targetIdx] = temp;
-    const reordered = cloned.map((s, idx) => ({ ...s, order: idx + 1 }));
-    onUpdateStamps(reordered);
+    commitPartnerStamps(cloned);
   };
 
-  // 削除
+  // 削除（妻のリストを空にできるよう0件まで削除可能）
   const handleDelete = (id: string) => {
-    if (shiftStamps.length <= 1) return;
-    const filtered = shiftStamps
-      .filter((s) => s.id !== id)
-      .map((s, idx) => ({ ...s, order: idx + 1 }));
-    onUpdateStamps(filtered);
+    const filtered = shiftStamps.filter((s) => s.id !== id);
+    commitPartnerStamps(filtered);
   };
+
+  const currentPartnerName = targetPartner === 'partnerA' ? partnerAName : partnerBName;
+  const currentPartnerAvatar = targetPartner === 'partnerA' ? partnerAAvatar : partnerBAvatar;
 
   return (
     <div
@@ -157,23 +190,60 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
         className="w-full max-w-lg max-h-[92vh] bg-[#FFFBF7] rounded-t-3xl sm:rounded-3xl shadow-2xl border-2 border-[#FFE5EC] flex flex-col overflow-hidden animate-pop"
       >
         {/* ヘッダー */}
-        <div className="bg-white px-4 py-3.5 border-b border-[#FFE5EC] flex items-center justify-between">
-          <div>
-            <h2 className="text-base sm:text-lg font-extrabold text-stone-800 flex items-center gap-1.5">
-              <span>🎨</span>
-              <span>シフト種類の登録・かんたん編集</span>
-            </h2>
-            <p className="text-[11px] text-stone-400">
-              タップするだけで色・時間・名前をすぐ変更できます
-            </p>
+        <div className="bg-white px-4 py-3 border-b border-[#FFE5EC] space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base sm:text-lg font-extrabold text-stone-800 flex items-center gap-1.5">
+                <span>🎨</span>
+                <span>勤務リスト（シフト種類）の登録・編集</span>
+              </h2>
+              <p className="text-[11px] text-stone-400">
+                {partnerAAvatar}{partnerAName}用と{partnerBAvatar}{partnerBName}用で別々に勤務リストを管理できます
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] text-white font-extrabold text-xs shadow-xs"
+            >
+              完了して閉じる
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] text-white font-extrabold text-xs shadow-xs"
-          >
-            完了して閉じる
-          </button>
+
+          {/* 🐻 夫の勤務リスト ⇔ 🐰 妻の勤務リスト 切替タブ */}
+          <div className="grid grid-cols-2 gap-1.5 bg-[#FFFBF7] p-1 rounded-2xl border border-stone-200">
+            <button
+              type="button"
+              onClick={() => {
+                setTargetPartner('partnerA');
+                setExpandedId(null);
+              }}
+              className={`py-2 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all ${
+                targetPartner === 'partnerA'
+                  ? 'bg-[#56CFE1] text-white shadow-xs'
+                  : 'text-stone-600 hover:bg-white'
+              }`}
+            >
+              <span>{partnerAAvatar}</span>
+              <span>{partnerAName}の勤務リスト ({getPartnerShiftStamps(stamps, 'partnerA').length}種)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTargetPartner('partnerB');
+                setExpandedId(null);
+              }}
+              className={`py-2 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all ${
+                targetPartner === 'partnerB'
+                  ? 'bg-[#B388EB] text-white shadow-xs'
+                  : 'text-stone-600 hover:bg-white'
+              }`}
+            >
+              <span>{partnerBAvatar}</span>
+              <span>{partnerBName}の勤務リスト ({getPartnerShiftStamps(stamps, 'partnerB').length}種)</span>
+            </button>
+          </div>
         </div>
 
         {/* スクロールコンテンツ */}
@@ -185,7 +255,9 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
           >
             <div className="text-xs font-extrabold text-[#9E2A47] flex items-center gap-1">
               <Plus className="w-4 h-4 text-[#FF8FAB]" />
-              <span>新しいシフト種類を追加</span>
+              <span>
+                {currentPartnerAvatar} {currentPartnerName}の新しいシフト種類を追加
+              </span>
             </div>
 
             {/* 名前＆アイコン入力 */}
@@ -361,12 +433,46 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
 
           {/* 2. 登録済みシフト一覧（タップでその場でかんたん編集） */}
           <div className="space-y-2">
-            <div className="text-xs font-extrabold text-stone-700 px-1 flex items-center justify-between">
-              <span>📋 登録済みのシフト一覧 ({shiftStamps.length}種類)</span>
-              <span className="text-[11px] text-stone-400 font-normal">
-                カードをタップすると編集できます
+            <div className="text-xs font-extrabold text-stone-700 px-1 flex flex-wrap items-center justify-between gap-2">
+              <span>
+                📋 {currentPartnerAvatar} {currentPartnerName}の勤務リスト ({shiftStamps.length}種類)
               </span>
+              <div className="flex items-center gap-1.5">
+                {targetPartner === 'partnerA' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      commitPartnerStamps(
+                        DEFAULT_STAMP_PRESETS.filter((s) => s.partnerId === 'partnerA')
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#136370] hover:text-white text-[10px] font-extrabold transition-colors"
+                  >
+                    🔄 夫の12種リストに戻す
+                  </button>
+                )}
+                {shiftStamps.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => commitPartnerStamps([])}
+                    className="px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] font-extrabold transition-colors"
+                  >
+                    🗑️ リストを空にする
+                  </button>
+                )}
+              </div>
             </div>
+
+            {shiftStamps.length === 0 && (
+              <div className="bg-white rounded-2xl p-5 border border-dashed border-stone-300 text-center space-y-1.5">
+                <div className="text-sm font-extrabold text-stone-600">
+                  {currentPartnerAvatar} {currentPartnerName}の勤務リストは現在「空」です
+                </div>
+                <p className="text-[11px] text-stone-400">
+                  上の入力欄またはワンタップ追加ボタンから、いつでも{currentPartnerName}用のシフトを追加できます✨
+                </p>
+              </div>
+            )}
 
             {shiftStamps.map((stamp, idx) => {
               const isExpanded = expandedId === stamp.id;
