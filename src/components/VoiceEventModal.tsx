@@ -10,17 +10,23 @@ import {
 } from 'lucide-react';
 import {
   CalendarCategoryId,
+  CalendarCategoryItem,
   CoupleMetadata,
   PartnerId,
   ScheduleEvent,
 } from '../types/calendar';
-import { CATEGORY_MAP, SUPPORT_BADGE_PRESETS } from '../utils/presets';
+import {
+  DEFAULT_CATEGORIES,
+  resolveCategoryInfo,
+  SUPPORT_BADGE_PRESETS,
+} from '../utils/presets';
 import { parseSpokenScheduleText } from '../utils/voiceAndAi';
 
 interface VoiceEventModalProps {
   selectedDate: string; // "YYYY-MM-DD"
   activePartner: PartnerId;
   metadata: CoupleMetadata;
+  categories?: CalendarCategoryItem[];
   onClose: () => void;
   onSaveEvent: (ev: ScheduleEvent) => void;
 }
@@ -41,9 +47,12 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   selectedDate,
   activePartner,
   metadata,
+  categories,
   onClose,
   onSaveEvent,
 }) => {
+  const categoryList =
+    categories && categories.length > 0 ? categories : DEFAULT_CATEGORIES;
   const [isListening, setIsListening] = useState(false);
   const [spokenText, setSpokenText] = useState('');
   const [speechError, setSpeechError] = useState<string | null>(null);
@@ -144,7 +153,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     if (!finalTitle) return;
 
     const nowIso = new Date().toISOString();
-    const cat = CATEGORY_MAP[categoryId] || CATEGORY_MAP.shared;
+    const cat = resolveCategoryInfo(categoryId, categoryList);
 
     const ev: ScheduleEvent = {
       id: `voice_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -323,20 +332,19 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
             {/* カテゴリ選択 */}
             <div className="flex flex-wrap gap-1.5">
-              {(Object.keys(CATEGORY_MAP) as CalendarCategoryId[]).map((cid) => {
-                const cat = CATEGORY_MAP[cid];
-                const selected = categoryId === cid;
+              {categoryList.map((cat) => {
+                const selected = categoryId === cat.id;
                 const label =
-                  cid === 'partnerA'
-                    ? `${partnerA.avatar}${partnerA.name}`
-                    : cid === 'partnerB'
-                    ? `${partnerB.avatar}${partnerB.name}`
-                    : `${cat.icon}${cat.shortLabel}`;
+                  cat.id === 'partnerA'
+                    ? `${partnerA.avatar}${partnerA.name}予定`
+                    : cat.id === 'partnerB'
+                    ? `${partnerB.avatar}${partnerB.name}予定`
+                    : `${cat.icon}${cat.label}`;
                 return (
                   <button
-                    key={cid}
+                    key={cat.id}
                     type="button"
-                    onClick={() => setCategoryId(cid)}
+                    onClick={() => setCategoryId(cat.id)}
                     style={
                       selected
                         ? { backgroundColor: cat.accentColor, color: '#fff' }
