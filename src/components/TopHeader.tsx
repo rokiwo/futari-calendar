@@ -67,6 +67,7 @@ interface TopHeaderProps {
   onTriggerSync: () => void;
   onOpenSettings: () => void;
   onLockScreen: () => void;
+  onOpenWidgetHome?: () => void;
 }
 
 export function formatLastSeen(isoStr?: string): string {
@@ -123,6 +124,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onTriggerSync,
   onOpenSettings,
   onLockScreen,
+  onOpenWidgetHome,
 }) => {
   const [showHolidayPopup, setShowHolidayPopup] = useState(false);
   const [showOvertimePopup, setShowOvertimePopup] = useState(false);
@@ -139,10 +141,21 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   return (
     <header className="sticky top-0 z-30 bg-[#FFFBF7]/95 backdrop-blur-md border-b border-[#FFE5EC] shadow-xs">
       <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-1.5 pb-1.5 space-y-1.5">
-        {/* 上段：年月セレクター ＋ ふたり休日一致 ＋ 残業時間集計 ＋ 既読・操作切替 */}
+        {/* 上段：ウィジェットへ戻る ＋ 年月セレクター ＋ ふたり休日一致 ＋ 残業時間集計 ＋ 既読・操作切替 */}
         <div className="flex flex-wrap items-center justify-between gap-1.5">
-          {/* 左側：年月切替＆お休み一致＆残業バッジ */}
+          {/* 左側：ウィジェット切替＆年月切替＆お休み一致＆残業バッジ */}
           <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+            {onOpenWidgetHome && (
+              <button
+                type="button"
+                onClick={onOpenWidgetHome}
+                className="px-2.5 py-1 rounded-2xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[11px] font-extrabold shadow-2xs active:scale-95"
+                title="デフォルトのウィジェット（ホーム）画面へ戻る"
+              >
+                🏠 ウィジェット
+              </button>
+            )}
+
             <div className="flex items-center bg-white rounded-2xl border border-stone-200/80 shadow-2xs px-0.5 py-0.5">
               <button
                 type="button"
