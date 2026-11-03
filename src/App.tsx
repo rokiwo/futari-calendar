@@ -148,13 +148,29 @@ export const App: React.FC = () => {
 
       setStore(nextStore);
       setIsLoaded(true);
+
+      // 初回起動時に自動でクラウドから最新データをマージ取得（夫婦間の設定不要同期）
+      const initialCfg = loadSyncConfig();
+      if (initialCfg.enabled && initialCfg.githubToken) {
+        try {
+          setIsSyncing(true);
+          const { mergedStore } = await syncWithGitHub(nextStore, initialCfg);
+          if (mounted) {
+            setStore(mergedStore);
+          }
+        } catch {
+          // オフライン時はローカルデータを維持
+        } finally {
+          if (mounted) setIsSyncing(false);
+        }
+      }
     });
     return () => {
       mounted = false;
     };
   }, []);
 
-  // ストア変更時のローカル保存＆自動クラウド同期
+  // ストア変更時のローカル保存＆自動クラウド同期（合言葉未設定でもデフォルト夫婦暗号鍵で自動同期）
   const commitStore = useCallback(
     async (nextStore: CalendarDataStore, triggerAutoCloud = true) => {
       const stamped: CalendarDataStore = {
@@ -168,8 +184,7 @@ export const App: React.FC = () => {
         triggerAutoCloud &&
         syncConfig.enabled &&
         syncConfig.autoSync &&
-        syncConfig.githubToken &&
-        sessionPassword
+        syncConfig.githubToken
       ) {
         try {
           setIsSyncing(true);
@@ -714,11 +729,6 @@ export const App: React.FC = () => {
     async (configOverride?: CloudSyncConfig, passwordOverride?: string) => {
       const cfg = configOverride || syncConfig;
       const pass = passwordOverride || sessionPassword;
-      if (!pass) {
-        setSettingsOpen(true);
-        showToast('🔑 同期には「合言葉（パスワード）」の設定が必要です');
-        return;
-      }
       setIsSyncing(true);
       try {
         const { mergedStore, statusMessage } = await syncWithGitHub(store, cfg, pass);
@@ -733,6 +743,18 @@ export const App: React.FC = () => {
     },
     [sessionPassword, showToast, store, syncConfig]
   );
+
+  // スマホでアプリ画面を開き直した時（フォーカス復帰時）に自動でクラウド同期
+  useEffect(() => {
+    if (!isLoaded || !syncConfig.enabled || !syncConfig.githubToken) return;
+    const onFocus = () => {
+      syncWithGitHub(store, syncConfig, sessionPassword)
+        .then(({ mergedStore }) => setStore(mergedStore))
+        .catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [isLoaded, sessionPassword, store, syncConfig]);
 
   const handlePrevMonth = useCallback(() => {
     if (month === 1) {
