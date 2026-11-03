@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   ChevronLeft,
@@ -13,10 +13,15 @@ import {
   Settings2,
   Timer,
   Briefcase,
+  Bell,
+  CheckSquare,
+  Square,
+  ExternalLink,
 } from 'lucide-react';
 import {
   CalendarCategoryId,
   CalendarDataStore,
+  NotifyTarget,
   PartnerId,
   ScheduleEvent,
   ShiftEntry,
@@ -29,11 +34,18 @@ import {
   resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
+import {
+  buildGoogleCalendarUrl,
+  getNotifyTargetLabel,
+  REMINDER_PRESETS,
+  shouldNotifyPartner,
+} from '../utils/googleCalendar';
 
 interface DayDetailModalProps {
   dateStr: string; // "YYYY-MM-DD"
   store: CalendarDataStore;
   activePartner: PartnerId;
+  initialOpenEventForm?: boolean;
   onClose: () => void;
   onMoveDate: (deltaDays: number) => void;
   onSetShiftAndAdvance: (
@@ -48,6 +60,7 @@ interface DayDetailModalProps {
   ) => void;
   onToggleDaySupportBadge: (dateStr: string, badge: string) => void;
   onSaveEvent: (event: ScheduleEvent) => void;
+  onToggleTaskComplete: (eventId: string) => void;
   onDeleteEvent: (eventId: string) => void;
   onOpenVoiceModal: () => void;
   onOpenShiftStampManager: () => void;
@@ -69,18 +82,20 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   dateStr,
   store,
   activePartner,
+  initialOpenEventForm = false,
   onClose,
   onMoveDate,
   onSetShiftAndAdvance,
   onUpdateShiftDetails,
   onToggleDaySupportBadge,
   onSaveEvent,
+  onToggleTaskComplete,
   onDeleteEvent,
   onOpenVoiceModal,
   onOpenShiftStampManager,
   onOpenCategoryManager,
 }) => {
-  const [showEventForm, setShowEventForm] = useState(false);
+  const [showEventForm, setShowEventForm] = useState(initialOpenEventForm);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [patternTabId, setPatternTabId] = useState<string>(
     EVENT_PATTERN_CATEGORIES[0].id
@@ -88,12 +103,25 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
   // 新規・編集用フォームステート
   const [title, setTitle] = useState('');
-  const [categoryId, setCategoryId] = useState<CalendarCategoryId>('shared');
+  const [categoryId, setCategoryId] = useState<CalendarCategoryId>(
+    activePartner === 'partnerB' ? 'partnerB' : 'shared'
+  );
+  const [isTask, setIsTask] = useState(false);
+  const [notifyTarget, setNotifyTarget] = useState<NotifyTarget>(activePartner);
+  const [reminderMinutes, setReminderMinutes] = useState<number>(30);
+  const [autoOpenGoogleCal, setAutoOpenGoogleCal] = useState<boolean>(false);
+
   const [isAllDay, setIsAllDay] = useState(false);
   const [startTime, setStartTime] = useState('10:00');
-  const [endTime, setEndTime] = useState('12:00');
+  const [endTime, setEndTime] = useState('11:00');
   const [memo, setMemo] = useState('');
   const [eventBadges, setEventBadges] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (initialOpenEventForm) {
+      setShowEventForm(true);
+    }
+  }, [initialOpenEventForm]);
 
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
@@ -102,6 +130,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
   const partnerA = store.metadata.partners.partnerA;
   const partnerB = store.metadata.partners.partnerB;
+  const currentPartnerInfo = store.metadata.partners[activePartner];
 
   const categories =
     store.categories && store.categories.length > 0
@@ -142,6 +171,18 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const daySupport = store.daySupports?.[dateStr];
   const activeDayBadges = daySupport?.badges || [];
 
+  // カテゴリ選択に応じて通知対象端末を自動連動（妻予定なら妻の端末のみ、夫予定なら夫の端末のみ）
+  const handleSelectCategory = (catId: CalendarCategoryId) => {
+    setCategoryId(catId);
+    if (catId === 'partnerA') {
+      setNotifyTarget('partnerA');
+    } else if (catId === 'partnerB') {
+      setNotifyTarget('partnerB');
+    } else if (!isTask) {
+      setNotifyTarget('both');
+    }
+  };
+
   const renderAuditAndReadStatus = (createdBy: PartnerId, createdAt: string, updatedAt: string) => {
     const creator = store.metadata.partners[createdBy];
     const otherId: PartnerId = createdBy === 'partnerA' ? 'partnerB' : 'partnerA';
@@ -175,13 +216,24 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     );
   };
 
-  const handleOpenNewForm = (defaultCatId?: CalendarCategoryId) => {
+  const handleOpenNewForm = (defaultCatId?: CalendarCategoryId, defaultTaskMode = false) => {
     setEditingEventId(null);
     setTitle('');
-    setCategoryId(defaultCatId || categories[0]?.id || 'shared');
+    const nextCat = defaultCatId || (defaultTaskMode ? activePartner : categories[0]?.id || 'shared');
+    setCategoryId(nextCat);
+    setIsTask(defaultTaskMode);
+    if (nextCat === 'partnerA') {
+      setNotifyTarget('partnerA');
+    } else if (nextCat === 'partnerB') {
+      setNotifyTarget('partnerB');
+    } else {
+      setNotifyTarget(defaultTaskMode ? activePartner : 'both');
+    }
+    setReminderMinutes(30);
+    setAutoOpenGoogleCal(defaultTaskMode);
     setIsAllDay(false);
     setStartTime('10:00');
-    setEndTime('12:00');
+    setEndTime('11:00');
     setMemo('');
     setEventBadges([]);
     setShowEventForm(true);
@@ -191,9 +243,20 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     setEditingEventId(ev.id);
     setTitle(ev.title);
     setCategoryId(ev.categoryId);
+    setIsTask(Boolean(ev.isTask));
+    setNotifyTarget(
+      ev.notifyTarget ||
+        (ev.categoryId === 'partnerA'
+          ? 'partnerA'
+          : ev.categoryId === 'partnerB'
+          ? 'partnerB'
+          : 'both')
+    );
+    setReminderMinutes(ev.reminderMinutes ?? 30);
+    setAutoOpenGoogleCal(false);
     setIsAllDay(ev.isAllDay);
     setStartTime(ev.startTime || '10:00');
-    setEndTime(ev.endTime || '12:00');
+    setEndTime(ev.endTime || '11:00');
     setMemo(ev.memo || '');
     setEventBadges(ev.supportBadges || []);
     setShowEventForm(true);
@@ -218,12 +281,25 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
       endTime: isAllDay ? undefined : endTime,
       memo: memo.trim() || undefined,
       supportBadges: eventBadges.length > 0 ? eventBadges : undefined,
+      isTask,
+      isCompleted: existing ? existing.isCompleted : false,
+      notifyTarget,
+      reminderMinutes,
+      googleCalSynced: existing?.googleCalSynced || autoOpenGoogleCal,
       createdBy: existing ? existing.createdBy : activePartner,
       createdAt: existing ? existing.createdAt : nowIso,
       updatedAt: nowIso,
     };
 
     onSaveEvent(newEvent);
+
+    // もし「保存時にGoogleカレンダー通知をセット」がONで、かつ自分の端末が通知対象の場合のみGoogleカレンダーを起動！
+    // （妻のタスクなら妻の端末のみ、夫のタスクなら夫の端末のみで開く安全設計）
+    if (autoOpenGoogleCal && shouldNotifyPartner(newEvent, activePartner)) {
+      const gcalUrl = buildGoogleCalendarUrl(newEvent, store);
+      window.open(gcalUrl, '_blank', 'noopener,noreferrer');
+    }
+
     setShowEventForm(false);
     setEditingEventId(null);
   };
@@ -289,7 +365,553 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
         {/* 2. モーダル本文 */}
         <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4">
-          {/* セクションA：ふたりのシフト並列入力欄（本業シフト ＋ 仕事終わり/休日のバイト ＋ 残業・休出時間） */}
+          {/* セクションA（最上部）：この日のすべての予定＆タスク一覧 ＋ 新規追加フォーム（TimeTree風） */}
+          <div className="space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-extrabold text-stone-800">
+                📅 この日のすべての予定・タスク ({dayEvents.length}件)
+              </h3>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenVoiceModal();
+                  }}
+                  className="px-2.5 py-1.5 rounded-2xl bg-[#B388EB] hover:bg-[#8C5EC7] text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
+                >
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>声で追加</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenNewForm(activePartner, true)}
+                  className="px-2.5 py-1.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  <span>＋タスク(通知)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenNewForm()}
+                  className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>＋予定を追加</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 項目別（二人予定・夫予定・妻予定）ワンタップ入力開始ボタン */}
+            {!showEventForm && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {categories.map((cat) => {
+                  const resolved = resolveCategoryInfo(cat.id, store.categories, store.metadata);
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => handleOpenNewForm(cat.id, false)}
+                      style={{
+                        backgroundColor: resolved.bgColor,
+                        color: resolved.textColor,
+                        borderColor: resolved.accentColor,
+                      }}
+                      className="px-2.5 py-1 rounded-xl border text-xs font-extrabold flex items-center gap-1 shadow-2xs active:scale-95"
+                    >
+                      <span>＋ {resolved.icon}</span>
+                      <span>{resolved.shortLabel}を追加</span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={onOpenCategoryManager}
+                  className="px-2.5 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 text-[11px] font-bold"
+                >
+                  ＋項目の追加・削除
+                </button>
+              </div>
+            )}
+
+            {/* 新規・編集フォーム（予定 または Googleカレンダー連携タスク） */}
+            {showEventForm && (
+              <form
+                onSubmit={handleSubmitEvent}
+                className="bg-white rounded-2xl p-3.5 border-2 border-[#FF8FAB] shadow-md space-y-3 animate-pop"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-[#9E2A47]">
+                    {editingEventId
+                      ? '✏️ 予定・タスクを編集'
+                      : isTask
+                      ? '✅ 新しいタスク（Googleカレンダー通知対応）を追加'
+                      : '✨ 新しい予定を追加'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEventForm(false)}
+                    className="text-xs text-stone-400 hover:text-stone-600 font-bold"
+                  >
+                    閉じる
+                  </button>
+                </div>
+
+                {/* 📅予定 ⇔ ✅タスク(ToDo) 切替タブ */}
+                <div className="grid grid-cols-2 gap-1.5 bg-stone-100 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setIsTask(false)}
+                    className={`py-1.5 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1 transition-all ${
+                      !isTask
+                        ? 'bg-white text-[#9E2A47] shadow-xs'
+                        : 'text-stone-500 hover:text-stone-700'
+                    }`}
+                  >
+                    <span>📅 通常の予定</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsTask(true);
+                      // タスクに切り替えた時は操作中のパートナー（妻なら妻、夫なら夫）の端末のみ通知をデフォルトに！
+                      if (categoryId === 'partnerA') {
+                        setNotifyTarget('partnerA');
+                      } else if (categoryId === 'partnerB') {
+                        setNotifyTarget('partnerB');
+                      } else {
+                        setNotifyTarget(activePartner);
+                      }
+                    }}
+                    className={`py-1.5 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1 transition-all ${
+                      isTask
+                        ? 'bg-emerald-500 text-white shadow-xs'
+                        : 'text-stone-500 hover:text-stone-700'
+                    }`}
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    <span>✅ タスク（ToDo・通知）</span>
+                  </button>
+                </div>
+
+                {/* パターン別アイコン＆定型予定ワンタップ選択パレット */}
+                <div className="bg-[#FFFBF7] rounded-2xl p-2.5 border border-[#FFE5EC] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-[#9E2A47]">
+                      🎨 パターン別アイコン＆定型予定（1タップ入力）
+                    </span>
+                  </div>
+
+                  {/* パターンカテゴリ切替タブ */}
+                  <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                    {EVENT_PATTERN_CATEGORIES.map((grp) => {
+                      const active = patternTabId === grp.id;
+                      return (
+                        <button
+                          key={grp.id}
+                          type="button"
+                          onClick={() => setPatternTabId(grp.id)}
+                          className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold whitespace-nowrap transition-all ${
+                            active
+                              ? 'bg-[#FF8FAB] text-white shadow-2xs'
+                              : 'bg-white text-stone-600 border border-stone-200/80 hover:bg-stone-50'
+                          }`}
+                        >
+                          {grp.tabLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {(() => {
+                    const currentGrp =
+                      EVENT_PATTERN_CATEGORIES.find((g) => g.id === patternTabId) ||
+                      EVENT_PATTERN_CATEGORIES[0];
+                    return (
+                      <>
+                        {/* ワンタップ定型予定チップ */}
+                        <div className="flex flex-wrap gap-1">
+                          {currentGrp.items.map((item) => (
+                            <button
+                              key={item.label}
+                              type="button"
+                              onClick={() => {
+                                setTitle(item.title);
+                                if (item.startTime) {
+                                  setIsAllDay(false);
+                                  setStartTime(item.startTime);
+                                  if (item.endTime) setEndTime(item.endTime);
+                                }
+                                if (
+                                  item.supportBadge &&
+                                  !eventBadges.includes(item.supportBadge)
+                                ) {
+                                  setEventBadges([...eventBadges, item.supportBadge]);
+                                }
+                              }}
+                              className="px-2 py-1 rounded-xl bg-white hover:bg-[#FFE5EC] border border-stone-200/90 text-[11px] font-extrabold text-stone-700 flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
+                            >
+                              <span>{item.icon}</span>
+                              <span>{item.label}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* アイコン絵文字だけ先頭に付ける／差し替えるボタン群 */}
+                        <div className="pt-1 border-t border-stone-200/60">
+                          <div className="text-[10px] font-bold text-stone-400 mb-1">
+                            👇 アイコンだけ選んでタイトルの先頭に付ける：
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {currentGrp.icons.map((ic) => (
+                              <button
+                                key={ic}
+                                type="button"
+                                onClick={() => {
+                                  const cleaned = title.replace(
+                                    /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/u,
+                                    ''
+                                  );
+                                  setTitle(`${ic} ${cleaned}`);
+                                }}
+                                className="w-7 h-7 rounded-lg bg-white hover:bg-[#FFE5EC] border border-stone-200/80 text-sm flex items-center justify-center active:scale-90 transition-transform"
+                              >
+                                {ic}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                <div>
+                  <textarea
+                    rows={2}
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder={
+                      isTask
+                        ? 'タスク・やることを入力（例：市役所へ行く、振込、買い物など）'
+                        : '予定タイトルを入力（上のパターンをタップするか、キーボードの🎤でも入力可能）'
+                    }
+                    autoFocus
+                    className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-sm font-bold text-stone-800 focus:border-[#FF8FAB] focus:outline-none"
+                  />
+                </div>
+
+                {/* カテゴリ選択（二人予定・夫予定・妻予定＋追加項目） */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {categories.map((c) => {
+                    const cat = resolveCategoryInfo(c.id, store.categories, store.metadata);
+                    const selected = categoryId === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => handleSelectCategory(c.id)}
+                        style={
+                          selected
+                            ? { backgroundColor: cat.accentColor, color: '#fff' }
+                            : { backgroundColor: cat.bgColor, color: cat.textColor }
+                        }
+                        className="px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all"
+                      >
+                        {cat.icon} {cat.shortLabel}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={onOpenCategoryManager}
+                    className="px-2 py-1 rounded-xl bg-stone-100 text-stone-600 text-[10px] font-bold"
+                  >
+                    ＋項目編集
+                  </button>
+                </div>
+
+                {/* 時間設定 */}
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <label className="flex items-center gap-1.5 font-bold text-stone-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isAllDay}
+                      onChange={(e) => setIsAllDay(e.target.checked)}
+                      className="rounded text-[#FF8FAB]"
+                    />
+                    <span>終日</span>
+                  </label>
+
+                  {!isAllDay && (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="time"
+                        value={startTime}
+                        onChange={(e) => setStartTime(e.target.value)}
+                        className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold"
+                      />
+                      <span>〜</span>
+                      <input
+                        type="time"
+                        value={endTime}
+                        onChange={(e) => setEndTime(e.target.value)}
+                        className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 🔔 Googleカレンダー連携 ＆ 端末別通知設定（妻なら妻の端末のみ、夫なら夫の端末のみに通知） */}
+                <div className="bg-[#F6F9FF] rounded-2xl p-3 border border-sky-200/90 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold text-sky-900 flex items-center gap-1">
+                      <Bell className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Googleカレンダー通知対象（端末別通知）</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-sky-700">
+                      ※選んだ人のスマホにだけ通知されます
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setNotifyTarget('partnerA')}
+                      className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
+                        notifyTarget === 'partnerA'
+                          ? 'bg-[#126875] text-white border-[#126875] shadow-2xs'
+                          : 'bg-white text-stone-600 border-stone-200'
+                      }`}
+                    >
+                      {partnerA.avatar} {partnerA.name}の端末のみ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNotifyTarget('partnerB')}
+                      className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
+                        notifyTarget === 'partnerB'
+                          ? 'bg-[#6638A6] text-white border-[#6638A6] shadow-2xs'
+                          : 'bg-white text-stone-600 border-stone-200'
+                      }`}
+                    >
+                      {partnerB.avatar} {partnerB.name}の端末のみ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNotifyTarget('both')}
+                      className={`py-1.5 px-2 rounded-xl text-[11px] font-extrabold border transition-all ${
+                        notifyTarget === 'both'
+                          ? 'bg-[#D63864] text-white border-[#D63864] shadow-2xs'
+                          : 'bg-white text-stone-600 border-stone-200'
+                      }`}
+                    >
+                      💕 2人の端末とも
+                    </button>
+                  </div>
+
+                  {/* 通知タイミング */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[11px] font-bold text-stone-600">通知時間:</span>
+                    {REMINDER_PRESETS.map((rm) => (
+                      <button
+                        key={rm.minutes}
+                        type="button"
+                        onClick={() => setReminderMinutes(rm.minutes)}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border ${
+                          reminderMinutes === rm.minutes
+                            ? 'bg-sky-600 text-white border-sky-600'
+                            : 'bg-white text-stone-600 border-stone-200'
+                        }`}
+                      >
+                        {rm.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 現在の操作端末（activePartner）が通知対象に含まれている場合のみ、保存時Googleカレンダー起動チェックを表示 */}
+                  { notifyTarget === 'both' || notifyTarget === activePartner ? (
+                    <label className="flex items-center gap-1.5 pt-1 text-[11px] font-extrabold text-sky-900 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoOpenGoogleCal}
+                        onChange={(e) => setAutoOpenGoogleCal(e.target.checked)}
+                        className="rounded text-sky-600"
+                      />
+                      <span>
+                        📲 保存と同時にこの端末（{currentPartnerInfo.avatar}{currentPartnerInfo.name}）のGoogleカレンダーを開いて通知セットする
+                      </span>
+                    </label>
+                  ) : (
+                    <div className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
+                      💡 この予定・タスクは「{notifyTarget === 'partnerA' ? `${partnerA.avatar}${partnerA.name}` : `${partnerB.avatar}${partnerB.name}`}の端末のみ通知」に設定されています。あなたの端末には通知されず、相手の画面にGoogleカレンダー通知ボタンが表示されます。
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <input
+                    type="text"
+                    value={memo}
+                    onChange={(e) => setMemo(e.target.value)}
+                    placeholder="メモ・場所・持ち物など（任意）"
+                    className="w-full px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] text-xs text-stone-700"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowEventForm(false)}
+                    className="px-3.5 py-1.5 rounded-xl bg-stone-100 text-stone-600 text-xs font-bold"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-xs"
+                  >
+                    {editingEventId ? '更新する' : isTask ? 'タスクを追加する' : '予定を追加する'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* 予定＆タスク一覧表示 */}
+            {dayEvents.length === 0 ? (
+              <div className="bg-white rounded-2xl p-4 text-center border border-dashed border-stone-200 text-xs text-stone-400">
+                この日の予定・タスクはまだありません🐾 上の「＋予定を追加」「＋タスク(通知)」から登録できます。
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {dayEvents.map((ev) => {
+                  const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
+                  const isMyNotificationTarget = shouldNotifyPartner(ev, activePartner);
+                  const notifyLabel = getNotifyTargetLabel(ev, store);
+
+                  return (
+                    <div
+                      key={ev.id}
+                      style={{
+                        backgroundColor: cat.bgColor,
+                        borderLeftColor: ev.color || cat.accentColor,
+                      }}
+                      className={`rounded-2xl p-3 border-l-4 shadow-xs transition-all ${
+                        ev.isTask && ev.isCompleted ? 'opacity-70' : ''
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {ev.isTask && (
+                              <button
+                                type="button"
+                                onClick={() => onToggleTaskComplete(ev.id)}
+                                className={`px-2 py-0.5 rounded-full text-[11px] font-black flex items-center gap-1 transition-all ${
+                                  ev.isCompleted
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-white text-emerald-700 border border-emerald-400 shadow-2xs'
+                                }`}
+                              >
+                                {ev.isCompleted ? (
+                                  <>
+                                    <CheckSquare className="w-3 h-3" />
+                                    <span>完了済</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Square className="w-3 h-3" />
+                                    <span>タスク未完了（タップで完了）</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+
+                            <span
+                              style={{ backgroundColor: cat.accentColor }}
+                              className="px-2 py-0.5 rounded-full text-white text-[10px] font-extrabold"
+                            >
+                              {cat.icon} {cat.shortLabel}
+                            </span>
+
+                            <span className="text-xs font-extrabold text-stone-700 flex items-center gap-0.5">
+                              <Clock className="w-3 h-3 opacity-70" />
+                              {ev.isAllDay
+                                ? '終日'
+                                : `${ev.startTime || ''}${ev.endTime ? `〜${ev.endTime}` : ''}`}
+                            </span>
+
+                            <span className="px-2 py-0.5 rounded-full bg-white/80 text-stone-700 text-[10px] font-extrabold flex items-center gap-0.5">
+                              <Bell className="w-2.5 h-2.5 text-sky-600" />
+                              <span>{notifyLabel}</span>
+                            </span>
+                          </div>
+
+                          <p
+                            style={{ color: cat.textColor }}
+                            className={`text-sm font-extrabold whitespace-pre-wrap break-words leading-snug ${
+                              ev.isTask && ev.isCompleted ? 'line-through' : ''
+                            }`}
+                          >
+                            {ev.title}
+                          </p>
+
+                          {ev.memo && (
+                            <p className="text-xs text-stone-600 bg-white/70 rounded-xl px-2.5 py-1 whitespace-pre-wrap">
+                              📝 {ev.memo}
+                            </p>
+                          )}
+
+                          {/* Googleカレンダー通知登録ボタン：現在の操作端末（妻 or 夫）が通知対象の時だけ表示！ */}
+                          {isMyNotificationTarget && (
+                            <div className="pt-1">
+                              <a
+                                href={buildGoogleCalendarUrl(ev, store)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 text-[11px] font-extrabold shadow-2xs transition-all"
+                              >
+                                <Bell className="w-3 h-3 text-sky-600" />
+                                <span>
+                                  🔔 {currentPartnerInfo.avatar}{currentPartnerInfo.name}のGoogleカレンダーに通知登録
+                                </span>
+                                <ExternalLink className="w-3 h-3 opacity-70" />
+                              </a>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditEvent(ev)}
+                            className="p-1.5 rounded-xl bg-white/80 hover:bg-white text-stone-600 shadow-2xs"
+                            title="予定を編集"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteEvent(ev.id)}
+                            className="p-1.5 rounded-xl bg-white/80 hover:bg-rose-50 text-rose-500 shadow-2xs"
+                            title="予定を削除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {renderAuditAndReadStatus(ev.createdBy, ev.createdAt, ev.updatedAt)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* セクションB：ふたりのシフト並列入力欄（本業シフト ＋ 仕事終わり/休日のバイト ＋ 残業・休出時間） */}
           <div className="bg-white rounded-2xl p-3.5 border border-stone-200/90 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-extrabold text-stone-700">
@@ -565,7 +1187,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
             </div>
           </div>
 
-          {/* セクションB：🍳すれ違いサポートアイコン（1タップでごはん・お迎え目印） */}
+          {/* セクションC：🍳すれ違いサポートアイコン（1タップでごはん・お迎え目印） */}
           <div className="bg-white rounded-2xl p-3 border border-stone-200/90 shadow-xs">
             <div className="text-xs font-extrabold text-stone-700 mb-2">
               🍳 ごはん・お迎え目印（1タップで日付に表示）
@@ -589,370 +1211,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                 );
               })}
             </div>
-          </div>
-
-          {/* セクションC：この日の予定リスト（二人予定・夫予定・妻予定・追加項目） */}
-          <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-extrabold text-stone-800">
-                📅 この日の予定 ({dayEvents.length}件)
-              </h3>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenVoiceModal();
-                  }}
-                  className="px-3 py-1.5 rounded-2xl bg-[#B388EB] hover:bg-[#8C5EC7] text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
-                >
-                  <Mic className="w-3.5 h-3.5" />
-                  <span>声で予定を入れる</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleOpenNewForm()}
-                  className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>予定を追加</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 項目別（二人予定・夫予定・妻予定）ワンタップ入力開始ボタン */}
-            {!showEventForm && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {categories.map((cat) => {
-                  const resolved = resolveCategoryInfo(cat.id, store.categories, store.metadata);
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => handleOpenNewForm(cat.id)}
-                      style={{
-                        backgroundColor: resolved.bgColor,
-                        color: resolved.textColor,
-                        borderColor: resolved.accentColor,
-                      }}
-                      className="px-2.5 py-1 rounded-xl border text-xs font-extrabold flex items-center gap-1 shadow-2xs active:scale-95"
-                    >
-                      <span>＋ {resolved.icon}</span>
-                      <span>{resolved.shortLabel}を追加</span>
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={onOpenCategoryManager}
-                  className="px-2.5 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 text-[11px] font-bold"
-                >
-                  ＋項目の追加・削除
-                </button>
-              </div>
-            )}
-
-            {/* 新規・編集フォーム */}
-            {showEventForm && (
-              <form
-                onSubmit={handleSubmitEvent}
-                className="bg-white rounded-2xl p-3.5 border-2 border-[#FF8FAB] shadow-md space-y-3 animate-pop"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-[#9E2A47]">
-                    {editingEventId ? '✏️ 予定を編集' : '✨ 新しい予定を追加'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowEventForm(false)}
-                    className="text-xs text-stone-400 hover:text-stone-600"
-                  >
-                    閉じる
-                  </button>
-                </div>
-
-                {/* パターン別アイコン＆定型予定ワンタップ選択パレット */}
-                <div className="bg-[#FFFBF7] rounded-2xl p-2.5 border border-[#FFE5EC] space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-extrabold text-[#9E2A47]">
-                      🎨 パターン別アイコン＆定型予定（1タップ入力）
-                    </span>
-                  </div>
-
-                  {/* パターンカテゴリ切替タブ */}
-                  <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
-                    {EVENT_PATTERN_CATEGORIES.map((grp) => {
-                      const active = patternTabId === grp.id;
-                      return (
-                        <button
-                          key={grp.id}
-                          type="button"
-                          onClick={() => setPatternTabId(grp.id)}
-                          className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold whitespace-nowrap transition-all ${
-                            active
-                              ? 'bg-[#FF8FAB] text-white shadow-2xs'
-                              : 'bg-white text-stone-600 border border-stone-200/80 hover:bg-stone-50'
-                          }`}
-                        >
-                          {grp.tabLabel}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {(() => {
-                    const currentGrp =
-                      EVENT_PATTERN_CATEGORIES.find((g) => g.id === patternTabId) ||
-                      EVENT_PATTERN_CATEGORIES[0];
-                    return (
-                      <>
-                        {/* ワンタップ定型予定チップ */}
-                        <div className="flex flex-wrap gap-1">
-                          {currentGrp.items.map((item) => (
-                            <button
-                              key={item.label}
-                              type="button"
-                              onClick={() => {
-                                setTitle(item.title);
-                                if (item.startTime) {
-                                  setIsAllDay(false);
-                                  setStartTime(item.startTime);
-                                  if (item.endTime) setEndTime(item.endTime);
-                                }
-                                if (
-                                  item.supportBadge &&
-                                  !eventBadges.includes(item.supportBadge)
-                                ) {
-                                  setEventBadges([...eventBadges, item.supportBadge]);
-                                }
-                              }}
-                              className="px-2 py-1 rounded-xl bg-white hover:bg-[#FFE5EC] border border-stone-200/90 text-[11px] font-extrabold text-stone-700 flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
-                            >
-                              <span>{item.icon}</span>
-                              <span>{item.label}</span>
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* アイコン絵文字だけ先頭に付ける／差し替えるボタン群 */}
-                        <div className="pt-1 border-t border-stone-200/60">
-                          <div className="text-[10px] font-bold text-stone-400 mb-1">
-                            👇 アイコンだけ選んでタイトルの先頭に付ける：
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            {currentGrp.icons.map((ic) => (
-                              <button
-                                key={ic}
-                                type="button"
-                                onClick={() => {
-                                  const cleaned = title.replace(
-                                    /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/u,
-                                    ''
-                                  );
-                                  setTitle(`${ic} ${cleaned}`);
-                                }}
-                                className="w-7 h-7 rounded-lg bg-white hover:bg-[#FFE5EC] border border-stone-200/80 text-sm flex items-center justify-center active:scale-90 transition-transform"
-                              >
-                                {ic}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-
-                <div>
-                  <textarea
-                    rows={2}
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="予定タイトルを入力（上のパターンをタップするか、キーボードの🎤でも入力可能）"
-                    autoFocus
-                    className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-sm font-bold text-stone-800 focus:border-[#FF8FAB] focus:outline-none"
-                  />
-                </div>
-
-                {/* カテゴリ選択（二人予定・夫予定・妻予定＋追加項目） */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {categories.map((c) => {
-                    const cat = resolveCategoryInfo(c.id, store.categories, store.metadata);
-                    const selected = categoryId === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => setCategoryId(c.id)}
-                        style={
-                          selected
-                            ? { backgroundColor: cat.accentColor, color: '#fff' }
-                            : { backgroundColor: cat.bgColor, color: cat.textColor }
-                        }
-                        className="px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all"
-                      >
-                        {cat.icon} {cat.shortLabel}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    onClick={onOpenCategoryManager}
-                    className="px-2 py-1 rounded-xl bg-stone-100 text-stone-600 text-[10px] font-bold"
-                  >
-                    ＋項目編集
-                  </button>
-                </div>
-
-                {/* 時間設定 */}
-                <div className="flex flex-wrap items-center gap-3 text-xs">
-                  <label className="flex items-center gap-1.5 font-bold text-stone-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isAllDay}
-                      onChange={(e) => setIsAllDay(e.target.checked)}
-                      className="rounded text-[#FF8FAB]"
-                    />
-                    <span>終日予定</span>
-                  </label>
-
-                  {!isAllDay && (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold"
-                      />
-                      <span>〜</span>
-                      <input
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <input
-                    type="text"
-                    value={memo}
-                    onChange={(e) => setMemo(e.target.value)}
-                    placeholder="メモ・場所・持ち物など（任意）"
-                    className="w-full px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] text-xs text-stone-700"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowEventForm(false)}
-                    className="px-3.5 py-1.5 rounded-xl bg-stone-100 text-stone-600 text-xs font-bold"
-                  >
-                    キャンセル
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-xs"
-                  >
-                    {editingEventId ? '更新する' : '追加する'}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* 予定リスト表示 */}
-            {dayEvents.length === 0 ? (
-              <div className="bg-white rounded-2xl p-5 text-center border border-dashed border-stone-200 text-xs text-stone-400">
-                予定はまだありません🐾 上の「＋二人予定」「＋夫予定」「＋妻予定」または「🎙️声で予定を入れる」からすぐ登録できます。
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {dayEvents.map((ev) => {
-                  const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
-                  return (
-                    <div
-                      key={ev.id}
-                      style={{
-                        backgroundColor: cat.bgColor,
-                        borderLeftColor: ev.color || cat.accentColor,
-                      }}
-                      className="rounded-2xl p-3 border-l-4 shadow-xs transition-all"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="space-y-1 min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span
-                              style={{ backgroundColor: cat.accentColor }}
-                              className="px-2 py-0.5 rounded-full text-white text-[10px] font-extrabold"
-                            >
-                              {cat.icon} {cat.shortLabel}
-                            </span>
-
-                            <span className="text-xs font-extrabold text-stone-700 flex items-center gap-0.5">
-                              <Clock className="w-3 h-3 opacity-70" />
-                              {ev.isAllDay
-                                ? '終日'
-                                : `${ev.startTime || ''}${ev.endTime ? `〜${ev.endTime}` : ''}`}
-                            </span>
-                          </div>
-
-                          <p
-                            style={{ color: cat.textColor }}
-                            className="text-sm font-extrabold whitespace-pre-wrap break-words leading-snug"
-                          >
-                            {ev.title}
-                          </p>
-
-                          {ev.memo && (
-                            <p className="text-xs text-stone-600 bg-white/70 rounded-xl px-2.5 py-1 whitespace-pre-wrap">
-                              📝 {ev.memo}
-                            </p>
-                          )}
-
-                          {ev.supportBadges && ev.supportBadges.length > 0 && (
-                            <div className="flex flex-wrap gap-1 pt-0.5">
-                              {ev.supportBadges.map((b) => (
-                                <span
-                                  key={b}
-                                  className="px-2 py-0.5 rounded-lg bg-[#FFF6D6] text-[#8A5A00] text-[10px] font-extrabold"
-                                >
-                                  {b}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleStartEditEvent(ev)}
-                            className="p-1.5 rounded-xl bg-white/80 hover:bg-white text-stone-600 shadow-2xs"
-                            title="予定を編集"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteEvent(ev.id)}
-                            className="p-1.5 rounded-xl bg-white/80 hover:bg-rose-50 text-rose-500 shadow-2xs"
-                            title="予定を削除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {renderAuditAndReadStatus(ev.createdBy, ev.createdAt, ev.updatedAt)}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
         </div>
       </div>
