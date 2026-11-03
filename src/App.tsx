@@ -8,7 +8,7 @@ import {
   ShiftEntry,
   StampPreset,
 } from './types/calendar';
-import { CATEGORY_MAP, createInitialDataStore } from './utils/presets';
+import { createInitialDataStore } from './utils/presets';
 import { hashPasscode } from './utils/crypto';
 import {
   getActivePartnerId,
@@ -28,6 +28,10 @@ import { StampDrawer, StampDrawerTab } from './components/StampDrawer';
 import { DayDetailModal } from './components/DayDetailModal';
 import { SettingsAndSyncModal } from './components/SettingsAndSyncModal';
 import { PasscodeModal } from './components/PasscodeModal';
+import { ShiftStampManagerModal } from './components/ShiftStampManagerModal';
+import { ShiftImageOcrModal } from './components/ShiftImageOcrModal';
+import { VoiceEventModal } from './components/VoiceEventModal';
+import { WidgetCompactView, WidgetGuideModal } from './components/WidgetModalAndView';
 
 // 日付文字列 "YYYY-MM-DD" に deltaDays 日を加算した "YYYY-MM-DD" を返す
 function addDaysToDateStr(dateStr: string, deltaDays: number): string {
@@ -49,6 +53,12 @@ export const App: React.FC = () => {
   const [store, setStore] = useState<CalendarDataStore>(() => createInitialDataStore());
   const [isLoaded, setIsLoaded] = useState(false);
 
+  // URLクエリ ?widget=1 の場合はスマホウィジェット専用コンパクト画面で起動
+  const [isWidgetMode, setIsWidgetMode] = useState<boolean>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('widget') === '1';
+  });
+
   // 表示中の年月・選択日
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -62,15 +72,18 @@ export const App: React.FC = () => {
   const [isExpandedView, setIsExpandedView] = useState<boolean>(true);
   const [showShiftTimeInCell, setShowShiftTimeInCell] = useState<boolean>(false);
 
-  // ポチポチ連続スタンプドロワー状態
+  // シフト連続入力ドロワー状態
   const [stampDrawerOpen, setStampDrawerOpen] = useState<boolean>(false);
   const [stampDrawerTab, setStampDrawerTab] = useState<StampDrawerTab>('partnerA_shift');
   const [selectedStampId, setSelectedStampId] = useState<string | null>('shift_day');
-  const [autoAdvance, setAutoAdvance] = useState<boolean>(true);
 
-  // モーダル開閉状態
+  // 各種モーダル開閉状態
   const [dayDetailOpen, setDayDetailOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [shiftManagerOpen, setShiftManagerOpen] = useState<boolean>(false);
+  const [imageOcrOpen, setImageOcrOpen] = useState<boolean>(false);
+  const [voiceModalOpen, setVoiceModalOpen] = useState<boolean>(false);
+  const [widgetGuideOpen, setWidgetGuideOpen] = useState<boolean>(false);
 
   // パスワードロック＆クラウド同期状態
   const [savedPassHash, setSavedPassHashState] = useState<string | null>(() => getSavedPassHash());
@@ -88,16 +101,20 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!toastText) return;
-    const timer = setTimeout(() => setToastText(null), 2600);
+    const timer = setTimeout(() => setToastText(null), 2400);
     return () => clearTimeout(timer);
   }, [toastText]);
 
-  // 初回ロード（IndexedDB / localStorage から復元）
+  // 初回ロード（IndexedDB / localStorage から復元し、不要になったeventスタンプを除外）
   useEffect(() => {
     let mounted = true;
     loadLocalStore().then((loaded) => {
       if (!mounted) return;
-      setStore(loaded);
+      const shiftOnlyStamps = (loaded.stamps || []).filter((s) => s.type === 'shift');
+      setStore({
+        ...loaded,
+        stamps: shiftOnlyStamps.length > 0 ? shiftOnlyStamps : createInitialDataStore().stamps,
+      });
       setIsLoaded(true);
     });
     return () => {
@@ -127,7 +144,7 @@ export const App: React.FC = () => {
           const { mergedStore } = await syncWithGitHub(stamped, syncConfig, sessionPassword);
           setStore(mergedStore);
         } catch {
-          // バックグラウンド自動同期失敗時はローカル保存を維持
+          // オフライン時はローカル保存を維持
         } finally {
           setIsSyncing(false);
         }
@@ -147,8 +164,8 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  // 指定日にシフトを登録または消去
-  const handleSetShift = useCallback(
+  // 指定日にシフトを登録または消去し、必ず次の日（翌日）へ移動する
+  const handleSetShiftAndAdvance = useCallback(
     (
       dateStr: string,
       partnerId: PartnerId,
@@ -163,7 +180,6 @@ export const App: React.FC = () => {
 
       let nextShift: ShiftEntry;
       if (!stamp) {
-        // 論理削除（クラウド差分マージでも消去が正しく伝播するように deletedAt を記録）
         nextShift = {
           id: shiftId,
           date: dateStr,
@@ -198,42 +214,36 @@ export const App: React.FC = () => {
         },
       };
       commitStore(nextStore);
+
+      // シフトが1つ入ったら必ず翌日へ自動移動！
+      const nextDate = addDaysToDateStr(dateStr, 1);
+      setSelectedDate(nextDate);
+      const [ny, nm] = nextDate.split('-').map(Number);
+      setYear(ny);
+      setMonth(nm);
     },
     [activePartner, commitStore, store]
   );
 
-  // 定型予定スタンプからワンタップで予定を追加
-  const handleQuickAddEventFromStamp = useCallback(
-    (dateStr: string, stamp: StampPreset) => {
-      const nowIso = new Date().toISOString();
-      const catId = stamp.categoryId || 'shared';
-      const cat = CATEGORY_MAP[catId] || CATEGORY_MAP.shared;
-      const newEvent: ScheduleEvent = {
-        id: `ev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        date: dateStr,
-        title: stamp.label,
-        categoryId: catId,
-        color: stamp.color || cat.accentColor,
-        isAllDay: !stamp.startTime,
-        startTime: stamp.startTime,
-        endTime: stamp.endTime,
-        createdBy: activePartner,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      };
-
-      const nextStore: CalendarDataStore = {
+  // AI画像読取やナスカレ連携からの一括シフト＆予定登録
+  const handleBulkApplyShiftsAndEvents = useCallback(
+    (newShifts: ShiftEntry[], newEvents: ScheduleEvent[], summaryMsg: string) => {
+      const nextShifts = { ...store.shifts };
+      for (const s of newShifts) {
+        nextShifts[s.id] = s;
+      }
+      const nextEvents = { ...store.events };
+      for (const ev of newEvents) {
+        nextEvents[ev.id] = ev;
+      }
+      commitStore({
         ...store,
-        events: {
-          ...store.events,
-          [newEvent.id]: newEvent,
-        },
-      };
-      commitStore(nextStore);
-      const [, m, d] = dateStr.split('-').map(Number);
-      showToast(`${m}/${d} に「${stamp.label}」を追加しました✨`);
+        shifts: nextShifts,
+        events: nextEvents,
+      });
+      showToast(summaryMsg);
     },
-    [activePartner, commitStore, showToast, store]
+    [commitStore, showToast, store]
   );
 
   // 日付ごとの「🍳すれ違いサポートアイコン」をON/OFF
@@ -264,29 +274,6 @@ export const App: React.FC = () => {
     [activePartner, commitStore, store]
   );
 
-  // スタンプドロワーでスタンプボタンを押した時の処理（即反映＆自動翌日移動）
-  const handleApplyStampToDate = useCallback(
-    (targetDate: string, stamp: StampPreset, targetPartner?: PartnerId) => {
-      if (stamp.type === 'shift') {
-        const pid =
-          targetPartner ||
-          (stampDrawerTab === 'partnerB_shift' ? 'partnerB' : 'partnerA');
-        handleSetShift(targetDate, pid, stamp);
-      } else {
-        handleQuickAddEventFromStamp(targetDate, stamp);
-      }
-
-      if (autoAdvance) {
-        const nextDate = addDaysToDateStr(targetDate, 1);
-        setSelectedDate(nextDate);
-        const [ny, nm] = nextDate.split('-').map(Number);
-        setYear(ny);
-        setMonth(nm);
-      }
-    },
-    [autoAdvance, handleQuickAddEventFromStamp, handleSetShift, stampDrawerTab]
-  );
-
   // カレンダーの日付セルをタップした時の処理
   const handleCellClick = useCallback(
     (dateStr: string) => {
@@ -297,7 +284,6 @@ export const App: React.FC = () => {
         setMonth(nm);
       }
 
-      // スタンプドロワーが開いている時は、タップした日付に即スタンプを押す！
       if (stampDrawerOpen) {
         if (stampDrawerTab === 'support_badge') {
           return;
@@ -306,27 +292,20 @@ export const App: React.FC = () => {
           stampDrawerTab === 'partnerB_shift' ? 'partnerB' : 'partnerA';
 
         if (selectedStampId === '__ERASER__') {
-          handleSetShift(dateStr, targetPartner, null);
-          if (autoAdvance) {
-            const nextDate = addDaysToDateStr(dateStr, 1);
-            setSelectedDate(nextDate);
-          }
+          handleSetShiftAndAdvance(dateStr, targetPartner, null);
           return;
         }
 
         const stamp = store.stamps.find((s) => s.id === selectedStampId);
         if (stamp) {
-          handleApplyStampToDate(dateStr, stamp, targetPartner);
+          handleSetShiftAndAdvance(dateStr, targetPartner, stamp);
         }
       } else {
-        // 通常モード時はその日の詳細・ワンタップ予定追加モーダルを開く
         setDayDetailOpen(true);
       }
     },
     [
-      autoAdvance,
-      handleApplyStampToDate,
-      handleSetShift,
+      handleSetShiftAndAdvance,
       month,
       selectedStampId,
       stampDrawerOpen,
@@ -347,7 +326,8 @@ export const App: React.FC = () => {
         },
       };
       commitStore(nextStore);
-      showToast(`「${ev.title}」を保存しました💕`);
+      const [, m, d] = ev.date.split('-').map(Number);
+      showToast(`📅 ${m}/${d} に「${ev.title}」を登録しました💕`);
     },
     [commitStore, showToast, store]
   );
@@ -371,35 +351,6 @@ export const App: React.FC = () => {
       };
       commitStore(nextStore);
       showToast('予定を削除しました');
-    },
-    [commitStore, showToast, store]
-  );
-
-  // スタンププリセットの追加・更新・削除
-  const handleSaveStampPreset = useCallback(
-    (stamp: StampPreset) => {
-      const exists = store.stamps.some((s) => s.id === stamp.id);
-      const nextStamps = exists
-        ? store.stamps.map((s) => (s.id === stamp.id ? stamp : s))
-        : [...store.stamps, stamp];
-      commitStore({
-        ...store,
-        stamps: nextStamps,
-      });
-      setSelectedStampId(stamp.id);
-      showToast(`スタンプ「${stamp.label}」を保存しました🎨`);
-    },
-    [commitStore, showToast, store]
-  );
-
-  const handleDeleteStampPreset = useCallback(
-    (stampId: string) => {
-      const nextStamps = store.stamps.filter((s) => s.id !== stampId);
-      commitStore({
-        ...store,
-        stamps: nextStamps,
-      });
-      showToast('スタンプを削除しました');
     },
     [commitStore, showToast, store]
   );
@@ -486,7 +437,6 @@ export const App: React.FC = () => {
     return count;
   }, [activePartner, store.events, store.metadata.partners, store.shifts]);
 
-  // クラウド手動・設定同期トリガー
   const handleTriggerCloudSync = useCallback(
     async (configOverride?: CloudSyncConfig, passwordOverride?: string) => {
       const cfg = configOverride || syncConfig;
@@ -511,11 +461,48 @@ export const App: React.FC = () => {
     [sessionPassword, showToast, store, syncConfig]
   );
 
+  const handlePrevMonth = useCallback(() => {
+    if (month === 1) {
+      setYear((y) => y - 1);
+      setMonth(12);
+    } else {
+      setMonth((m) => m - 1);
+    }
+  }, [month]);
+
+  const handleNextMonth = useCallback(() => {
+    if (month === 12) {
+      setYear((y) => y + 1);
+      setMonth(1);
+    } else {
+      setMonth((m) => m + 1);
+    }
+  }, [month]);
+
   if (!isLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FFFBF7] text-stone-600 font-bold">
         🐻💕🐰 ふたりカレを読み込み中...
       </div>
+    );
+  }
+
+  // スマホ用ウィジェットコンパクト画面モード時
+  if (isWidgetMode && !isLocked) {
+    return (
+      <WidgetCompactView
+        store={store}
+        matchedHolidaysCount={matchedHolidays.length}
+        onExitWidgetMode={() => setIsWidgetMode(false)}
+        onSelectDateInFullCalendar={(dateStr) => {
+          setIsWidgetMode(false);
+          setSelectedDate(dateStr);
+          const [ny, nm] = dateStr.split('-').map(Number);
+          setYear(ny);
+          setMonth(nm);
+          setDayDetailOpen(true);
+        }}
+      />
     );
   }
 
@@ -557,26 +544,12 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* トップヘッダー（既読ステータス・ふたり休日一致・カテゴリフィルタ・表示モード切替） */}
+      {/* トップヘッダー */}
       <TopHeader
         year={year}
         month={month}
-        onPrevMonth={() => {
-          if (month === 1) {
-            setYear(year - 1);
-            setMonth(12);
-          } else {
-            setMonth(month - 1);
-          }
-        }}
-        onNextMonth={() => {
-          if (month === 12) {
-            setYear(year + 1);
-            setMonth(1);
-          } else {
-            setMonth(month + 1);
-          }
-        }}
+        onPrevMonth={handlePrevMonth}
+        onNextMonth={handleNextMonth}
         onToday={() => {
           const t = new Date();
           setYear(t.getFullYear());
@@ -614,7 +587,7 @@ export const App: React.FC = () => {
         onLockScreen={() => setIsLocked(true)}
       />
 
-      {/* 月間カレンダーグリッド（2人並列シフト＋無制限複数行予定＋未確認ドット＋ふたり休日ハイライト） */}
+      {/* 月間カレンダーグリッド（左右スワイプで前月・次月移動対応） */}
       <main className="flex-1">
         <MonthlyCalendarGrid
           year={year}
@@ -627,10 +600,12 @@ export const App: React.FC = () => {
           selectedDate={selectedDate}
           stampModeActive={stampDrawerOpen}
           onCellClick={handleCellClick}
+          onSwipePrevMonth={handlePrevMonth}
+          onSwipeNextMonth={handleNextMonth}
         />
       </main>
 
-      {/* ボトム「ポチポチ連続スタンプ入力ドロワー」 */}
+      {/* ボトム「シフト連続入力ドロワー ＆ スマホ用下部5ボタンアクションドック」 */}
       <StampDrawer
         isOpen={stampDrawerOpen}
         onToggleOpen={setStampDrawerOpen}
@@ -641,28 +616,25 @@ export const App: React.FC = () => {
         onSelectStamp={setSelectedStampId}
         selectedDate={selectedDate}
         onMoveDate={moveSelectedDate}
-        autoAdvance={autoAdvance}
-        onToggleAutoAdvance={() => setAutoAdvance(!autoAdvance)}
-        onApplyStampToSelectedDate={(stamp, targetPartner) =>
-          handleApplyStampToDate(selectedDate, stamp, targetPartner)
+        onApplyShiftAndAdvance={(stamp, targetPartner) =>
+          handleSetShiftAndAdvance(selectedDate, targetPartner, stamp)
         }
-        onClearShiftOnSelectedDate={(targetPartner) => {
-          handleSetShift(selectedDate, targetPartner, null);
-          if (autoAdvance) {
-            moveSelectedDate(1);
-          }
-        }}
+        onClearShiftAndAdvance={(targetPartner) =>
+          handleSetShiftAndAdvance(selectedDate, targetPartner, null)
+        }
         onToggleSupportBadgeOnSelectedDate={(badge) =>
           handleToggleDaySupportBadge(selectedDate, badge)
         }
         activeSupportBadgesOnSelectedDate={store.daySupports?.[selectedDate]?.badges || []}
         onOpenDayDetail={() => setDayDetailOpen(true)}
-        onSaveStampPreset={handleSaveStampPreset}
-        onDeleteStampPreset={handleDeleteStampPreset}
+        onOpenShiftStampManager={() => setShiftManagerOpen(true)}
+        onOpenVoiceModal={() => setVoiceModalOpen(true)}
+        onOpenImageOcrModal={() => setImageOcrOpen(true)}
+        onOpenWidgetModal={() => setWidgetGuideOpen(true)}
         metadata={store.metadata}
       />
 
-      {/* 日付詳細＆ワンタップ予定追加モーダル */}
+      {/* 日付詳細＆シフト・予定モーダル */}
       {dayDetailOpen && (
         <DayDetailModal
           dateStr={selectedDate}
@@ -670,15 +642,67 @@ export const App: React.FC = () => {
           activePartner={activePartner}
           onClose={() => setDayDetailOpen(false)}
           onMoveDate={moveSelectedDate}
-          onSetShift={handleSetShift}
+          onSetShiftAndAdvance={handleSetShiftAndAdvance}
           onToggleDaySupportBadge={handleToggleDaySupportBadge}
-          onQuickAddEventFromStamp={handleQuickAddEventFromStamp}
           onSaveEvent={handleSaveEvent}
           onDeleteEvent={handleDeleteEvent}
+          onOpenVoiceModal={() => setVoiceModalOpen(true)}
+          onOpenShiftStampManager={() => setShiftManagerOpen(true)}
         />
       )}
 
-      {/* 設定・GitHub暗号化同期・iCal (.ics) 連携・バックアップモーダル */}
+      {/* 🎨 シフト種類の登録・かんたん編集モーダル */}
+      {shiftManagerOpen && (
+        <ShiftStampManagerModal
+          stamps={store.stamps}
+          onClose={() => setShiftManagerOpen(false)}
+          onUpdateStamps={(nextStamps) => {
+            commitStore({
+              ...store,
+              stamps: nextStamps,
+            });
+            showToast('シフト種類を更新しました🎨');
+          }}
+        />
+      )}
+
+      {/* 📷 シフト表AI画像自動読み取り ＆ 🏥 ナスカレ一括取込モーダル */}
+      {imageOcrOpen && (
+        <ShiftImageOcrModal
+          year={year}
+          month={month}
+          activePartner={activePartner}
+          metadata={store.metadata}
+          stamps={store.stamps}
+          onClose={() => setImageOcrOpen(false)}
+          onBulkApplyShiftsAndEvents={handleBulkApplyShiftsAndEvents}
+        />
+      )}
+
+      {/* 🎙️ 音声で予定を入れるモーダル */}
+      {voiceModalOpen && (
+        <VoiceEventModal
+          selectedDate={selectedDate}
+          activePartner={activePartner}
+          metadata={store.metadata}
+          onClose={() => setVoiceModalOpen(false)}
+          onSaveEvent={handleSaveEvent}
+        />
+      )}
+
+      {/* 📱 iPhone / Android ホーム画面ウィジェット設定モーダル */}
+      {widgetGuideOpen && (
+        <WidgetGuideModal
+          store={store}
+          onClose={() => setWidgetGuideOpen(false)}
+          onOpenWidgetPreview={() => {
+            setWidgetGuideOpen(false);
+            setIsWidgetMode(true);
+          }}
+        />
+      )}
+
+      {/* 設定・GitHub暗号化同期・iCal連携・バックアップモーダル */}
       {settingsOpen && (
         <SettingsAndSyncModal
           store={store}
