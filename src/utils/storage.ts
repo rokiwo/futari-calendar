@@ -123,6 +123,12 @@ export function mergeCalendarStores(
   for (const s of local.stamps || []) stampMap.set(s.id, s);
   const mergedStamps = Array.from(stampMap.values()).sort((a, b) => a.order - b.order);
 
+  // 4-2. カレンダー予定項目（categories）のマージ
+  const mergedCategories =
+    toTimeMs(remote.updatedAt) > toTimeMs(local.updatedAt)
+      ? remote.categories || local.categories
+      : local.categories || remote.categories;
+
   // 5. メタデータ＆最終確認日時（lastSeenAt は常に新しい方を採用）
   const localMeta = local.metadata;
   const remoteMeta = remote.metadata;
@@ -162,6 +168,7 @@ export function mergeCalendarStores(
           ? remoteMeta.updatedAt
           : localMeta.updatedAt,
     },
+    categories: mergedCategories,
     stamps: mergedStamps,
     shifts: mergedShifts,
     events: mergedEvents,
