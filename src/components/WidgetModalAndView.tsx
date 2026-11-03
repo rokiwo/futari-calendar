@@ -24,6 +24,7 @@ import {
 } from '../types/calendar';
 import { getJapaneseHoliday, resolveCategoryInfo } from '../utils/presets';
 import { MonthlyOvertimeSummary, formatLastSeen } from './TopHeader';
+import { buildGoogleCalendarUrl, shouldNotifyPartner } from '../utils/googleCalendar';
 
 interface WidgetCompactViewProps {
   store: CalendarDataStore;
@@ -35,6 +36,8 @@ interface WidgetCompactViewProps {
   onExitWidgetMode: () => void;
   onOpenCalendarWithStampDrawer: () => void;
   onOpenDayDetail: (dateStr: string) => void;
+  onQuickAddEventForDate: (dateStr: string) => void;
+  onToggleTaskComplete: (eventId: string) => void;
   onSelectDateInFullCalendar: (dateStr: string) => void;
   onOpenVoiceModal: (dateStr: string) => void;
   onOpenImageOcrModal: () => void;
@@ -93,6 +96,8 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
   onExitWidgetMode,
   onOpenCalendarWithStampDrawer,
   onOpenDayDetail,
+  onQuickAddEventForDate,
+  onToggleTaskComplete,
   onSelectDateInFullCalendar,
   onOpenVoiceModal,
   onOpenImageOcrModal,
@@ -317,10 +322,17 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
                     <Calendar className="w-3 h-3" />
                     <span>カレンダー</span>
                   </button>
-                  <span className="px-2 py-1 rounded-xl bg-[#FFF0F5] text-[#D63864] text-[11px] font-extrabold flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onQuickAddEventForDate(day.dateStr);
+                    }}
+                    className="px-2 py-1 rounded-xl bg-[#FFF0F5] text-[#D63864] text-[11px] font-extrabold flex items-center gap-0.5"
+                  >
                     <Plus className="w-3 h-3" />
-                    <span>入力</span>
-                  </span>
+                    <span>予定追加</span>
+                  </button>
                 </div>
               </div>
 
@@ -413,7 +425,7 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
                 </div>
               </div>
 
-              {/* カード下段：予定リスト（二人予定・夫予定・妻予定）＆すれ違いサポート */}
+              {/* カード下段：予定＆タスクリスト（二人予定・夫予定・妻予定）＆すれ違いサポート */}
               {(events.length > 0 || uniqueSupports.length > 0) && (
                 <div className="mt-2.5 pt-2 border-t border-stone-200/60 space-y-1.5">
                   {uniqueSupports.length > 0 && (
@@ -431,6 +443,7 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
 
                   {events.map((ev) => {
                     const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
+                    const isMyNotif = shouldNotifyPartner(ev, activePartner);
                     return (
                       <div
                         key={ev.id}
@@ -439,9 +452,24 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
                           color: cat.textColor,
                           borderLeftColor: ev.color || cat.accentColor,
                         }}
-                        className="px-3 py-1.5 rounded-xl border-l-4 flex items-center justify-between gap-2 text-xs sm:text-sm font-extrabold"
+                        className={`px-3 py-1.5 rounded-xl border-l-4 flex items-center justify-between gap-2 text-xs sm:text-sm font-extrabold ${
+                          ev.isTask && ev.isCompleted ? 'opacity-65 line-through' : ''
+                        }`}
                       >
-                        <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          {ev.isTask && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleTaskComplete(ev.id);
+                              }}
+                              className="text-sm shrink-0"
+                              title="タスク完了切替"
+                            >
+                              {ev.isCompleted ? '✅' : '⬜'}
+                            </button>
+                          )}
                           <span
                             style={{ backgroundColor: cat.accentColor }}
                             className="px-1.5 py-0.5 rounded-md text-white text-[10px] font-extrabold shrink-0"
@@ -453,8 +481,23 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
                               {ev.startTime}
                             </span>
                           )}
-                          <span className="break-words">{ev.title}</span>
+                          <span className="truncate whitespace-nowrap overflow-hidden flex-1">
+                            {ev.title}
+                          </span>
                         </div>
+
+                        {isMyNotif && (
+                          <a
+                            href={buildGoogleCalendarUrl(ev, store)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="shrink-0 px-2 py-0.5 rounded-lg bg-white/90 text-sky-700 border border-sky-200 text-[10px] font-extrabold"
+                            title="自分のGoogleカレンダーで通知登録"
+                          >
+                            🔔通知
+                          </a>
+                        )}
                       </div>
                     );
                   })}
@@ -464,6 +507,17 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
           );
         })}
       </main>
+
+      {/* 右下フローティング「＋」ボタン（ウィジェット画面からも1タップで予定・タスク追加） */}
+      <button
+        type="button"
+        onClick={() => onQuickAddEventForDate(todayStr)}
+        title="予定・タスクを追加"
+        className="fixed right-4 bottom-20 z-40 flex items-center gap-1.5 px-4 py-3.5 rounded-full bg-gradient-to-tr from-[#FF8FAB] to-[#B388EB] text-white font-black shadow-xl hover:scale-105 active:scale-95 transition-all border-2 border-white"
+      >
+        <span className="text-xl leading-none">＋</span>
+        <span className="text-xs">予定・タスク追加</span>
+      </button>
 
       {/* 下部固定スマホドック（ウィジェット画面からカレンダー・スタンプ・音声・カメラへ即アクセス） */}
       <div className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#FFE5EC] shadow-lg">
