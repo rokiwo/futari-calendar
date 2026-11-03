@@ -62,12 +62,15 @@ export interface ShiftEntry {
   deletedAt?: string | null;
 }
 
-// カレンダー予定データ
+// 通知の対象端末（夫の端末のみ／妻の端末のみ／両方）
+export type NotifyTarget = PartnerId | 'both';
+
+// カレンダー予定・タスクデータ
 export interface ScheduleEvent {
   id: string;             // UUID
   date: string;           // "YYYY-MM-DD"
   endDate?: string;       // "YYYY-MM-DD"
-  title: string;          // 複数行表示対応
+  title: string;          // 予定・タスク名
   categoryId: CalendarCategoryId;
   color: string;          // 色分け用カラーコード
   isAllDay: boolean;
@@ -75,6 +78,14 @@ export interface ScheduleEvent {
   endTime?: string;       // "HH:mm"
   memo?: string;
   supportBadges?: string[]; // 例: ["🍳夜ごはん不要", "🍱お弁当あり"]
+
+  // タスク機能＆Googleカレンダー端末別通知フィールド
+  isTask?: boolean;           // true の場合はタスク（ToDoチェック付き）として扱う
+  isCompleted?: boolean;      // タスクの完了チェック状態
+  notifyTarget?: NotifyTarget; // 通知を送る対象（'partnerA'=夫の端末のみ, 'partnerB'=妻の端末のみ, 'both'=両方）
+  reminderMinutes?: number;   // Googleカレンダー通知タイミング（分前: 0=定刻, 10=10分前, 30=30分前, 60=1時間前, 1440=前日）
+  googleCalSynced?: boolean;  // Googleカレンダーへ登録済みフラグ
+
   createdBy: PartnerId;   // 誰が入れたか
   createdAt: string;      // いつ予定を入れたか
   updatedAt: string;      // いつ更新したか
