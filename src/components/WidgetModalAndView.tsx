@@ -8,23 +8,41 @@ import {
   Calendar,
   Sparkles,
   Heart,
-  Maximize2,
+  CalendarDays,
+  Mic,
+  Camera,
+  Stamp,
+  Settings,
+  Timer,
+  Plus,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   CalendarDataStore,
+  PartnerId,
   StampPreset,
 } from '../types/calendar';
-import { CATEGORY_MAP, getJapaneseHoliday } from '../utils/presets';
+import { getJapaneseHoliday, resolveCategoryInfo } from '../utils/presets';
+import { MonthlyOvertimeSummary, formatLastSeen } from './TopHeader';
 
 interface WidgetCompactViewProps {
   store: CalendarDataStore;
-  matchedHolidaysCount: number;
+  activePartner: PartnerId;
+  onToggleActivePartner: (p: PartnerId) => void;
+  onMarkSeenNow: () => void;
+  matchedHolidays: string[];
+  overtimeSummary: MonthlyOvertimeSummary;
   onExitWidgetMode: () => void;
+  onOpenCalendarWithStampDrawer: () => void;
+  onOpenDayDetail: (dateStr: string) => void;
   onSelectDateInFullCalendar: (dateStr: string) => void;
+  onOpenVoiceModal: (dateStr: string) => void;
+  onOpenImageOcrModal: () => void;
+  onOpenSettings: () => void;
 }
 
 // 今日から n 日間の日付配列を生成
-function getUpcomingDates(daysCount = 5): {
+function getUpcomingDates(daysCount = 7): {
   dateStr: string;
   label: string;
   subLabel: string;
@@ -42,7 +60,14 @@ function getUpcomingDates(daysCount = 5): {
     const d = dt.getDate();
     const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const w = weekNames[dt.getDay()];
-    const rel = i === 0 ? '今日' : i === 1 ? '明日' : i === 2 ? '明後日' : `${m}/${d}`;
+    const rel =
+      i === 0
+        ? '今日'
+        : i === 1
+        ? '明日'
+        : i === 2
+        ? '明後日'
+        : `${i}日後`;
     list.push({
       dateStr,
       label: `${m}/${d}(${w})`,
@@ -55,158 +80,438 @@ function getUpcomingDates(daysCount = 5): {
 }
 
 /**
- * スマホのホーム画面ウィジェット用コンパクトビュー（?widget=1 またはアプリ内ウィジェットモード）
- * 今日〜5日間の「2人のシフト並列＋予定＋すれ違い目印」を一目で確認できます。
+ * デフォルト起動の「🏠 ふたりホーム（ウィジェット画面）」
+ * スマホの縦画面でも文字が大きく100%読めるカード形式で、ここから1タップで月間カレンダーへ飛べます。
  */
 export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
   store,
-  matchedHolidaysCount,
+  activePartner,
+  onToggleActivePartner,
+  onMarkSeenNow,
+  matchedHolidays,
+  overtimeSummary,
   onExitWidgetMode,
+  onOpenCalendarWithStampDrawer,
+  onOpenDayDetail,
   onSelectDateInFullCalendar,
+  onOpenVoiceModal,
+  onOpenImageOcrModal,
+  onOpenSettings,
 }) => {
-  const upcoming = getUpcomingDates(5);
+  const [daysCount, setDaysCount] = useState<7 | 14 | 30>(7);
+  const upcoming = getUpcomingDates(daysCount);
+
   const stampMap = new Map<string, StampPreset>();
   for (const s of store.stamps) stampMap.set(s.id, s);
 
   const partnerA = store.metadata.partners.partnerA;
   const partnerB = store.metadata.partners.partnerB;
+  const otherPartnerId: PartnerId = activePartner === 'partnerA' ? 'partnerB' : 'partnerA';
+  const otherProfile = store.metadata.partners[otherPartnerId];
+
+  const todayStr = upcoming[0]?.dateStr || '';
 
   return (
-    <div className="min-h-screen bg-[#FFFBF7] p-3 flex flex-col justify-between max-w-md mx-auto">
-      <div className="bg-white rounded-3xl shadow-lg border-2 border-[#FFE5EC] p-3.5 space-y-2.5">
-        {/* ウィジェットヘッダー */}
-        <div className="flex items-center justify-between border-b border-stone-100 pb-2">
-          <div className="flex items-center gap-1.5">
-            <span className="text-base">🐻💕🐰</span>
-            <span className="font-extrabold text-sm text-stone-800">ふたりカレ</span>
-            <span className="px-2 py-0.5 rounded-full bg-[#FFE5EC] text-[#D63864] text-[10px] font-extrabold flex items-center gap-0.5">
-              <Heart className="w-2.5 h-2.5 fill-[#FF8FAB] text-[#FF8FAB]" />
-              今月一致 {matchedHolidaysCount}日
-            </span>
+    <div className="min-h-screen bg-[#FFFBF7] pb-24">
+      {/* 上部固定ヘッダー */}
+      <header className="sticky top-0 z-30 bg-[#FFFBF7]/95 backdrop-blur-md border-b border-[#FFE5EC] shadow-2xs">
+        <div className="max-w-xl mx-auto px-3 py-2.5 space-y-2">
+          {/* 1段目：タイトル ＆ 月間カレンダーへ飛ぶ特大ボタン */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-lg">🐻💕🐰</span>
+              <div>
+                <h1 className="font-extrabold text-sm sm:text-base text-stone-800 leading-tight">
+                  ふたりカレ
+                </h1>
+                <p className="text-[10px] font-bold text-stone-400 leading-none">
+                  {otherProfile.avatar}{otherProfile.name}の確認: {formatLastSeen(otherProfile.lastSeenAt)}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {/* 操作中パートナー切替 */}
+              <div className="flex items-center bg-white rounded-full p-0.5 border border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => onToggleActivePartner('partnerA')}
+                  className={`px-2 py-1 rounded-full text-[11px] font-extrabold transition-all ${
+                    activePartner === 'partnerA'
+                      ? 'bg-[#E2F9FC] text-[#126875] shadow-2xs'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  {partnerA.avatar}{partnerA.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onToggleActivePartner('partnerB')}
+                  className={`px-2 py-1 rounded-full text-[11px] font-extrabold transition-all ${
+                    activePartner === 'partnerB'
+                      ? 'bg-[#F3EAFF] text-[#6638A6] shadow-2xs'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  {partnerB.avatar}{partnerB.name}
+                </button>
+              </div>
+
+              {/* カレンダー全体へ飛ぶメインボタン */}
+              <button
+                type="button"
+                onClick={onExitWidgetMode}
+                className="px-3 py-2 rounded-2xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-xs font-extrabold flex items-center gap-1 shadow-sm active:scale-95 transition-transform"
+              >
+                <CalendarDays className="w-4 h-4" />
+                <span>カレンダーへ</span>
+              </button>
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onExitWidgetMode}
-            className="px-2.5 py-1 rounded-xl bg-stone-800 text-white text-[11px] font-extrabold flex items-center gap-1 shadow-xs"
-          >
-            <Maximize2 className="w-3 h-3" />
-            <span>月間カレンダーを開く</span>
-          </button>
-        </div>
-
-        {/* 今日〜5日間の2人並列シフト＆予定リスト */}
-        <div className="space-y-2">
-          {upcoming.map((day, idx) => {
-            const sA = store.shifts[`${day.dateStr}_partnerA`];
-            const sB = store.shifts[`${day.dateStr}_partnerB`];
-            const shiftA = sA && !sA.deletedAt ? sA : undefined;
-            const shiftB = sB && !sB.deletedAt ? sB : undefined;
-            const stampA = shiftA ? stampMap.get(shiftA.stampId) : undefined;
-            const stampB = shiftB ? stampMap.get(shiftB.stampId) : undefined;
-
-            const events = Object.values(store.events)
-              .filter((e) => !e.deletedAt && e.date === day.dateStr)
-              .sort((a, b) => (a.startTime || '00:00').localeCompare(b.startTime || '00:00'));
-
-            const supports = store.daySupports?.[day.dateStr]?.badges || [];
-
-            return (
-              <div
-                key={day.dateStr}
-                onClick={() => onSelectDateInFullCalendar(day.dateStr)}
-                className={`rounded-2xl p-2.5 border transition-all cursor-pointer ${
-                  idx === 0
-                    ? 'bg-[#FFF9FB] border-[#FF8FAB] shadow-xs'
-                    : 'bg-[#FFFBF7] border-stone-200/80 hover:border-[#FF8FAB]'
-                }`}
+          {/* 2段目：今月の休日一致 ＆ 残業・バイト集計 ＆ 表示日数切替 */}
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={onExitWidgetMode}
+                className="px-2.5 py-1 rounded-full bg-[#FFE5EC] text-[#D63864] text-[11px] font-extrabold flex items-center gap-1"
               >
-                <div className="flex items-center justify-between gap-2">
-                  {/* 左：日付ラベル */}
-                  <div className="flex items-center gap-1.5 min-w-[88px]">
-                    <span
-                      className={`px-1.5 py-0.5 rounded-lg text-[10px] font-extrabold ${
-                        idx === 0
-                          ? 'bg-[#FF8FAB] text-white'
-                          : 'bg-stone-200/70 text-stone-600'
-                      }`}
-                    >
-                      {day.subLabel}
+                <Heart className="w-3 h-3 fill-[#FF8FAB] text-[#FF8FAB]" />
+                <span>今月お休み一致 {matchedHolidays.length}日</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onExitWidgetMode}
+                className="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-extrabold flex items-center gap-1"
+              >
+                <Timer className="w-3 h-3 text-amber-600" />
+                <span>
+                  残業 {partnerA.avatar}
+                  {overtimeSummary.partnerA.totalExtraHours}h / {partnerB.avatar}
+                  {overtimeSummary.partnerB.totalExtraHours}h
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onMarkSeenNow}
+                className="px-2 py-1 rounded-full bg-[#E6F7EF] text-[#1E6645] text-[10px] font-extrabold flex items-center gap-0.5"
+              >
+                <CheckCircle2 className="w-3 h-3 text-[#52B788]" />
+                <span>既読にする</span>
+              </button>
+            </div>
+
+            {/* 表示日数切り替え */}
+            <div className="flex items-center bg-stone-100 rounded-xl p-0.5 text-[10px] font-extrabold">
+              {([7, 14, 30] as const).map((cnt) => (
+                <button
+                  key={cnt}
+                  type="button"
+                  onClick={() => setDaysCount(cnt)}
+                  className={`px-2 py-1 rounded-lg transition-all ${
+                    daysCount === cnt
+                      ? 'bg-white text-stone-800 shadow-2xs'
+                      : 'text-stone-500'
+                  }`}
+                >
+                  {cnt}日間
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* メイン：今日からのシフト＆予定カード一覧（スマホ縦画面で文字がくっきり読める大判レイアウト） */}
+      <main className="max-w-xl mx-auto px-3 pt-3 space-y-2.5">
+        {upcoming.map((day, idx) => {
+          const sA = store.shifts[`${day.dateStr}_partnerA`];
+          const sB = store.shifts[`${day.dateStr}_partnerB`];
+          const shiftA = sA && !sA.deletedAt ? sA : undefined;
+          const shiftB = sB && !sB.deletedAt ? sB : undefined;
+          const stampA = shiftA ? stampMap.get(shiftA.stampId) : undefined;
+          const stampB = shiftB ? stampMap.get(shiftB.stampId) : undefined;
+
+          const subStampA = shiftA?.subStampId ? stampMap.get(shiftA.subStampId) : undefined;
+          const subStampB = shiftB?.subStampId ? stampMap.get(shiftB.subStampId) : undefined;
+          const subLabelA = shiftA?.subCustomLabel || subStampA?.label;
+          const subLabelB = shiftB?.subCustomLabel || subStampB?.label;
+
+          const isBothHoliday = matchedHolidays.includes(day.dateStr);
+
+          const events = Object.values(store.events)
+            .filter((e) => !e.deletedAt && e.date === day.dateStr)
+            .sort((a, b) => {
+              if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1;
+              return (a.startTime || '00:00').localeCompare(b.startTime || '00:00');
+            });
+
+          const supports = [
+            ...(store.daySupports?.[day.dateStr]?.badges || []),
+            ...events.flatMap((e) => e.supportBadges || []),
+          ];
+          const uniqueSupports = Array.from(new Set(supports));
+
+          return (
+            <div
+              key={day.dateStr}
+              onClick={() => onOpenDayDetail(day.dateStr)}
+              className={`rounded-3xl p-3.5 border-2 transition-all cursor-pointer active:scale-[0.99] ${
+                idx === 0
+                  ? 'bg-white border-[#FF8FAB] shadow-md'
+                  : isBothHoliday
+                  ? 'bg-gradient-to-r from-[#FFF0F5] via-white to-[#FFF9FB] border-[#FFC2D1] shadow-xs'
+                  : 'bg-white border-stone-200/90 hover:border-[#FF8FAB] shadow-2xs'
+              }`}
+            >
+              {/* カード上部：日付・曜日・祝日・休日一致・カレンダーで開くボタン */}
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={`px-2 py-0.5 rounded-xl text-xs font-extrabold shrink-0 ${
+                      idx === 0
+                        ? 'bg-[#FF8FAB] text-white'
+                        : idx === 1
+                        ? 'bg-[#FFE5EC] text-[#9E2A47]'
+                        : 'bg-stone-100 text-stone-600'
+                    }`}
+                  >
+                    {day.subLabel}
+                  </span>
+                  <span
+                    className={`text-base font-extrabold ${
+                      day.dayOfWeek === 0 || day.holidayName
+                        ? 'text-rose-500'
+                        : day.dayOfWeek === 6
+                        ? 'text-sky-600'
+                        : 'text-stone-800'
+                    }`}
+                  >
+                    {day.label}
+                  </span>
+                  {day.holidayName && (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 text-[11px] font-extrabold truncate">
+                      {day.holidayName}
                     </span>
-                    <span
-                      className={`text-xs font-extrabold ${
-                        day.dayOfWeek === 0 || day.holidayName
-                          ? 'text-rose-500'
-                          : day.dayOfWeek === 6
-                          ? 'text-sky-600'
-                          : 'text-stone-800'
-                      }`}
-                    >
-                      {day.label}
+                  )}
+                  {isBothHoliday && (
+                    <span className="px-2 py-0.5 rounded-full bg-[#FFE5EC] text-[#D63864] text-[11px] font-extrabold shrink-0">
+                      💕ふたり休日
                     </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectDateInFullCalendar(day.dateStr);
+                    }}
+                    className="px-2 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 text-[11px] font-bold flex items-center gap-0.5"
+                    title="月間カレンダーのこの場所へ移動"
+                  >
+                    <Calendar className="w-3 h-3" />
+                    <span>カレンダー</span>
+                  </button>
+                  <span className="px-2 py-1 rounded-xl bg-[#FFF0F5] text-[#D63864] text-[11px] font-extrabold flex items-center gap-0.5">
+                    <Plus className="w-3 h-3" />
+                    <span>入力</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* カード中段：夫・妻の2人並列シフトボックス（バイト・残業も大きく表示） */}
+              <div className="grid grid-cols-2 gap-2">
+                {/* 夫シフト */}
+                <div
+                  style={
+                    stampA
+                      ? { backgroundColor: stampA.color, color: stampA.textColor }
+                      : undefined
+                  }
+                  className={`rounded-2xl px-3 py-2 border flex flex-col justify-center ${
+                    stampA
+                      ? 'border-black/5'
+                      : 'bg-stone-50 text-stone-400 border-dashed border-stone-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs font-extrabold opacity-85">
+                      {partnerA.avatar} {partnerA.name}
+                    </span>
+                    {(shiftA?.startTime || stampA?.startTime) && (
+                      <span className="text-[11px] font-bold opacity-85">
+                        {shiftA?.startTime || stampA?.startTime}〜{shiftA?.endTime || stampA?.endTime || ''}
+                      </span>
+                    )}
                   </div>
-
-                  {/* 右：2人のシフト並列バッジ */}
-                  <div className="grid grid-cols-2 gap-1.5 flex-1 max-w-[210px]">
-                    <div
-                      style={
-                        stampA
-                          ? { backgroundColor: stampA.color, color: stampA.textColor }
-                          : undefined
-                      }
-                      className={`px-2 py-1 rounded-xl text-[11px] font-extrabold flex items-center justify-center gap-1 truncate ${
-                        stampA ? '' : 'bg-stone-100 text-stone-400'
-                      }`}
-                    >
-                      <span>{partnerA.avatar}</span>
-                      <span>{stampA ? `${stampA.icon || ''}${stampA.label}` : '未定'}</span>
-                    </div>
-
-                    <div
-                      style={
-                        stampB
-                          ? { backgroundColor: stampB.color, color: stampB.textColor }
-                          : undefined
-                      }
-                      className={`px-2 py-1 rounded-xl text-[11px] font-extrabold flex items-center justify-center gap-1 truncate ${
-                        stampB ? '' : 'bg-stone-100 text-stone-400'
-                      }`}
-                    >
-                      <span>{partnerB.avatar}</span>
-                      <span>{stampB ? `${stampB.icon || ''}${stampB.label}` : '未定'}</span>
-                    </div>
+                  <div className="text-sm font-black mt-0.5 flex flex-wrap items-center gap-1">
+                    <span>
+                      {stampA ? `${stampA.icon || ''} ${shiftA?.customLabel || stampA.label}` : 'シフト未登録'}
+                    </span>
+                    {subLabelA && (
+                      <span className="px-1.5 py-0.5 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-extrabold">
+                        ＋🏪{subLabelA}
+                        {shiftA?.subStartTime ? `(${shiftA.subStartTime})` : ''}
+                      </span>
+                    )}
+                    {((shiftA?.overtimeHours || 0) > 0 || (shiftA?.holidayWorkHours || 0) > 0) && (
+                      <span className="px-1.5 py-0.5 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold">
+                        {(shiftA?.holidayWorkHours || 0) > 0
+                          ? `休出${shiftA?.holidayWorkHours}h`
+                          : `残業+${shiftA?.overtimeHours}h`}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {/* 予定＆すれ違いサポートがあれば下段に表示 */}
-                {(events.length > 0 || supports.length > 0) && (
-                  <div className="mt-1.5 pt-1.5 border-t border-stone-200/50 flex flex-wrap items-center gap-1">
-                    {supports.map((b) => (
-                      <span
-                        key={b}
-                        className="px-1.5 py-0.5 rounded-md bg-[#FFF6D6] text-[#8A5A00] text-[10px] font-extrabold"
-                      >
-                        {b}
+                {/* 妻シフト */}
+                <div
+                  style={
+                    stampB
+                      ? { backgroundColor: stampB.color, color: stampB.textColor }
+                      : undefined
+                  }
+                  className={`rounded-2xl px-3 py-2 border flex flex-col justify-center ${
+                    stampB
+                      ? 'border-black/5'
+                      : 'bg-stone-50 text-stone-400 border-dashed border-stone-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs font-extrabold opacity-85">
+                      {partnerB.avatar} {partnerB.name}
+                    </span>
+                    {(shiftB?.startTime || stampB?.startTime) && (
+                      <span className="text-[11px] font-bold opacity-85">
+                        {shiftB?.startTime || stampB?.startTime}〜{shiftB?.endTime || stampB?.endTime || ''}
                       </span>
-                    ))}
-                    {events.map((ev) => {
-                      const cat = CATEGORY_MAP[ev.categoryId] || CATEGORY_MAP.shared;
-                      return (
-                        <span
-                          key={ev.id}
-                          style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
-                          className="px-2 py-0.5 rounded-md text-[10px] font-extrabold truncate max-w-full"
-                        >
-                          {ev.startTime ? `${ev.startTime} ` : ''}
-                          {ev.title}
-                        </span>
-                      );
-                    })}
+                    )}
                   </div>
-                )}
+                  <div className="text-sm font-black mt-0.5 flex flex-wrap items-center gap-1">
+                    <span>
+                      {stampB ? `${stampB.icon || ''} ${shiftB?.customLabel || stampB.label}` : 'シフト未登録'}
+                    </span>
+                    {subLabelB && (
+                      <span className="px-1.5 py-0.5 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-extrabold">
+                        ＋🏪{subLabelB}
+                        {shiftB?.subStartTime ? `(${shiftB.subStartTime})` : ''}
+                      </span>
+                    )}
+                    {((shiftB?.overtimeHours || 0) > 0 || (shiftB?.holidayWorkHours || 0) > 0) && (
+                      <span className="px-1.5 py-0.5 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold">
+                        {(shiftB?.holidayWorkHours || 0) > 0
+                          ? `休出${shiftB?.holidayWorkHours}h`
+                          : `残業+${shiftB?.overtimeHours}h`}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
-            );
-          })}
+
+              {/* カード下段：予定リスト（二人予定・夫予定・妻予定）＆すれ違いサポート */}
+              {(events.length > 0 || uniqueSupports.length > 0) && (
+                <div className="mt-2.5 pt-2 border-t border-stone-200/60 space-y-1.5">
+                  {uniqueSupports.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {uniqueSupports.map((b) => (
+                        <span
+                          key={b}
+                          className="px-2 py-0.5 rounded-lg bg-[#FFF6D6] border border-[#FFE28A] text-[#8A5A00] text-xs font-extrabold"
+                        >
+                          {b}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {events.map((ev) => {
+                    const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
+                    return (
+                      <div
+                        key={ev.id}
+                        style={{
+                          backgroundColor: cat.bgColor,
+                          color: cat.textColor,
+                          borderLeftColor: ev.color || cat.accentColor,
+                        }}
+                        className="px-3 py-1.5 rounded-xl border-l-4 flex items-center justify-between gap-2 text-xs sm:text-sm font-extrabold"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            style={{ backgroundColor: cat.accentColor }}
+                            className="px-1.5 py-0.5 rounded-md text-white text-[10px] font-extrabold shrink-0"
+                          >
+                            {cat.icon}{cat.shortLabel}
+                          </span>
+                          {!ev.isAllDay && ev.startTime && (
+                            <span className="text-xs font-black opacity-85 shrink-0">
+                              {ev.startTime}
+                            </span>
+                          )}
+                          <span className="break-words">{ev.title}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </main>
+
+      {/* 下部固定スマホドック（ウィジェット画面からカレンダー・スタンプ・音声・カメラへ即アクセス） */}
+      <div className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#FFE5EC] shadow-lg">
+        <div className="max-w-xl mx-auto px-2 py-2 grid grid-cols-5 gap-1.5">
+          <button
+            type="button"
+            onClick={onExitWidgetMode}
+            className="py-2 px-1 rounded-2xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white font-extrabold text-[11px] flex flex-col items-center justify-center gap-0.5 shadow-xs active:scale-95"
+          >
+            <CalendarDays className="w-4 h-4" />
+            <span>月間カレンダー</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenCalendarWithStampDrawer}
+            className="py-2 px-1 rounded-2xl bg-[#FFF0F5] text-[#9E2A47] border border-[#FFC2D1] font-extrabold text-[11px] flex flex-col items-center justify-center gap-0.5 active:scale-95"
+          >
+            <Stamp className="w-4 h-4 text-[#FF8FAB]" />
+            <span>シフト連続入力</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpenVoiceModal(todayStr)}
+            className="py-2 px-1 rounded-2xl bg-[#F3EAFF] text-[#59318F] border border-[#DEC9FC] font-extrabold text-[11px] flex flex-col items-center justify-center gap-0.5 active:scale-95"
+          >
+            <Mic className="w-4 h-4 text-[#B388EB]" />
+            <span>声で予定追加</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenImageOcrModal}
+            className="py-2 px-1 rounded-2xl bg-[#E2F9FC] text-[#136370] border border-[#A9E9F2] font-extrabold text-[11px] flex flex-col items-center justify-center gap-0.5 active:scale-95"
+          >
+            <Camera className="w-4 h-4 text-[#56CFE1]" />
+            <span>シフト画像読取</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="py-2 px-1 rounded-2xl bg-stone-100 text-stone-700 border border-stone-200 font-extrabold text-[11px] flex flex-col items-center justify-center gap-0.5 active:scale-95"
+          >
+            <Settings className="w-4 h-4 text-stone-600" />
+            <span>設定・同期</span>
+          </button>
         </div>
       </div>
     </div>
