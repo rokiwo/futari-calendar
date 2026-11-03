@@ -339,90 +339,122 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
               {/* カード中段：夫・妻の2人並列シフトボックス（バイト・残業も大きく表示） */}
               <div className="grid grid-cols-2 gap-2">
                 {/* 夫シフト */}
-                <div
-                  style={
-                    stampA
-                      ? { backgroundColor: stampA.color, color: stampA.textColor }
-                      : undefined
-                  }
-                  className={`rounded-2xl px-3 py-2 border flex flex-col justify-center ${
-                    stampA
-                      ? 'border-black/5'
-                      : 'bg-stone-50 text-stone-400 border-dashed border-stone-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs font-extrabold opacity-85">
-                      {partnerA.avatar} {partnerA.name}
-                    </span>
-                    {(shiftA?.startTime || stampA?.startTime) && (
-                      <span className="text-[11px] font-bold opacity-85">
-                        {shiftA?.startTime || stampA?.startTime}〜{shiftA?.endTime || stampA?.endTime || ''}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-sm font-black mt-0.5 flex flex-wrap items-center gap-1">
-                    <span>
-                      {stampA ? `${stampA.icon || ''} ${shiftA?.customLabel || stampA.label}` : 'シフト未登録'}
-                    </span>
-                    {subLabelA && (
-                      <span className="px-1.5 py-0.5 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-extrabold">
-                        ＋🏪{subLabelA}
-                        {shiftA?.subStartTime ? `(${shiftA.subStartTime})` : ''}
-                      </span>
-                    )}
-                    {((shiftA?.overtimeHours || 0) > 0 || (shiftA?.holidayWorkHours || 0) > 0) && (
-                      <span className="px-1.5 py-0.5 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold">
-                        {(shiftA?.holidayWorkHours || 0) > 0
-                          ? `休出${shiftA?.holidayWorkHours}h`
-                          : `残業+${shiftA?.overtimeHours}h`}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                {(() => {
+                  const hasExtraA =
+                    Boolean(subLabelA) ||
+                    (shiftA?.overtimeHours || 0) > 0 ||
+                    (shiftA?.holidayWorkHours || 0) > 0;
+                  return (
+                    <div
+                      style={
+                        stampA
+                          ? { backgroundColor: stampA.color, color: stampA.textColor }
+                          : undefined
+                      }
+                      className={`rounded-2xl px-3 py-2 border flex flex-col justify-center ${
+                        stampA
+                          ? 'border-black/5'
+                          : hasExtraA
+                          ? 'bg-rose-50/90 text-rose-900 border-rose-200'
+                          : 'bg-stone-50 text-stone-400 border-dashed border-stone-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-extrabold opacity-85">
+                          {partnerA.avatar} {partnerA.name}
+                        </span>
+                        {(shiftA?.startTime || stampA?.startTime) && (
+                          <span className="text-[11px] font-bold opacity-85">
+                            {shiftA?.startTime || stampA?.startTime}〜
+                            {shiftA?.endTime || stampA?.endTime || ''}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm font-black mt-0.5 flex flex-wrap items-center gap-1">
+                        {(stampA || !hasExtraA) && (
+                          <span>
+                            {stampA
+                              ? `${stampA.icon || ''} ${shiftA?.customLabel || stampA.label}`
+                              : 'シフト未登録'}
+                          </span>
+                        )}
+                        {subLabelA && (
+                          <span className="px-1.5 py-0.5 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-extrabold">
+                            ＋🏪{subLabelA}
+                            {shiftA?.subStartTime ? `(${shiftA.subStartTime})` : ''}
+                          </span>
+                        )}
+                        {((shiftA?.overtimeHours || 0) > 0 ||
+                          (shiftA?.holidayWorkHours || 0) > 0) && (
+                          <span className="px-1.5 py-0.5 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold">
+                            {(shiftA?.holidayWorkHours || 0) > 0
+                              ? `⏱️休出${shiftA?.holidayWorkHours}h`
+                              : `⏱️残業+${shiftA?.overtimeHours}h`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* 妻シフト */}
-                <div
-                  style={
-                    stampB
-                      ? { backgroundColor: stampB.color, color: stampB.textColor }
-                      : undefined
-                  }
-                  className={`rounded-2xl px-3 py-2 border flex flex-col justify-center ${
-                    stampB
-                      ? 'border-black/5'
-                      : 'bg-stone-50 text-stone-400 border-dashed border-stone-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs font-extrabold opacity-85">
-                      {partnerB.avatar} {partnerB.name}
-                    </span>
-                    {(shiftB?.startTime || stampB?.startTime) && (
-                      <span className="text-[11px] font-bold opacity-85">
-                        {shiftB?.startTime || stampB?.startTime}〜{shiftB?.endTime || stampB?.endTime || ''}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-sm font-black mt-0.5 flex flex-wrap items-center gap-1">
-                    <span>
-                      {stampB ? `${stampB.icon || ''} ${shiftB?.customLabel || stampB.label}` : 'シフト未登録'}
-                    </span>
-                    {subLabelB && (
-                      <span className="px-1.5 py-0.5 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-extrabold">
-                        ＋🏪{subLabelB}
-                        {shiftB?.subStartTime ? `(${shiftB.subStartTime})` : ''}
-                      </span>
-                    )}
-                    {((shiftB?.overtimeHours || 0) > 0 || (shiftB?.holidayWorkHours || 0) > 0) && (
-                      <span className="px-1.5 py-0.5 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold">
-                        {(shiftB?.holidayWorkHours || 0) > 0
-                          ? `休出${shiftB?.holidayWorkHours}h`
-                          : `残業+${shiftB?.overtimeHours}h`}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                {(() => {
+                  const hasExtraB =
+                    Boolean(subLabelB) ||
+                    (shiftB?.overtimeHours || 0) > 0 ||
+                    (shiftB?.holidayWorkHours || 0) > 0;
+                  return (
+                    <div
+                      style={
+                        stampB
+                          ? { backgroundColor: stampB.color, color: stampB.textColor }
+                          : undefined
+                      }
+                      className={`rounded-2xl px-3 py-2 border flex flex-col justify-center ${
+                        stampB
+                          ? 'border-black/5'
+                          : hasExtraB
+                          ? 'bg-rose-50/90 text-rose-900 border-rose-200'
+                          : 'bg-stone-50 text-stone-400 border-dashed border-stone-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-extrabold opacity-85">
+                          {partnerB.avatar} {partnerB.name}
+                        </span>
+                        {(shiftB?.startTime || stampB?.startTime) && (
+                          <span className="text-[11px] font-bold opacity-85">
+                            {shiftB?.startTime || stampB?.startTime}〜
+                            {shiftB?.endTime || stampB?.endTime || ''}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm font-black mt-0.5 flex flex-wrap items-center gap-1">
+                        {(stampB || !hasExtraB) && (
+                          <span>
+                            {stampB
+                              ? `${stampB.icon || ''} ${shiftB?.customLabel || stampB.label}`
+                              : 'シフト未登録'}
+                          </span>
+                        )}
+                        {subLabelB && (
+                          <span className="px-1.5 py-0.5 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-extrabold">
+                            ＋🏪{subLabelB}
+                            {shiftB?.subStartTime ? `(${shiftB.subStartTime})` : ''}
+                          </span>
+                        )}
+                        {((shiftB?.overtimeHours || 0) > 0 ||
+                          (shiftB?.holidayWorkHours || 0) > 0) && (
+                          <span className="px-1.5 py-0.5 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold">
+                            {(shiftB?.holidayWorkHours || 0) > 0
+                              ? `⏱️休出${shiftB?.holidayWorkHours}h`
+                              : `⏱️残業+${shiftB?.overtimeHours}h`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* カード下段：予定＆タスクリスト（二人予定・夫予定・妻予定）＆すれ違いサポート */}
