@@ -15,6 +15,7 @@ import {
 import {
   CoupleMetadata,
   PartnerId,
+  ShiftEntry,
   StampPreset,
 } from '../types/calendar';
 import { SUPPORT_BADGE_PRESETS } from '../utils/presets';
@@ -33,6 +34,11 @@ interface StampDrawerProps {
   onMoveDate: (deltaDays: number) => void;
   onApplyShiftAndAdvance: (stamp: StampPreset, targetPartner: PartnerId) => void;
   onClearShiftAndAdvance: (targetPartner: PartnerId) => void;
+  onUpdateShiftDetailsOnSelectedDate: (
+    targetPartner: PartnerId,
+    patch: Partial<ShiftEntry>
+  ) => void;
+  currentShiftOnSelectedDate?: ShiftEntry;
   onToggleSupportBadgeOnSelectedDate: (badge: string) => void;
   activeSupportBadgesOnSelectedDate: string[];
   onOpenDayDetail: () => void;
@@ -55,6 +61,8 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   onMoveDate,
   onApplyShiftAndAdvance,
   onClearShiftAndAdvance,
+  onUpdateShiftDetailsOnSelectedDate,
+  currentShiftOnSelectedDate,
   onToggleSupportBadgeOnSelectedDate,
   activeSupportBadgesOnSelectedDate,
   onOpenDayDetail,
@@ -78,12 +86,10 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
     return `${m}/${d}(${w})`;
   };
 
-  // ドロワーが閉じている時の「スマホライクな下部アクションドック」
   if (!isOpen) {
     return (
       <nav className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#FFE5EC] shadow-[0_-4px_20px_rgba(255,143,171,0.15)] pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-lg mx-auto px-2 py-1.5 grid grid-cols-5 gap-1">
-          {/* 1. シフト連続入力 */}
           <button
             type="button"
             onClick={() => onToggleOpen(true)}
@@ -95,7 +101,6 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             </span>
           </button>
 
-          {/* 2. 音声で予定入力（中央左・目立つボタン） */}
           <button
             type="button"
             onClick={onOpenVoiceModal}
@@ -107,7 +112,6 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             </span>
           </button>
 
-          {/* 3. 選択日の予定追加・詳細（センターメインボタン） */}
           <button
             type="button"
             onClick={onOpenDayDetail}
@@ -119,7 +123,6 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             </span>
           </button>
 
-          {/* 4. シフト表AI画像読取＆ナスカレ連携 */}
           <button
             type="button"
             onClick={onOpenImageOcrModal}
@@ -131,7 +134,6 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             </span>
           </button>
 
-          {/* 5. スマホウィジェット表示 */}
           <button
             type="button"
             onClick={onOpenWidgetModal}
@@ -182,7 +184,6 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* シフト種類の追加・かんたん編集ボタン */}
             <button
               type="button"
               onClick={onOpenShiftStampManager}
@@ -245,16 +246,10 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
           </button>
         </div>
 
-        {/* 3. シフトボタンパレット（1回押すごとに自動で翌日に移動！） */}
+        {/* 3. シフトボタンパレット（1回押すごとに自動で翌日に移動！）＋ バイト＆残業クイック追記バー */}
         {(activeTab === 'partnerA_shift' || activeTab === 'partnerB_shift') && (
           <div className="space-y-1.5">
-            <div className="text-[11px] text-stone-500 px-1 flex items-center justify-between">
-              <span>
-                👇 ボタンを押すと <strong>{formatSelectedDate(selectedDate)}</strong> に入り、<strong>自動で次の日へ進みます</strong>
-              </span>
-            </div>
-
-            <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5 max-h-44 overflow-y-auto p-0.5">
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5 max-h-36 overflow-y-auto p-0.5">
               {shiftStamps.map((stamp) => {
                 const isSelected = selectedStampId === stamp.id;
                 return (
@@ -269,7 +264,7 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                       backgroundColor: stamp.color,
                       color: stamp.textColor,
                     }}
-                    className={`py-2.5 px-1.5 rounded-2xl font-extrabold text-xs flex flex-col items-center justify-center gap-0.5 shadow-xs active:scale-90 transition-all border-2 ${
+                    className={`py-2 px-1.5 rounded-2xl font-extrabold text-xs flex flex-col items-center justify-center gap-0.5 shadow-xs active:scale-90 transition-all border-2 ${
                       isSelected
                         ? 'border-stone-800 ring-2 ring-stone-800/15'
                         : 'border-white hover:brightness-95'
@@ -292,19 +287,80 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                 );
               })}
 
-              {/* シフト消去＆次へボタン */}
               <button
                 type="button"
                 onClick={() => {
                   onSelectStamp('__ERASER__');
                   onClearShiftAndAdvance(currentShiftPartner);
                 }}
-                className={`py-2.5 px-1.5 rounded-2xl font-extrabold text-xs flex flex-col items-center justify-center gap-0.5 bg-stone-100 text-stone-600 hover:bg-rose-50 hover:text-rose-600 border-2 ${
+                className={`py-2 px-1.5 rounded-2xl font-extrabold text-xs flex flex-col items-center justify-center gap-0.5 bg-stone-100 text-stone-600 hover:bg-rose-50 hover:text-rose-600 border-2 ${
                   selectedStampId === '__ERASER__' ? 'border-rose-500' : 'border-stone-200'
                 }`}
               >
                 <Eraser className="w-4 h-4" />
                 <span>消して次へ</span>
+              </button>
+            </div>
+
+            {/* 選択日の「＋仕事終わり・休日のバイト」＆「⏱️残業・休日出勤」ワンタップ重ね記載バー */}
+            <div className="pt-1.5 border-t border-stone-100 flex items-center gap-1 overflow-x-auto no-scrollbar text-[10px]">
+              <span className="font-bold text-stone-400 shrink-0">
+                {formatSelectedDate(selectedDate)}に重ね書き:
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                    subStampId: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'shift_part',
+                    subCustomLabel: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'バイト',
+                    subStartTime: '18:30',
+                    subEndTime: '22:00',
+                  })
+                }
+                className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 ${
+                  currentShiftOnSelectedDate?.subCustomLabel
+                    ? 'bg-[#FFF3D6] border-[#FFB703] text-[#996300]'
+                    : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
+                }`}
+              >
+                ＋🏪バイト重ね書き
+              </button>
+
+              {[1, 2, 3].map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() =>
+                    onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                      overtimeHours:
+                        currentShiftOnSelectedDate?.overtimeHours === h ? 0 : h,
+                    })
+                  }
+                  className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 ${
+                    currentShiftOnSelectedDate?.overtimeHours === h
+                      ? 'bg-rose-500 border-rose-500 text-white'
+                      : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
+                  }`}
+                >
+                  ⏱️残業+{h}h
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                    isHolidayWork: !currentShiftOnSelectedDate?.isHolidayWork,
+                    holidayWorkHours: currentShiftOnSelectedDate?.holidayWorkHours ? 0 : 4,
+                  })
+                }
+                className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 ${
+                  currentShiftOnSelectedDate?.holidayWorkHours
+                    ? 'bg-amber-600 border-amber-600 text-white'
+                    : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
+                }`}
+              >
+                💼休出4h
               </button>
             </div>
           </div>
