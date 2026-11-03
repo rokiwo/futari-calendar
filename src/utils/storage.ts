@@ -10,7 +10,11 @@ import {
   StampPreset,
 } from '../types/calendar';
 import { decryptCalendarStore, encryptCalendarStore } from './crypto';
-import { createInitialDataStore, DEFAULT_STAMP_PRESETS } from './presets';
+import {
+  createInitialDataStore,
+  DEFAULT_STAMP_PRESETS,
+  LEGACY_DEFAULT_STAMP_IDS,
+} from './presets';
 import { getDefaultCloudCredentials } from './defaultCloud';
 
 const DB_NAME = 'FutariCalDB';
@@ -117,11 +121,25 @@ export function mergeCalendarStores(
     }
   }
 
-  // 4. スタンププリセットのマージ（IDごと・order順ソート）
+  // 4. スタンププリセットのマージ（旧デフォルトスタンプは除外し、更新日時が新しい方を優先しつつ統合）
+  const isRemoteNewer = toTimeMs(remote.updatedAt) > toTimeMs(local.updatedAt);
+  const primaryStamps = (isRemoteNewer ? remote.stamps : local.stamps) || [];
+  const secondaryStamps = (isRemoteNewer ? local.stamps : remote.stamps) || [];
+
   const stampMap = new Map<string, StampPreset>();
-  for (const s of DEFAULT_STAMP_PRESETS) stampMap.set(s.id, s);
-  for (const s of remote.stamps || []) stampMap.set(s.id, s);
-  for (const s of local.stamps || []) stampMap.set(s.id, s);
+  for (const s of DEFAULT_STAMP_PRESETS) {
+    stampMap.set(s.id, s);
+  }
+  for (const s of secondaryStamps) {
+    if (!LEGACY_DEFAULT_STAMP_IDS.has(s.id) && s.type === 'shift') {
+      stampMap.set(s.id, { ...s, partnerId: s.partnerId || 'partnerA' });
+    }
+  }
+  for (const s of primaryStamps) {
+    if (!LEGACY_DEFAULT_STAMP_IDS.has(s.id) && s.type === 'shift') {
+      stampMap.set(s.id, { ...s, partnerId: s.partnerId || 'partnerA' });
+    }
+  }
   const mergedStamps = Array.from(stampMap.values()).sort((a, b) => a.order - b.order);
 
   // 4-2. カレンダー予定項目（categories）のマージ
