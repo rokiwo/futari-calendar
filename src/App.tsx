@@ -80,6 +80,7 @@ export const App: React.FC = () => {
 
   // 各種モーダル開閉状態
   const [dayDetailOpen, setDayDetailOpen] = useState<boolean>(false);
+  const [openEventFormDirectly, setOpenEventFormDirectly] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [shiftManagerOpen, setShiftManagerOpen] = useState<boolean>(false);
   const [categoryManagerOpen, setCategoryManagerOpen] = useState<boolean>(false);
@@ -107,10 +108,10 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [toastText]);
 
-  // 初回ロード（IndexedDB / localStorage から復元し、バイト・休出スタンプやデフォルト項目を補完）
+  // 初回ロード（IndexedDB / localStorage から復元＋「いったん今登録してある全部の予定削除」マイグレーション実行）
   useEffect(() => {
     let mounted = true;
-    loadLocalStore().then((loaded) => {
+    loadLocalStore().then(async (loaded) => {
       if (!mounted) return;
       const defaultStore = createInitialDataStore();
       const shiftOnlyStamps = (loaded.stamps || []).filter((s) => s.type === 'shift');
@@ -124,14 +125,27 @@ export const App: React.FC = () => {
         }
       }
 
-      setStore({
+      // ご要望：「いったん今登録してある全部の予定削除」を初回起動時に自動適用
+      const CLEAR_EVENTS_FLAG = 'futarical_clear_all_events_20261103_v1';
+      const shouldClearAllEvents = localStorage.getItem(CLEAR_EVENTS_FLAG) !== '1';
+
+      const nextStore: CalendarDataStore = {
         ...loaded,
+        events: shouldClearAllEvents ? {} : loaded.events || {},
+        daySupports: shouldClearAllEvents ? {} : loaded.daySupports || {},
         categories:
           loaded.categories && loaded.categories.length > 0
             ? loaded.categories
             : DEFAULT_CATEGORIES,
         stamps: mergedStamps,
-      });
+      };
+
+      if (shouldClearAllEvents) {
+        localStorage.setItem(CLEAR_EVENTS_FLAG, '1');
+        await saveLocalStore(nextStore);
+      }
+
+      setStore(nextStore);
       setIsLoaded(true);
     });
     return () => {
@@ -335,8 +349,8 @@ export const App: React.FC = () => {
     [activePartner, commitStore, store]
   );
 
-  // カレンダーの日付セルをタップした時の処理
-  const handleCellClick = useCallback(
+  // 月間カレンダーの日付セルを「シングルタップ」した時の処理（その日に移動。スタンプドロワー展開中のみシフト押印）
+  const handleCellSingleTap = useCallback(
     (dateStr: string) => {
       setSelectedDate(dateStr);
       const [ny, nm] = dateStr.split('-').map(Number);
@@ -361,8 +375,6 @@ export const App: React.FC = () => {
         if (stamp) {
           handleSetShiftAndAdvance(dateStr, targetPartner, stamp);
         }
-      } else {
-        setDayDetailOpen(true);
       }
     },
     [
@@ -376,7 +388,37 @@ export const App: React.FC = () => {
     ]
   );
 
-  // 予定の追加・更新
+  // 月間カレンダーの日付セルを「ダブルタップ」した時の処理（TimeTree風：その日のすべての予定を表示）
+  const handleCellDoubleTap = useCallback(
+    (dateStr: string) => {
+      setSelectedDate(dateStr);
+      const [ny, nm] = dateStr.split('-').map(Number);
+      if (ny !== year || nm !== month) {
+        setYear(ny);
+        setMonth(nm);
+      }
+      setOpenEventFormDirectly(false);
+      setDayDetailOpen(true);
+    },
+    [month, year]
+  );
+
+  // 右下の「＋」ボタンから選択中の日（または指定日）に予定・タスクを直接追加する処理
+  const handleQuickAddForDate = useCallback(
+    (dateStr: string) => {
+      setSelectedDate(dateStr);
+      const [ny, nm] = dateStr.split('-').map(Number);
+      if (ny !== year || nm !== month) {
+        setYear(ny);
+        setMonth(nm);
+      }
+      setOpenEventFormDirectly(true);
+      setDayDetailOpen(true);
+    },
+    [month, year]
+  );
+
+  // 予定・タスクの追加・更新
   const handleSaveEvent = useCallback(
     (ev: ScheduleEvent) => {
       const nextStore: CalendarDataStore = {
@@ -388,7 +430,33 @@ export const App: React.FC = () => {
       };
       commitStore(nextStore);
       const [, m, d] = ev.date.split('-').map(Number);
-      showToast(`📅 ${m}/${d} に「${ev.title}」を登録しました💕`);
+      showToast(
+        `${ev.isTask ? '✅' : '📅'} ${m}/${d} に「${ev.title}」を登録しました💕`
+      );
+    },
+    [commitStore, showToast, store]
+  );
+
+  // タスクの完了／未完了を1タップ切替
+  const handleToggleTaskComplete = useCallback(
+    (eventId: string) => {
+      const existing = store.events[eventId];
+      if (!existing) return;
+      const nowIso = new Date().toISOString();
+      const nextCompleted = !existing.isCompleted;
+      const nextStore: CalendarDataStore = {
+        ...store,
+        events: {
+          ...store.events,
+          [eventId]: {
+            ...existing,
+            isCompleted: nextCompleted,
+            updatedAt: nowIso,
+          },
+        },
+      };
+      commitStore(nextStore);
+      showToast(nextCompleted ? '✅ タスクを完了にしました！' : '⬜ タスクを未完了に戻しました');
     },
     [commitStore, showToast, store]
   );
@@ -415,6 +483,25 @@ export const App: React.FC = () => {
     },
     [commitStore, showToast, store]
   );
+
+  // 登録されているすべての予定・タスクを一括削除
+  const handleClearAllEvents = useCallback(() => {
+    const nowIso = new Date().toISOString();
+    const deletedEvents: Record<string, ScheduleEvent> = {};
+    for (const [id, ev] of Object.entries(store.events)) {
+      deletedEvents[id] = {
+        ...ev,
+        updatedAt: nowIso,
+        deletedAt: nowIso,
+      };
+    }
+    commitStore({
+      ...store,
+      events: deletedEvents,
+      daySupports: {},
+    });
+    showToast('🗑️ すべての予定・タスクを削除しました');
+  }, [commitStore, showToast, store]);
 
   // 操作中パートナーの切り替え（🐻夫 ⇔ 🐰妻）
   const handleToggleActivePartner = useCallback(
@@ -662,8 +749,13 @@ export const App: React.FC = () => {
             const [ny, nm] = dateStr.split('-').map(Number);
             setYear(ny);
             setMonth(nm);
+            setOpenEventFormDirectly(false);
             setDayDetailOpen(true);
           }}
+          onQuickAddEventForDate={(dateStr) => {
+            handleQuickAddForDate(dateStr);
+          }}
+          onToggleTaskComplete={handleToggleTaskComplete}
           onSelectDateInFullCalendar={(dateStr) => {
             setIsWidgetMode(false);
             setSelectedDate(dateStr);
@@ -710,6 +802,7 @@ export const App: React.FC = () => {
             overtimeSummary={overtimeSummary}
             onSelectDate={(dateStr) => {
               setSelectedDate(dateStr);
+              setOpenEventFormDirectly(false);
               setDayDetailOpen(true);
             }}
             filterCategory={filterCategory}
@@ -727,7 +820,7 @@ export const App: React.FC = () => {
             onOpenWidgetHome={() => setIsWidgetMode(true)}
           />
 
-          {/* 月間カレンダーグリッド（左右スワイプで前月・次月移動対応） */}
+          {/* 月間カレンダーグリッド（シングルタップ移動・ダブルタップ予定一覧・右下＋予定追加） */}
           <main className="flex-1">
             <MonthlyCalendarGrid
               year={year}
@@ -739,7 +832,9 @@ export const App: React.FC = () => {
               showShiftTimeInCell={showShiftTimeInCell}
               selectedDate={selectedDate}
               stampModeActive={stampDrawerOpen}
-              onCellClick={handleCellClick}
+              onCellSingleTap={handleCellSingleTap}
+              onCellDoubleTap={handleCellDoubleTap}
+              onQuickAddForSelectedDate={() => handleQuickAddForDate(selectedDate)}
               onSwipePrevMonth={handlePrevMonth}
               onSwipeNextMonth={handleNextMonth}
             />
@@ -772,7 +867,10 @@ export const App: React.FC = () => {
               handleToggleDaySupportBadge(selectedDate, badge)
             }
             activeSupportBadgesOnSelectedDate={store.daySupports?.[selectedDate]?.badges || []}
-            onOpenDayDetail={() => setDayDetailOpen(true)}
+            onOpenDayDetail={() => {
+              setOpenEventFormDirectly(true);
+              setDayDetailOpen(true);
+            }}
             onOpenShiftStampManager={() => setShiftManagerOpen(true)}
             onOpenVoiceModal={() => setVoiceModalOpen(true)}
             onOpenImageOcrModal={() => setImageOcrOpen(true)}
@@ -782,18 +880,23 @@ export const App: React.FC = () => {
         </>
       )}
 
-      {/* 日付詳細＆シフト・予定モーダル */}
+      {/* 日付詳細＆シフト・予定・タスクモーダル */}
       {dayDetailOpen && (
         <DayDetailModal
           dateStr={selectedDate}
           store={store}
           activePartner={activePartner}
-          onClose={() => setDayDetailOpen(false)}
+          initialOpenEventForm={openEventFormDirectly}
+          onClose={() => {
+            setDayDetailOpen(false);
+            setOpenEventFormDirectly(false);
+          }}
           onMoveDate={moveSelectedDate}
           onSetShiftAndAdvance={handleSetShiftAndAdvance}
           onUpdateShiftDetails={handleUpdateShiftDetails}
           onToggleDaySupportBadge={handleToggleDaySupportBadge}
           onSaveEvent={handleSaveEvent}
+          onToggleTaskComplete={handleToggleTaskComplete}
           onDeleteEvent={handleDeleteEvent}
           onOpenVoiceModal={() => setVoiceModalOpen(true)}
           onOpenShiftStampManager={() => setShiftManagerOpen(true)}
@@ -910,6 +1013,7 @@ export const App: React.FC = () => {
               events: nextEvents,
             });
           }}
+          onClearAllEvents={handleClearAllEvents}
           onUpdatePartnerProfiles={(nameA, avatarA, nameB, avatarB) => {
             const nowIso = new Date().toISOString();
             commitStore({
