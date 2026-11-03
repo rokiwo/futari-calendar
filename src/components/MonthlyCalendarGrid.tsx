@@ -218,8 +218,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     const hasSubWork = Boolean(shift?.subCustomLabel || subStamp);
     const subLabel = shift?.subCustomLabel || subStamp?.shortLabel || '';
 
-    const overtime = shift?.overtimeHours || 0;
-    const holWork = shift?.holidayWorkHours || 0;
+    const overtime = Number(shift?.overtimeHours || 0);
+    const holWork = Number(shift?.holidayWorkHours || 0);
+    const hasExtra = hasSubWork || overtime > 0 || holWork > 0;
 
     return (
       <div
@@ -237,6 +238,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         className={`relative rounded sm:rounded-lg px-0.5 py-0.5 sm:py-0.5 text-[10px] sm:text-[10px] font-black flex flex-col items-center justify-center leading-none sm:leading-tight border ${
           stamp
             ? 'border-black/5'
+            : hasExtra
+            ? 'bg-rose-50/90 text-rose-800 border-rose-200'
             : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
         }`}
       >
@@ -247,7 +250,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
               {shift?.customLabel || stamp.shortLabel}
             </span>
           ) : (
-            <span className="text-[8.5px] font-normal opacity-55">{partnerAvatar}</span>
+            <span className="text-[8.5px] font-normal opacity-75">{partnerAvatar}</span>
           )}
         </div>
 
@@ -261,7 +264,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         {/* 残業時間・休日出勤時間のバッジ表示 */}
         {(overtime > 0 || holWork > 0) && (
           <div className="w-full mt-[1px] px-0.5 rounded-xs bg-rose-500 text-white text-[8.5px] sm:text-[8.5px] font-black text-center truncate leading-tight">
-            {holWork > 0 ? `休${holWork}h` : `+${overtime}h`}
+            {holWork > 0 ? `休${holWork}h` : `残+${overtime}h`}
           </div>
         )}
 
@@ -782,23 +785,32 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                     : undefined
                 }
                 className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
-                  selStampA ? '' : 'bg-stone-100 text-stone-400'
+                  selStampA
+                    ? ''
+                    : Number(activeSelShiftA?.overtimeHours || 0) > 0 ||
+                      Number(activeSelShiftA?.holidayWorkHours || 0) > 0 ||
+                      activeSelShiftA?.subCustomLabel
+                    ? 'bg-rose-50 text-rose-900 border border-rose-200'
+                    : 'bg-stone-100 text-stone-400'
                 }`}
               >
                 <span>{partnerA.avatar}{partnerA.name}:</span>
                 <span>
                   {selStampA
                     ? `${selStampA.icon || ''}${activeSelShiftA?.customLabel || selStampA.label}`
-                    : '未登録'}
+                    : 'シフト未定'}
                 </span>
                 {activeSelShiftA?.subCustomLabel && (
                   <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
                     +🏪{activeSelShiftA.subCustomLabel}
                   </span>
                 )}
-                {(activeSelShiftA?.overtimeHours || 0) > 0 && (
-                  <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
-                    残業+{activeSelShiftA?.overtimeHours}h
+                {(Number(activeSelShiftA?.overtimeHours || 0) > 0 ||
+                  Number(activeSelShiftA?.holidayWorkHours || 0) > 0) && (
+                  <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
+                    {Number(activeSelShiftA?.holidayWorkHours || 0) > 0
+                      ? `休出${activeSelShiftA?.holidayWorkHours}h`
+                      : `残業+${activeSelShiftA?.overtimeHours}h`}
                   </span>
                 )}
               </div>
@@ -810,23 +822,32 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                     : undefined
                 }
                 className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
-                  selStampB ? '' : 'bg-stone-100 text-stone-400'
+                  selStampB
+                    ? ''
+                    : Number(activeSelShiftB?.overtimeHours || 0) > 0 ||
+                      Number(activeSelShiftB?.holidayWorkHours || 0) > 0 ||
+                      activeSelShiftB?.subCustomLabel
+                    ? 'bg-rose-50 text-rose-900 border border-rose-200'
+                    : 'bg-stone-100 text-stone-400'
                 }`}
               >
                 <span>{partnerB.avatar}{partnerB.name}:</span>
                 <span>
                   {selStampB
                     ? `${selStampB.icon || ''}${activeSelShiftB?.customLabel || selStampB.label}`
-                    : '未登録'}
+                    : 'シフト未定'}
                 </span>
                 {activeSelShiftB?.subCustomLabel && (
                   <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
                     +🏪{activeSelShiftB.subCustomLabel}
                   </span>
                 )}
-                {(activeSelShiftB?.overtimeHours || 0) > 0 && (
-                  <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
-                    残業+{activeSelShiftB?.overtimeHours}h
+                {(Number(activeSelShiftB?.overtimeHours || 0) > 0 ||
+                  Number(activeSelShiftB?.holidayWorkHours || 0) > 0) && (
+                  <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
+                    {Number(activeSelShiftB?.holidayWorkHours || 0) > 0
+                      ? `休出${activeSelShiftB?.holidayWorkHours}h`
+                      : `残業+${activeSelShiftB?.overtimeHours}h`}
                   </span>
                 )}
               </div>
