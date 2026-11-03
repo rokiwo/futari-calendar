@@ -13,7 +13,7 @@ import {
 import { StampPreset } from '../types/calendar';
 import {
   PASTEL_COLOR_PALETTE,
-  SHIFT_ICON_CHOICES,
+  SHIFT_ICON_PATTERNS,
   SHIFT_TIME_PRESETS,
 } from '../utils/presets';
 
@@ -32,13 +32,19 @@ const QUICK_SHIFT_TEMPLATES: {
   paletteIndex: number;
 }[] = [
   { label: '当直', icon: '🏥', startTime: '17:00', endTime: '09:00', isHoliday: false, paletteIndex: 4 },
-  { label: '午前半休', icon: '☀️', startTime: '13:00', endTime: '17:30', isHoliday: false, paletteIndex: 0 },
+  { label: '午前半休', icon: '🌤️', startTime: '13:00', endTime: '17:30', isHoliday: false, paletteIndex: 0 },
   { label: '午後半休', icon: '🌆', startTime: '08:30', endTime: '12:30', isHoliday: false, paletteIndex: 5 },
-  { label: '公休', icon: '🛋️', isHoliday: true, paletteIndex: 1 },
+  { label: '夜バイト', icon: '🏪', startTime: '18:00', endTime: '22:00', isHoliday: false, paletteIndex: 5 },
+  { label: '昼バイト', icon: '☕', startTime: '10:00', endTime: '15:00', isHoliday: false, paletteIndex: 5 },
+  { label: '休日出勤', icon: '💼', startTime: '09:00', endTime: '17:00', isHoliday: false, paletteIndex: 7 },
+  { label: '在宅勤務', icon: '💻', startTime: '09:00', endTime: '18:00', isHoliday: false, paletteIndex: 6 },
+  { label: '出張', icon: '✈️', startTime: '08:00', endTime: '19:00', isHoliday: false, paletteIndex: 2 },
+  { label: '研修', icon: '📝', startTime: '09:00', endTime: '17:00', isHoliday: false, paletteIndex: 3 },
+  { label: '公休', icon: '🌸', isHoliday: true, paletteIndex: 1 },
   { label: '夏休', icon: '🌻', isHoliday: true, paletteIndex: 5 },
+  { label: '看護・育休', icon: '👶', isHoliday: true, paletteIndex: 0 },
   { label: '夜勤入り', icon: '🌙', startTime: '16:30', endTime: '09:00', isHoliday: false, paletteIndex: 3 },
   { label: '夜勤明け', icon: '🍵', isHoliday: false, paletteIndex: 6 },
-  { label: '日勤B', icon: '🏢', startTime: '09:00', endTime: '18:00', isHoliday: false, paletteIndex: 2 },
 ];
 
 export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
@@ -52,6 +58,7 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
 
   // どのシフトカードを展開編集しているか（nullなら新規追加または閉じた状態）
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [iconCatIdx, setIconCatIdx] = useState<number>(0);
 
   // 新規追加フォーム状態
   const [newLabel, setNewLabel] = useState('');
@@ -195,26 +202,44 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
               />
             </div>
 
-            {/* アイコンワンタップ選択 */}
-            <div>
-              <div className="text-[11px] font-bold text-stone-500 mb-1">
-                アイコンをタップで選択
+            {/* パターン別アイコンワンタップ選択 */}
+            <div className="space-y-1.5">
+              <div className="text-[11px] font-bold text-stone-500">
+                パターン別アイコンをタップで選択
               </div>
-              <div className="flex gap-1 overflow-x-auto no-scrollbar pb-1">
-                {SHIFT_ICON_CHOICES.map((ic) => (
+              <div className="flex gap-1 overflow-x-auto pb-0.5">
+                {SHIFT_ICON_PATTERNS.map((grp, idx) => (
                   <button
-                    key={ic}
+                    key={grp.category}
                     type="button"
-                    onClick={() => setNewIcon(ic)}
-                    className={`w-8 h-8 rounded-xl text-base shrink-0 flex items-center justify-center transition-all ${
-                      newIcon === ic
-                        ? 'bg-[#FFE5EC] ring-2 ring-[#FF8FAB] scale-105'
-                        : 'bg-stone-50 hover:bg-stone-100'
+                    onClick={() => setIconCatIdx(idx)}
+                    className={`px-2 py-1 rounded-xl text-[10px] font-extrabold whitespace-nowrap transition-all ${
+                      iconCatIdx === idx
+                        ? 'bg-[#FF8FAB] text-white'
+                        : 'bg-stone-100 text-stone-600'
                     }`}
                   >
-                    {ic}
+                    {grp.category}
                   </button>
                 ))}
+              </div>
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {(SHIFT_ICON_PATTERNS[iconCatIdx]?.icons || SHIFT_ICON_PATTERNS[0].icons).map(
+                  (ic) => (
+                    <button
+                      key={ic}
+                      type="button"
+                      onClick={() => setNewIcon(ic)}
+                      className={`w-8 h-8 rounded-xl text-base shrink-0 flex items-center justify-center transition-all ${
+                        newIcon === ic
+                          ? 'bg-[#FFE5EC] ring-2 ring-[#FF8FAB] scale-105'
+                          : 'bg-stone-50 hover:bg-stone-100 border border-stone-200/70'
+                      }`}
+                    >
+                      {ic}
+                    </button>
+                  )
+                )}
               </div>
             </div>
 
@@ -455,22 +480,43 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
                         </div>
                       </div>
 
-                      {/* アイコンチップ選択 */}
-                      <div className="flex gap-1 overflow-x-auto no-scrollbar pb-0.5">
-                        {SHIFT_ICON_CHOICES.map((ic) => (
-                          <button
-                            key={ic}
-                            type="button"
-                            onClick={() => handleUpdateOne(stamp.id, { icon: ic })}
-                            className={`w-7 h-7 rounded-lg text-sm shrink-0 ${
-                              stamp.icon === ic
-                                ? 'bg-[#FFE5EC] ring-2 ring-[#FF8FAB]'
-                                : 'bg-white border border-stone-200'
-                            }`}
-                          >
-                            {ic}
-                          </button>
-                        ))}
+                      {/* パターン別アイコンチップ選択 */}
+                      <div className="space-y-1">
+                        <div className="flex gap-1 overflow-x-auto pb-0.5">
+                          {SHIFT_ICON_PATTERNS.map((grp, gIdx) => (
+                            <button
+                              key={grp.category}
+                              type="button"
+                              onClick={() => setIconCatIdx(gIdx)}
+                              className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold whitespace-nowrap ${
+                                iconCatIdx === gIdx
+                                  ? 'bg-[#FF8FAB] text-white'
+                                  : 'bg-white border border-stone-200 text-stone-500'
+                              }`}
+                            >
+                              {grp.category}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {(
+                            SHIFT_ICON_PATTERNS[iconCatIdx]?.icons ||
+                            SHIFT_ICON_PATTERNS[0].icons
+                          ).map((ic) => (
+                            <button
+                              key={ic}
+                              type="button"
+                              onClick={() => handleUpdateOne(stamp.id, { icon: ic })}
+                              className={`w-7 h-7 rounded-lg text-sm shrink-0 ${
+                                stamp.icon === ic
+                                  ? 'bg-[#FFE5EC] ring-2 ring-[#FF8FAB]'
+                                  : 'bg-white border border-stone-200'
+                              }`}
+                            >
+                              {ic}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
                       {/* 勤務時間プリセット＆ピッカー */}
