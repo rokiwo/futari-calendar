@@ -11,6 +11,8 @@ import {
   Heart,
   Mic,
   Settings2,
+  Timer,
+  Briefcase,
 } from 'lucide-react';
 import {
   CalendarCategoryId,
@@ -21,8 +23,9 @@ import {
   StampPreset,
 } from '../types/calendar';
 import {
-  CATEGORY_MAP,
+  DEFAULT_CATEGORIES,
   getJapaneseHoliday,
+  resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
 
@@ -37,11 +40,17 @@ interface DayDetailModalProps {
     partnerId: PartnerId,
     stamp: StampPreset | null
   ) => void;
+  onUpdateShiftDetails: (
+    dateStr: string,
+    partnerId: PartnerId,
+    patch: Partial<ShiftEntry>
+  ) => void;
   onToggleDaySupportBadge: (dateStr: string, badge: string) => void;
   onSaveEvent: (event: ScheduleEvent) => void;
   onDeleteEvent: (eventId: string) => void;
   onOpenVoiceModal: () => void;
   onOpenShiftStampManager: () => void;
+  onOpenCategoryManager: () => void;
 }
 
 function formatShortDateTime(isoStr?: string): string {
@@ -62,11 +71,13 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   onClose,
   onMoveDate,
   onSetShiftAndAdvance,
+  onUpdateShiftDetails,
   onToggleDaySupportBadge,
   onSaveEvent,
   onDeleteEvent,
   onOpenVoiceModal,
   onOpenShiftStampManager,
+  onOpenCategoryManager,
 }) => {
   const [showEventForm, setShowEventForm] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -88,6 +99,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const partnerA = store.metadata.partners.partnerA;
   const partnerB = store.metadata.partners.partnerB;
 
+  const categories =
+    store.categories && store.categories.length > 0
+      ? [...store.categories].sort((a, b) => a.order - b.order)
+      : DEFAULT_CATEGORIES;
+
   const stampMap = new Map<string, StampPreset>();
   for (const s of store.stamps) {
     stampMap.set(s.id, s);
@@ -106,7 +122,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const stampB = shiftB ? stampMap.get(shiftB.stampId) : undefined;
 
   const isHolidayShift = (shift?: ShiftEntry) => {
-    if (!shift) return false;
+    if (!shift || shift.isHolidayWork) return false;
     const p = stampMap.get(shift.stampId);
     return Boolean(p?.isHoliday || (p && /休|有休|公休/.test(p.label)));
   };
@@ -122,7 +138,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const daySupport = store.daySupports?.[dateStr];
   const activeDayBadges = daySupport?.badges || [];
 
-  // 作成者・相手の既読確認ステータス文字列を生成
   const renderAuditAndReadStatus = (createdBy: PartnerId, createdAt: string, updatedAt: string) => {
     const creator = store.metadata.partners[createdBy];
     const otherId: PartnerId = createdBy === 'partnerA' ? 'partnerB' : 'partnerA';
@@ -156,10 +171,10 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     );
   };
 
-  const handleOpenNewForm = () => {
+  const handleOpenNewForm = (defaultCatId?: CalendarCategoryId) => {
     setEditingEventId(null);
     setTitle('');
-    setCategoryId('shared');
+    setCategoryId(defaultCatId || categories[0]?.id || 'shared');
     setIsAllDay(false);
     setStartTime('10:00');
     setEndTime('12:00');
@@ -185,7 +200,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     if (!title.trim()) return;
 
     const nowIso = new Date().toISOString();
-    const cat = CATEGORY_MAP[categoryId] || CATEGORY_MAP.shared;
+    const cat = resolveCategoryInfo(categoryId, store.categories, store.metadata);
     const existing = editingEventId ? store.events[editingEventId] : undefined;
 
     const newEvent: ScheduleEvent = {
@@ -224,7 +239,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
             <button
               type="button"
               onClick={() => onMoveDate(-1)}
-              className="p-1.5 rounded-xl bg-stone-100 hover:bg-[#FFE5EC] text-stone-600 transition-colors"
+              className="p-1.5 rounded-xl bg-stone-100 hover:bg-[#FFE5EC] text-stone-600"
               title="前日へ"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -252,7 +267,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
             <button
               type="button"
               onClick={() => onMoveDate(1)}
-              className="p-1.5 rounded-xl bg-stone-100 hover:bg-[#FFE5EC] text-stone-600 transition-colors"
+              className="p-1.5 rounded-xl bg-stone-100 hover:bg-[#FFE5EC] text-stone-600"
               title="翌日へ"
             >
               <ChevronRight className="w-4 h-4" />
@@ -270,11 +285,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
         {/* 2. モーダル本文 */}
         <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4">
-          {/* セクションA：ふたりのシフト（タップで登録＆自動的に翌日へ移動！） */}
+          {/* セクションA：ふたりのシフト並列入力欄（本業シフト ＋ 仕事終わり/休日のバイト ＋ 残業・休出時間） */}
           <div className="bg-white rounded-2xl p-3.5 border border-stone-200/90 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-extrabold text-stone-700">
-                🐾 シフトをタップで登録（1つ入れると自動で次の日へ進みます⏩）
+                🐾 シフト並列確認・入力（メインを押すと翌日へ進みます⏩）
               </span>
               <button
                 type="button"
@@ -282,31 +297,36 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                 className="px-2.5 py-1 rounded-xl bg-[#FFE5EC] text-[#9E2A47] text-[11px] font-extrabold flex items-center gap-1"
               >
                 <Settings2 className="w-3 h-3" />
-                <span>シフト種類の追加・編集</span>
+                <span>シフト種類編集</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {(['partnerA', 'partnerB'] as PartnerId[]).map((pid) => {
                 const pInfo = store.metadata.partners[pid];
                 const shift = pid === 'partnerA' ? shiftA : shiftB;
                 const stamp = pid === 'partnerA' ? stampA : stampB;
 
+                const hasSubWork = Boolean(shift?.subCustomLabel || shift?.subStampId);
+                const overtime = shift?.overtimeHours || 0;
+                const holWork = shift?.holidayWorkHours || 0;
+
                 return (
                   <div
                     key={pid}
-                    className="bg-[#FFFBF7] rounded-2xl p-2.5 border border-stone-200/80 space-y-2"
+                    className="bg-[#FFFBF7] rounded-2xl p-3 border border-stone-200/90 space-y-2.5"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-stone-700 flex items-center gap-1">
+                    {/* パートナー名＆現在のメインシフト表示 */}
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-extrabold text-stone-800 flex items-center gap-1">
                         <span className="text-base">{pInfo.avatar}</span>
-                        <span>{pInfo.name}</span>
+                        <span>{pInfo.name}のシフト</span>
                       </span>
 
                       {shift && stamp ? (
                         <span
                           style={{ backgroundColor: stamp.color, color: stamp.textColor }}
-                          className="px-2.5 py-0.5 rounded-xl font-extrabold text-xs flex items-center gap-1"
+                          className="px-2.5 py-0.5 rounded-xl font-extrabold text-xs flex items-center gap-1 shadow-2xs"
                         >
                           <span>{stamp.icon}</span>
                           <span>{shift.customLabel || stamp.label}</span>
@@ -322,7 +342,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       )}
                     </div>
 
-                    {/* 常時表示のワンタップシフトボタン群（押すと入って次の日へ！） */}
+                    {/* ① メインシフト選択ボタン（タップすると登録して翌日へ移動） */}
                     <div className="grid grid-cols-4 gap-1">
                       {shiftStamps.map((s) => {
                         const isCurrent = shift?.stampId === s.id;
@@ -352,6 +372,187 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       )}
                     </div>
 
+                    {/* ② 仕事終わりや休日の「＋バイト・掛け持ち」重ね記載欄 */}
+                    <div className="pt-2 border-t border-stone-200/60 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-extrabold text-stone-600 flex items-center gap-1">
+                          <Briefcase className="w-3 h-3 text-amber-600" />
+                          <span>＋仕事終わり・休日のバイト</span>
+                        </span>
+                        {hasSubWork && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onUpdateShiftDetails(dateStr, pid, {
+                                subStampId: undefined,
+                                subCustomLabel: undefined,
+                                subStartTime: undefined,
+                                subEndTime: undefined,
+                              })
+                            }
+                            className="text-[10px] font-bold text-rose-500 hover:underline"
+                          >
+                            バイト解除
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { label: '🏪夜バイト', sub: 'バイト', start: '18:30', end: '22:00' },
+                          { label: '🏪昼バイト', sub: 'バイト', start: '10:00', end: '15:00' },
+                          { label: '💻副業', sub: '副業', start: '20:00', end: '23:00' },
+                        ].map((preset) => {
+                          const isSelectedSub =
+                            shift?.subCustomLabel === preset.sub &&
+                            shift?.subStartTime === preset.start;
+                          return (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={() =>
+                                onUpdateShiftDetails(dateStr, pid, {
+                                  subStampId: 'shift_part',
+                                  subCustomLabel: preset.sub,
+                                  subStartTime: preset.start,
+                                  subEndTime: preset.end,
+                                })
+                              }
+                              className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
+                                isSelectedSub
+                                  ? 'bg-[#FFF3D6] border-[#FFB703] text-[#996300] shadow-2xs'
+                                  : 'bg-white border-stone-200 text-stone-600'
+                              }`}
+                            >
+                              ＋{preset.label}({preset.start}-{preset.end})
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {hasSubWork && (
+                        <div className="flex items-center gap-1 pt-0.5 text-[11px]">
+                          <input
+                            type="text"
+                            value={shift?.subCustomLabel || 'バイト'}
+                            onChange={(e) =>
+                              onUpdateShiftDetails(dateStr, pid, {
+                                subCustomLabel: e.target.value,
+                              })
+                            }
+                            className="w-16 px-2 py-1 rounded-lg border border-stone-200 bg-white font-extrabold text-amber-900"
+                          />
+                          <input
+                            type="time"
+                            value={shift?.subStartTime || '18:30'}
+                            onChange={(e) =>
+                              onUpdateShiftDetails(dateStr, pid, {
+                                subStartTime: e.target.value,
+                              })
+                            }
+                            className="px-1.5 py-1 rounded-lg border border-stone-200 bg-white font-bold"
+                          />
+                          <span>〜</span>
+                          <input
+                            type="time"
+                            value={shift?.subEndTime || '22:00'}
+                            onChange={(e) =>
+                              onUpdateShiftDetails(dateStr, pid, {
+                                subEndTime: e.target.value,
+                              })
+                            }
+                            className="px-1.5 py-1 rounded-lg border border-stone-200 bg-white font-bold"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ③ 残業時間・休日出勤時間の記載欄 */}
+                    <div className="pt-2 border-t border-stone-200/60 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-extrabold text-stone-600 flex items-center gap-1">
+                          <Timer className="w-3 h-3 text-rose-500" />
+                          <span>残業・休日出勤時間</span>
+                        </span>
+                        {(overtime > 0 || holWork > 0) && (
+                          <span className="px-2 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black">
+                            {holWork > 0 ? `休日出勤 ${holWork}h` : `残業 +${overtime}h`}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* ワンタップ残業・休出ボタン */}
+                      <div className="flex flex-wrap gap-1">
+                        {[0, 0.5, 1, 1.5, 2, 3].map((hrs) => (
+                          <button
+                            key={hrs}
+                            type="button"
+                            onClick={() =>
+                              onUpdateShiftDetails(dateStr, pid, {
+                                overtimeHours: hrs,
+                                isHolidayWork: false,
+                                holidayWorkHours: 0,
+                              })
+                            }
+                            className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border ${
+                              overtime === hrs && !holWork
+                                ? 'bg-rose-500 border-rose-500 text-white'
+                                : 'bg-white border-stone-200 text-stone-600'
+                            }`}
+                          >
+                            {hrs === 0 ? 'なし' : `+${hrs}h`}
+                          </button>
+                        ))}
+                        {[4, 8].map((hHrs) => (
+                          <button
+                            key={`hol_${hHrs}`}
+                            type="button"
+                            onClick={() =>
+                              onUpdateShiftDetails(dateStr, pid, {
+                                isHolidayWork: true,
+                                holidayWorkHours: hHrs,
+                                overtimeHours: 0,
+                              })
+                            }
+                            className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border ${
+                              holWork === hHrs
+                                ? 'bg-amber-600 border-amber-600 text-white'
+                                : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
+                            }`}
+                          >
+                            💼休出{hHrs}h
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* 0.5h単位の微調整入力 */}
+                      <div className="flex items-center gap-2 text-[11px] pt-0.5">
+                        <span className="text-stone-500 font-bold">自由入力:</span>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0"
+                          max="24"
+                          value={holWork > 0 ? holWork : overtime}
+                          onChange={(e) => {
+                            const val = Math.max(0, Number(e.target.value));
+                            if (holWork > 0 || shift?.isHolidayWork) {
+                              onUpdateShiftDetails(dateStr, pid, {
+                                isHolidayWork: val > 0,
+                                holidayWorkHours: val,
+                              });
+                            } else {
+                              onUpdateShiftDetails(dateStr, pid, {
+                                overtimeHours: val,
+                              });
+                            }
+                          }}
+                          className="w-16 px-2 py-0.5 rounded-lg border border-stone-200 bg-white font-extrabold text-center"
+                        />
+                        <span className="font-bold text-stone-600">時間</span>
+                      </div>
+                    </div>
+
                     {shift &&
                       renderAuditAndReadStatus(shift.createdBy, shift.createdAt, shift.updatedAt)}
                   </div>
@@ -362,8 +563,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
           {/* セクションB：🍳すれ違いサポートアイコン（1タップでごはん・お迎え目印） */}
           <div className="bg-white rounded-2xl p-3 border border-stone-200/90 shadow-xs">
-            <div className="text-xs font-extrabold text-stone-700 mb-2 flex items-center justify-between">
-              <span>🍳 ごはん・お迎え目印（1タップで日付に表示）</span>
+            <div className="text-xs font-extrabold text-stone-700 mb-2">
+              🍳 ごはん・お迎え目印（1タップで日付に表示）
             </div>
             <div className="flex flex-wrap gap-1.5">
               {SUPPORT_BADGE_PRESETS.map((b) => {
@@ -386,7 +587,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
             </div>
           </div>
 
-          {/* セクションC：この日の予定リスト ＆ 音声入力・自由入力ボタン */}
+          {/* セクションC：この日の予定リスト（二人予定・夫予定・妻予定・追加項目） */}
           <div className="space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-extrabold text-stone-800">
@@ -399,7 +600,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     onClose();
                     onOpenVoiceModal();
                   }}
-                  className="px-3 py-1.5 rounded-2xl bg-[#B388EB] hover:bg-[#8C5EC7] text-white text-xs font-extrabold shadow-xs flex items-center gap-1 transition-colors"
+                  className="px-3 py-1.5 rounded-2xl bg-[#B388EB] hover:bg-[#8C5EC7] text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
                 >
                   <Mic className="w-3.5 h-3.5" />
                   <span>声で予定を入れる</span>
@@ -407,14 +608,46 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={handleOpenNewForm}
-                  className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white text-xs font-extrabold shadow-xs flex items-center gap-1 transition-colors"
+                  onClick={() => handleOpenNewForm()}
+                  className="px-3 py-1.5 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white text-xs font-extrabold shadow-xs flex items-center gap-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>文字で予定を追加</span>
+                  <span>予定を追加</span>
                 </button>
               </div>
             </div>
+
+            {/* 項目別（二人予定・夫予定・妻予定）ワンタップ入力開始ボタン */}
+            {!showEventForm && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {categories.map((cat) => {
+                  const resolved = resolveCategoryInfo(cat.id, store.categories, store.metadata);
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => handleOpenNewForm(cat.id)}
+                      style={{
+                        backgroundColor: resolved.bgColor,
+                        color: resolved.textColor,
+                        borderColor: resolved.accentColor,
+                      }}
+                      className="px-2.5 py-1 rounded-xl border text-xs font-extrabold flex items-center gap-1 shadow-2xs active:scale-95"
+                    >
+                      <span>＋ {resolved.icon}</span>
+                      <span>{resolved.shortLabel}を追加</span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={onOpenCategoryManager}
+                  className="px-2.5 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 text-[11px] font-bold"
+                >
+                  ＋項目の追加・削除
+                </button>
+              </div>
+            )}
 
             {/* 新規・編集フォーム */}
             {showEventForm && (
@@ -446,22 +679,16 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   />
                 </div>
 
-                {/* カテゴリ選択 */}
-                <div className="flex flex-wrap gap-1.5">
-                  {(Object.keys(CATEGORY_MAP) as CalendarCategoryId[]).map((cid) => {
-                    const cat = CATEGORY_MAP[cid];
-                    const selected = categoryId === cid;
-                    const customLabel =
-                      cid === 'partnerA'
-                        ? `${partnerA.avatar} ${partnerA.name}`
-                        : cid === 'partnerB'
-                        ? `${partnerB.avatar} ${partnerB.name}`
-                        : `${cat.icon} ${cat.shortLabel}`;
+                {/* カテゴリ選択（二人予定・夫予定・妻予定＋追加項目） */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {categories.map((c) => {
+                    const cat = resolveCategoryInfo(c.id, store.categories, store.metadata);
+                    const selected = categoryId === c.id;
                     return (
                       <button
-                        key={cid}
+                        key={c.id}
                         type="button"
-                        onClick={() => setCategoryId(cid)}
+                        onClick={() => setCategoryId(c.id)}
                         style={
                           selected
                             ? { backgroundColor: cat.accentColor, color: '#fff' }
@@ -469,10 +696,17 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                         }
                         className="px-2.5 py-1 rounded-xl text-xs font-extrabold transition-all"
                       >
-                        {customLabel}
+                        {cat.icon} {cat.shortLabel}
                       </button>
                     );
                   })}
+                  <button
+                    type="button"
+                    onClick={onOpenCategoryManager}
+                    className="px-2 py-1 rounded-xl bg-stone-100 text-stone-600 text-[10px] font-bold"
+                  >
+                    ＋項目編集
+                  </button>
                 </div>
 
                 {/* 時間設定 */}
@@ -537,12 +771,12 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
             {/* 予定リスト表示 */}
             {dayEvents.length === 0 ? (
               <div className="bg-white rounded-2xl p-5 text-center border border-dashed border-stone-200 text-xs text-stone-400">
-                予定はまだありません🐾 「🎙️声で予定を入れる」または「＋文字で予定を追加」から登録できます。
+                予定はまだありません🐾 上の「＋二人予定」「＋夫予定」「＋妻予定」または「🎙️声で予定を入れる」からすぐ登録できます。
               </div>
             ) : (
               <div className="space-y-2">
                 {dayEvents.map((ev) => {
-                  const cat = CATEGORY_MAP[ev.categoryId] || CATEGORY_MAP.shared;
+                  const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
                   return (
                     <div
                       key={ev.id}
@@ -559,11 +793,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                               style={{ backgroundColor: cat.accentColor }}
                               className="px-2 py-0.5 rounded-full text-white text-[10px] font-extrabold"
                             >
-                              {ev.categoryId === 'partnerA'
-                                ? `${partnerA.avatar}${partnerA.name}`
-                                : ev.categoryId === 'partnerB'
-                                ? `${partnerB.avatar}${partnerB.name}`
-                                : `${cat.icon}${cat.shortLabel}`}
+                              {cat.icon} {cat.shortLabel}
                             </span>
 
                             <span className="text-xs font-extrabold text-stone-700 flex items-center gap-0.5">
