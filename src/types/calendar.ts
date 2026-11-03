@@ -18,18 +18,19 @@ export interface CalendarCategoryItem {
   order: number;
 }
 
-// シフトスタンプの定義（ポチポチ連続入力用）
+// シフトスタンプの定義（ポチポチ連続入力用：夫用・妻用で別々に管理可能）
 export interface StampPreset {
   id: string;
-  label: string;          // 例: "日勤", "夜勤", "休み", "バイト", "休出"
-  shortLabel: string;     // カレンダーセル表示用（例: "日勤", "夜勤", "休み", "バイト"）
+  partnerId?: PartnerId;  // 'partnerA' (夫の勤務リスト) | 'partnerB' (妻の勤務リスト)
+  label: string;          // 例: "日勤", "遅A", "早A", "２夜", "明け", "準早", "準遅", "休み", "年休"
+  shortLabel: string;     // カレンダーセル表示用（例: "日勤", "遅A", "早A", "２夜"）
   type: 'shift' | 'event';
   color: string;          // 背景パステルカラー (HEX)
   textColor: string;      // 文字カラー (HEX)
-  startTime?: string;     // 付随する開始時間 例: "08:30"
-  endTime?: string;       // 付随する終了時間 例: "17:30"
+  startTime?: string;     // 付随する開始時間 例: "09:00"
+  endTime?: string;       // 付随する終了時間 例: "18:05"
   icon?: string;          // 絵文字アイコン
-  isHoliday?: boolean;    // ふたり休日一致判定用の休日フラグ（休・有休・公休など）
+  isHoliday?: boolean;    // ふたり休日一致判定用の休日フラグ（休・年休・有休・公休など）
   categoryId?: CalendarCategoryId;
   order: number;
 }
