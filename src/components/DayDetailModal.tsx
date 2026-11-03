@@ -31,6 +31,7 @@ import {
   DEFAULT_CATEGORIES,
   EVENT_PATTERN_CATEGORIES,
   getJapaneseHoliday,
+  getPartnerShiftStamps,
   resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
@@ -64,7 +65,7 @@ interface DayDetailModalProps {
   onToggleTaskComplete: (eventId: string) => void;
   onDeleteEvent: (eventId: string) => void;
   onOpenVoiceModal: () => void;
-  onOpenShiftStampManager: () => void;
+  onOpenShiftStampManager: (partnerId?: PartnerId) => void;
   onOpenCategoryManager: () => void;
 }
 
@@ -155,10 +156,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   for (const s of store.stamps) {
     stampMap.set(s.id, s);
   }
-
-  const shiftStamps = store.stamps
-    .filter((s) => s.type === 'shift')
-    .sort((a, b) => a.order - b.order);
 
   const rawShiftA = store.shifts[`${dateStr}_partnerA`];
   const rawShiftB = store.shifts[`${dateStr}_partnerB`];
@@ -1164,11 +1161,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
               </div>
               <button
                 type="button"
-                onClick={onOpenShiftStampManager}
+                onClick={() => onOpenShiftStampManager(activePartner)}
                 className="px-2.5 py-1 rounded-xl bg-[#FFE5EC] text-[#9E2A47] text-[11px] font-extrabold flex items-center gap-1"
               >
                 <Settings2 className="w-3 h-3" />
-                <span>シフト種類編集</span>
+                <span>勤務リスト編集</span>
               </button>
             </div>
 
@@ -1177,6 +1174,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                 const pInfo = store.metadata.partners[pid];
                 const shift = pid === 'partnerA' ? shiftA : shiftB;
                 const stamp = pid === 'partnerA' ? stampA : stampB;
+                const partnerStamps = getPartnerShiftStamps(store.stamps, pid);
 
                 const hasSubWork = Boolean(shift?.subCustomLabel || shift?.subStampId);
                 const overtime = Number(shift?.overtimeHours || 0);
@@ -1216,39 +1214,61 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       )}
                     </div>
 
-                    {/* ① メインシフト選択ボタン（同じ日に残業も続けて入力できるようデフォは日付維持） */}
-                    <div className="grid grid-cols-4 gap-1">
-                      {shiftStamps.map((s) => {
-                        const isCurrent = shift?.stampId === s.id;
-                        return (
-                          <button
-                            key={s.id}
-                            type="button"
-                            onClick={() =>
-                              onSetShiftAndAdvance(dateStr, pid, s, advanceOnShiftTap)
-                            }
-                            style={{ backgroundColor: s.color, color: s.textColor }}
-                            className={`py-1.5 px-1 rounded-xl font-extrabold text-[11px] flex items-center justify-center gap-0.5 active:scale-90 transition-all border ${
-                              isCurrent ? 'border-stone-800 ring-1 ring-stone-800' : 'border-white'
-                            }`}
-                          >
-                            <span>{s.icon}</span>
-                            <span className="truncate">{s.label}</span>
-                          </button>
-                        );
-                      })}
-                      {shift && (
+                    {/* ① メインシフト選択ボタン（パートナー別の勤務リストを表示） */}
+                    {partnerStamps.length === 0 ? (
+                      <div className="p-2.5 rounded-xl bg-white border border-dashed border-stone-300 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-stone-500">
+                          {pInfo.avatar} {pInfo.name}の勤務リストは空です
+                        </span>
                         <button
                           type="button"
-                          onClick={() =>
-                            onSetShiftAndAdvance(dateStr, pid, null, advanceOnShiftTap)
-                          }
-                          className="py-1.5 px-1 rounded-xl font-bold text-[10px] bg-stone-200/70 text-stone-600"
+                          onClick={() => onOpenShiftStampManager(pid)}
+                          className="px-2.5 py-1 rounded-lg bg-[#B388EB] text-white text-[10px] font-extrabold shrink-0"
                         >
-                          消去
+                          ＋ リストを追加
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-1">
+                        {partnerStamps.map((s) => {
+                          const isCurrent = shift?.stampId === s.id;
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() =>
+                                onSetShiftAndAdvance(dateStr, pid, s, advanceOnShiftTap)
+                              }
+                              style={{ backgroundColor: s.color, color: s.textColor }}
+                              className={`py-1.5 px-1 rounded-xl font-extrabold text-[11px] flex flex-col items-center justify-center active:scale-90 transition-all border ${
+                                isCurrent
+                                  ? 'border-stone-800 ring-1 ring-stone-800'
+                                  : 'border-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-0.5">
+                                <span>{s.icon}</span>
+                                <span className="truncate">{s.label}</span>
+                              </div>
+                              <span className="text-[8.5px] opacity-75 font-bold leading-tight">
+                                {s.startTime ? `${s.startTime}-${s.endTime}` : '終日'}
+                              </span>
+                            </button>
+                          );
+                        })}
+                        {shift && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onSetShiftAndAdvance(dateStr, pid, null, advanceOnShiftTap)
+                            }
+                            className="py-1.5 px-1 rounded-xl font-bold text-[10px] bg-stone-200/70 text-stone-600 flex items-center justify-center"
+                          >
+                            消去
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     {/* ② 仕事終わりや休日の「＋バイト・掛け持ち」重ね記載欄 */}
                     <div className="pt-2 border-t border-stone-200/60 space-y-1.5">
