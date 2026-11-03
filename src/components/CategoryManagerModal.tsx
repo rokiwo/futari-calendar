@@ -10,7 +10,11 @@ import {
   Check,
 } from 'lucide-react';
 import { CalendarCategoryItem, CoupleMetadata } from '../types/calendar';
-import { DEFAULT_CATEGORIES, PASTEL_COLOR_PALETTE } from '../utils/presets';
+import {
+  DEFAULT_CATEGORIES,
+  EVENT_PATTERN_CATEGORIES,
+  PASTEL_COLOR_PALETTE,
+} from '../utils/presets';
 
 interface CategoryManagerModalProps {
   categories: CalendarCategoryItem[];
@@ -26,10 +30,10 @@ const QUICK_CATEGORY_TEMPLATES = [
   { label: '子ども・学校', shortLabel: '子ども', icon: '👶', paletteIdx: 2 },
   { label: '通院・健康', shortLabel: '通院', icon: '🏥', paletteIdx: 0 },
   { label: 'お出かけ・旅行', shortLabel: '旅行', icon: '✈️', paletteIdx: 3 },
-];
-
-const CATEGORY_ICON_CHOICES = [
-  '💕', '🐻', '🐰', '🏪', '🎉', '🏠', '👶', '🏥', '✈️', '🍽️', '🛒', '💰', '🚗', '🐶', '🐱', '✨',
+  { label: '美容・サロン', shortLabel: '美容', icon: '💇‍♀️', paletteIdx: 1 },
+  { label: '実家・家族', shortLabel: '実家', icon: '👵', paletteIdx: 7 },
+  { label: 'お金・手続き', shortLabel: 'お金', icon: '💰', paletteIdx: 5 },
+  { label: 'ペット', shortLabel: 'ペット', icon: '🐶', paletteIdx: 6 },
 ];
 
 export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
@@ -43,6 +47,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
   const [newLabel, setNewLabel] = useState('');
   const [newIcon, setNewIcon] = useState('🎉');
   const [newPaletteIdx, setNewPaletteIdx] = useState(5);
+  const [iconTabId, setIconTabId] = useState(EVENT_PATTERN_CATEGORIES[0].id);
 
   const handleAddCategory = (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,22 +175,43 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
               />
             </div>
 
-            {/* アイコン選択 */}
-            <div className="flex gap-1 overflow-x-auto no-scrollbar pb-0.5">
-              {CATEGORY_ICON_CHOICES.map((ic) => (
-                <button
-                  key={ic}
-                  type="button"
-                  onClick={() => setNewIcon(ic)}
-                  className={`w-8 h-8 rounded-xl text-base shrink-0 ${
-                    newIcon === ic
-                      ? 'bg-[#FFE5EC] ring-2 ring-[#FF8FAB]'
-                      : 'bg-stone-50 hover:bg-stone-100'
-                  }`}
-                >
-                  {ic}
-                </button>
-              ))}
+            {/* パターン別アイコン選択 */}
+            <div className="space-y-1.5">
+              <div className="flex gap-1 overflow-x-auto pb-0.5">
+                {EVENT_PATTERN_CATEGORIES.map((grp) => (
+                  <button
+                    key={grp.id}
+                    type="button"
+                    onClick={() => setIconTabId(grp.id)}
+                    className={`px-2 py-1 rounded-xl text-[10px] font-extrabold whitespace-nowrap ${
+                      iconTabId === grp.id
+                        ? 'bg-[#FF8FAB] text-white'
+                        : 'bg-stone-100 text-stone-600'
+                    }`}
+                  >
+                    {grp.tabLabel}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {(
+                  EVENT_PATTERN_CATEGORIES.find((g) => g.id === iconTabId)?.icons ||
+                  EVENT_PATTERN_CATEGORIES[0].icons
+                ).map((ic) => (
+                  <button
+                    key={ic}
+                    type="button"
+                    onClick={() => setNewIcon(ic)}
+                    className={`w-8 h-8 rounded-xl text-base shrink-0 flex items-center justify-center ${
+                      newIcon === ic
+                        ? 'bg-[#FFE5EC] ring-2 ring-[#FF8FAB]'
+                        : 'bg-stone-50 hover:bg-stone-100 border border-stone-200/70'
+                    }`}
+                  >
+                    {ic}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* カラー選択 */}
