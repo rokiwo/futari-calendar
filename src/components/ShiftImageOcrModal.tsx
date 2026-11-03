@@ -81,9 +81,15 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
   const icsInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  const shiftStamps = stamps.filter((s) => s.type === 'shift');
+  const partnerSpecificStamps = stamps.filter(
+    (s) => s.type === 'shift' && (s.partnerId || 'partnerA') === targetPartner
+  );
+  const shiftStamps =
+    partnerSpecificStamps.length > 0
+      ? partnerSpecificStamps
+      : stamps.filter((s) => s.type === 'shift');
   const stampMap = new Map<string, StampPreset>();
-  for (const s of shiftStamps) stampMap.set(s.id, s);
+  for (const s of stamps.filter((st) => st.type === 'shift')) stampMap.set(s.id, s);
 
   const partnerA = metadata.partners.partnerA;
   const partnerB = metadata.partners.partnerB;
