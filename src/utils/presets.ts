@@ -1,53 +1,56 @@
-// 初期シフトスタンプ・カテゴリプリセット・日本の祝日判定・初期サンプルデータ定義
+// 初期シフトスタンプ・デフォルト予定項目（二人予定・夫予定・妻予定）・日本の祝日判定・サンプルデータ定義
 import {
   CalendarCategoryId,
+  CalendarCategoryItem,
   CalendarDataStore,
   CoupleMetadata,
   StampPreset,
 } from '../types/calendar';
 
-export interface CategoryInfo {
-  id: CalendarCategoryId;
-  label: string;
-  shortLabel: string;
-  icon: string;
-  accentColor: string;
-  bgColor: string;
-  textColor: string;
-  borderColor: string;
-}
+export type CategoryInfo = CalendarCategoryItem;
 
-export const CATEGORY_MAP: Record<CalendarCategoryId, CategoryInfo> = {
-  shared: {
+// デフォルトのカレンダー予定項目（二人予定・夫予定・妻予定の3つを基本とし、自由に追加・削除可能）
+export const DEFAULT_CATEGORIES: CalendarCategoryItem[] = [
+  {
     id: 'shared',
-    label: 'ふたりの共有予定',
-    shortLabel: 'ふたり',
+    label: '二人予定',
+    shortLabel: '二人予定',
     icon: '💕',
     accentColor: '#FF8FAB',
     bgColor: '#FFE5EC',
     textColor: '#9E2A47',
     borderColor: '#FFC2D1',
+    order: 1,
   },
-  partnerA: {
+  {
     id: 'partnerA',
-    label: 'パートナーAの予定',
-    shortLabel: '夫',
+    label: '夫予定',
+    shortLabel: '夫予定',
     icon: '🐻',
     accentColor: '#56CFE1',
     bgColor: '#E2F9FC',
     textColor: '#136370',
     borderColor: '#A9E9F2',
+    order: 2,
   },
-  partnerB: {
+  {
     id: 'partnerB',
-    label: 'パートナーBの予定',
-    shortLabel: '妻',
+    label: '妻予定',
+    shortLabel: '妻予定',
     icon: '🐰',
     accentColor: '#B388EB',
     bgColor: '#F3EAFF',
     textColor: '#59318F',
     borderColor: '#DEC9FC',
+    order: 3,
   },
+];
+
+// 後方互換＆フォールバック用マップ
+export const CATEGORY_MAP: Record<string, CalendarCategoryItem> = {
+  shared: DEFAULT_CATEGORIES[0],
+  partnerA: DEFAULT_CATEGORIES[1],
+  partnerB: DEFAULT_CATEGORIES[2],
   anniversary: {
     id: 'anniversary',
     label: '記念日・特別日',
@@ -57,6 +60,7 @@ export const CATEGORY_MAP: Record<CalendarCategoryId, CategoryInfo> = {
     bgColor: '#FFF6D6',
     textColor: '#8A5A00',
     borderColor: '#FFE28A',
+    order: 4,
   },
   chore: {
     id: 'chore',
@@ -67,8 +71,39 @@ export const CATEGORY_MAP: Record<CalendarCategoryId, CategoryInfo> = {
     bgColor: '#E6F7EF',
     textColor: '#1E6645',
     borderColor: '#B2E6CE',
+    order: 5,
   },
 };
+
+// カテゴリIDから安全にカテゴリ情報を取得するヘルパー
+export function resolveCategoryInfo(
+  categoryId: CalendarCategoryId,
+  categories?: CalendarCategoryItem[],
+  metadata?: CoupleMetadata
+): CalendarCategoryItem {
+  const list = categories && categories.length > 0 ? categories : DEFAULT_CATEGORIES;
+  const found = list.find((c) => c.id === categoryId) || CATEGORY_MAP[categoryId] || list[0] || DEFAULT_CATEGORIES[0];
+
+  if (metadata) {
+    if (found.id === 'partnerA') {
+      return {
+        ...found,
+        icon: metadata.partners.partnerA.avatar,
+        label: `${metadata.partners.partnerA.name}予定`,
+        shortLabel: `${metadata.partners.partnerA.name}予定`,
+      };
+    }
+    if (found.id === 'partnerB') {
+      return {
+        ...found,
+        icon: metadata.partners.partnerB.avatar,
+        label: `${metadata.partners.partnerB.name}予定`,
+        shortLabel: `${metadata.partners.partnerB.name}予定`,
+      };
+    }
+  }
+  return found;
+}
 
 // すれ違いサポートアイコン（日付や予定に1タップで添えられる目印）
 export const SUPPORT_BADGE_PRESETS: { id: string; label: string; short: string; desc: string }[] = [
@@ -78,11 +113,11 @@ export const SUPPORT_BADGE_PRESETS: { id: string; label: string; short: string; 
   { id: '🍚夕飯おねがい', label: '🍚 夕飯おねがい', short: '🍚夕飯担当', desc: 'パートナーに夕食準備をお願い' },
   { id: '🛒買い物お願い', label: '🛒 買い物お願い', short: '🛒買い物', desc: '帰りに食材・日用品の買い物' },
   { id: '🧺洗濯お願い', label: '🧺 洗濯お願い', short: '🧺洗濯', desc: '洗濯物の取り込み・洗濯お願い' },
-  { id: '🔑遅くなります', label: '🔑 遅くなります', short: '🔑帰宅遅め', desc: '残業などで帰りが遅くなる目印' },
+  { id: '🔑遅くなります', label: '🔑 遅くなります', short: '🔑帰宅遅め', desc: '残業やバイトで帰りが遅くなる目印' },
   { id: '👶送り迎え', label: '👶 送り迎え担当', short: '👶送迎', desc: '保育園や習い事の送迎目印' },
 ];
 
-// デフォルトのシフトスタンププリセット（予定スタンプは廃止しシフト入力に特化）
+// デフォルトのシフトスタンププリセット（本業シフト＋バイト・休日出勤に対応）
 export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
   {
     id: 'shift_day',
@@ -109,6 +144,32 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     order: 2,
   },
   {
+    id: 'shift_part',
+    label: 'バイト',
+    shortLabel: 'バイト',
+    type: 'shift',
+    color: '#FFF3D6',
+    textColor: '#996300',
+    startTime: '18:00',
+    endTime: '22:00',
+    icon: '🏪',
+    isHoliday: false,
+    order: 3,
+  },
+  {
+    id: 'shift_hol_work',
+    label: '休出',
+    shortLabel: '休出',
+    type: 'shift',
+    color: '#FFECE5',
+    textColor: '#9C3D1C',
+    startTime: '09:00',
+    endTime: '17:00',
+    icon: '💼',
+    isHoliday: false,
+    order: 4,
+  },
+  {
     id: 'shift_night',
     label: '夜勤',
     shortLabel: '夜勤',
@@ -119,7 +180,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '09:00',
     icon: '🌙',
     isHoliday: false,
-    order: 3,
+    order: 5,
   },
   {
     id: 'shift_semi_night',
@@ -132,7 +193,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '01:00',
     icon: '🌆',
     isHoliday: false,
-    order: 4,
+    order: 6,
   },
   {
     id: 'shift_early',
@@ -145,7 +206,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '16:00',
     icon: '🌅',
     isHoliday: false,
-    order: 5,
+    order: 7,
   },
   {
     id: 'shift_late',
@@ -158,7 +219,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '20:00',
     icon: '⏰',
     isHoliday: false,
-    order: 6,
+    order: 8,
   },
   {
     id: 'shift_paid',
@@ -169,7 +230,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     textColor: '#D63864',
     icon: '🌴',
     isHoliday: true,
-    order: 7,
+    order: 9,
   },
   {
     id: 'shift_ake',
@@ -180,7 +241,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     textColor: '#256D4B',
     icon: '🍵',
     isHoliday: false,
-    order: 8,
+    order: 10,
   },
   {
     id: 'shift_remote',
@@ -193,39 +254,26 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '18:00',
     icon: '💻',
     isHoliday: false,
-    order: 9,
-  },
-  {
-    id: 'shift_trip',
-    label: '出張',
-    shortLabel: '出張',
-    type: 'shift',
-    color: '#E2F9FC',
-    textColor: '#135D69',
-    startTime: '08:00',
-    endTime: '19:00',
-    icon: '🚄',
-    isHoliday: false,
-    order: 10,
+    order: 11,
   },
 ];
 
-// パステルカラー選択肢（シフトスタンプ＆予定カラー用）
+// パステルカラー選択肢（シフトスタンプ＆予定項目カラー用）
 export const PASTEL_COLOR_PALETTE = [
-  { name: 'さくらピンク', hex: '#FF8FAB', bg: '#FFE5EC', text: '#B8335A' },
-  { name: 'ベビーローズ', hex: '#FF6B8B', bg: '#FFF0F5', text: '#E05277' },
-  { name: 'ミントブルー', hex: '#56CFE1', bg: '#E2F9FC', text: '#126875' },
-  { name: 'ラベンダー', hex: '#B388EB', bg: '#F3EAFF', text: '#6638A6' },
-  { name: 'ナイトパープル', hex: '#7C83FD', bg: '#E8E5FF', text: '#483D8B' },
-  { name: 'ミモザイエロー', hex: '#FFB703', bg: '#FFF3D6', text: '#996300' },
-  { name: 'セージグリーン', hex: '#52B788', bg: '#E6F7EF', text: '#1E6645' },
-  { name: 'ピーチコーラル', hex: '#FF9E7D', bg: '#FFECE5', text: '#9C3D1C' },
+  { name: 'さくらピンク', hex: '#FF8FAB', bg: '#FFE5EC', text: '#B8335A', border: '#FFC2D1' },
+  { name: 'ベビーローズ', hex: '#FF6B8B', bg: '#FFF0F5', text: '#E05277', border: '#FFB3C6' },
+  { name: 'ミントブルー', hex: '#56CFE1', bg: '#E2F9FC', text: '#126875', border: '#A9E9F2' },
+  { name: 'ラベンダー', hex: '#B388EB', bg: '#F3EAFF', text: '#6638A6', border: '#DEC9FC' },
+  { name: 'ナイトパープル', hex: '#7C83FD', bg: '#E8E5FF', text: '#483D8B', border: '#C5C8FF' },
+  { name: 'ミモザイエロー', hex: '#FFB703', bg: '#FFF3D6', text: '#996300', border: '#FFE28A' },
+  { name: 'セージグリーン', hex: '#52B788', bg: '#E6F7EF', text: '#1E6645', border: '#B2E6CE' },
+  { name: 'ピーチコーラル', hex: '#FF9E7D', bg: '#FFECE5', text: '#9C3D1C', border: '#FFD0BF' },
 ];
 
 // シフト用アイコン絵文字のクイック選択リスト
 export const SHIFT_ICON_CHOICES = [
-  '☀️', '🌙', '🌆', '🌅', '⏰', '🏠', '🌴', '🍵', '💻', '🚄',
-  '🏥', '🏢', '🩺', '🚑', '🏪', '🍳', '✨', '💤', '🎉', '📅',
+  '☀️', '🌙', '🌆', '🌅', '⏰', '🏠', '🌴', '🍵', '💻', '🏪',
+  '💼', '🚄', '🏥', '🏢', '🩺', '🚑', '🍳', '✨', '💤', '🎉',
 ];
 
 // シフト時間のワンタッププリセット
@@ -233,8 +281,9 @@ export const SHIFT_TIME_PRESETS = [
   { label: '時間なし（休日等）', start: '', end: '' },
   { label: '08:30〜17:30 (日勤)', start: '08:30', end: '17:30' },
   { label: '09:00〜18:00 (定時)', start: '09:00', end: '18:00' },
+  { label: '18:00〜22:00 (夜バイト)', start: '18:00', end: '22:00' },
+  { label: '10:00〜15:00 (昼バイト)', start: '10:00', end: '15:00' },
   { label: '16:30〜09:00 (夜勤)', start: '16:30', end: '09:00' },
-  { label: '16:30〜01:00 (準夜)', start: '16:30', end: '01:00' },
   { label: '07:00〜16:00 (早番)', start: '07:00', end: '16:00' },
   { label: '11:00〜20:00 (遅番)', start: '11:00', end: '20:00' },
 ];
@@ -318,7 +367,6 @@ export function getJapaneseHoliday(dateStr: string): string | null {
   return fallbackMap[monthDay] || null;
 }
 
-// 初期メタデータ作成
 export function createDefaultMetadata(): CoupleMetadata {
   const now = new Date();
   const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
@@ -364,6 +412,7 @@ export function createInitialDataStore(): CalendarDataStore {
       stampId: 'shift_day',
       startTime: '08:30',
       endTime: '17:30',
+      overtimeHours: 1.5,
       createdBy: 'partnerA',
       createdAt: readTime,
       updatedAt: readTime,
@@ -379,6 +428,7 @@ export function createInitialDataStore(): CalendarDataStore {
       createdAt: readTime,
       updatedAt: readTime,
     },
+    // 2日：仕事＋残業 2.0h
     [`${d(2)}_partnerA`]: {
       id: `${d(2)}_partnerA`,
       date: d(2),
@@ -386,6 +436,7 @@ export function createInitialDataStore(): CalendarDataStore {
       stampId: 'shift_day',
       startTime: '08:30',
       endTime: '17:30',
+      overtimeHours: 2.0,
       createdBy: 'partnerA',
       createdAt: readTime,
       updatedAt: readTime,
@@ -397,6 +448,7 @@ export function createInitialDataStore(): CalendarDataStore {
       stampId: 'shift_night',
       startTime: '16:30',
       endTime: '09:00',
+      overtimeHours: 1.0,
       createdBy: 'partnerB',
       createdAt: readTime,
       updatedAt: readTime,
@@ -420,16 +472,21 @@ export function createInitialDataStore(): CalendarDataStore {
       createdAt: readTime,
       updatedAt: readTime,
     },
+    // 4日：普通の仕事＋仕事終わりにバイトへ行く日！
     [`${d(4)}_partnerA`]: {
       id: `${d(4)}_partnerA`,
       date: d(4),
       partnerId: 'partnerA',
-      stampId: 'shift_remote',
-      startTime: '09:00',
-      endTime: '18:00',
+      stampId: 'shift_day',
+      startTime: '08:30',
+      endTime: '17:30',
+      subStampId: 'shift_part',
+      subCustomLabel: 'バイト',
+      subStartTime: '18:30',
+      subEndTime: '22:00',
       createdBy: 'partnerA',
-      createdAt: readTime,
-      updatedAt: readTime,
+      createdAt: unreadTime,
+      updatedAt: unreadTime,
     },
     [`${d(4)}_partnerB`]: {
       id: `${d(4)}_partnerB`,
@@ -442,6 +499,7 @@ export function createInitialDataStore(): CalendarDataStore {
       createdAt: readTime,
       updatedAt: readTime,
     },
+    // 5日：休みの日にバイトへ行く日！
     [`${d(5)}_partnerA`]: {
       id: `${d(5)}_partnerA`,
       date: d(5),
@@ -457,12 +515,28 @@ export function createInitialDataStore(): CalendarDataStore {
       id: `${d(5)}_partnerB`,
       date: d(5),
       partnerId: 'partnerB',
-      stampId: 'shift_day',
-      startTime: '08:30',
-      endTime: '17:30',
+      stampId: 'shift_off',
+      subStampId: 'shift_part',
+      subCustomLabel: 'バイト',
+      subStartTime: '10:00',
+      subEndTime: '15:00',
       createdBy: 'partnerB',
-      createdAt: readTime,
-      updatedAt: readTime,
+      createdAt: unreadTime,
+      updatedAt: unreadTime,
+    },
+    // 6日：休日出勤（休出4.0h）
+    [`${d(6)}_partnerA`]: {
+      id: `${d(6)}_partnerA`,
+      date: d(6),
+      partnerId: 'partnerA',
+      stampId: 'shift_hol_work',
+      startTime: '09:00',
+      endTime: '13:00',
+      isHolidayWork: true,
+      holidayWorkHours: 4.0,
+      createdBy: 'partnerA',
+      createdAt: unreadTime,
+      updatedAt: unreadTime,
     },
     // 7日：ふたり休日一致 💕（有休＋休み）
     [`${d(7)}_partnerA`]: {
@@ -537,18 +611,31 @@ export function createInitialDataStore(): CalendarDataStore {
     ev_sample_3: {
       id: 'ev_sample_3',
       date: d(3),
-      title: '🗑️ 資源ごみ・ペットボトル回収日',
-      categoryId: 'chore',
-      color: '#52B788',
+      title: '🛒 帰りに成城石井で朝食パン購入',
+      categoryId: 'partnerA',
+      color: '#56CFE1',
       isAllDay: false,
-      startTime: '08:00',
-      endTime: '08:30',
+      startTime: '21:15',
+      endTime: '21:45',
       createdBy: 'partnerA',
       createdAt: readTime,
       updatedAt: readTime,
     },
     ev_sample_4: {
       id: 'ev_sample_4',
+      date: d(3),
+      title: '📦 ふるさと納税フルーツ届く（午前指定）',
+      categoryId: 'partnerB',
+      color: '#B388EB',
+      isAllDay: false,
+      startTime: '09:30',
+      endTime: '10:15',
+      createdBy: 'partnerB',
+      createdAt: readTime,
+      updatedAt: readTime,
+    },
+    ev_sample_5: {
+      id: 'ev_sample_5',
       date: d(5),
       title: '🍻 部署の歓迎会（二次会なし）',
       categoryId: 'partnerA',
@@ -561,8 +648,8 @@ export function createInitialDataStore(): CalendarDataStore {
       createdAt: unreadTime,
       updatedAt: unreadTime,
     },
-    ev_sample_5: {
-      id: 'ev_sample_5',
+    ev_sample_6: {
+      id: 'ev_sample_6',
       date: d(7),
       title: '💇‍♀️ 表参道ヘアサロン（カット＆カラー）',
       categoryId: 'partnerB',
@@ -574,12 +661,12 @@ export function createInitialDataStore(): CalendarDataStore {
       createdAt: readTime,
       updatedAt: readTime,
     },
-    ev_sample_6: {
-      id: 'ev_sample_6',
+    ev_sample_7: {
+      id: 'ev_sample_7',
       date: d(15),
       title: '🎂 結婚記念日ディナー＆ケーキ受取✨',
-      categoryId: 'anniversary',
-      color: '#FFB703',
+      categoryId: 'shared',
+      color: '#FF8FAB',
       isAllDay: false,
       startTime: '18:00',
       endTime: '21:00',
@@ -610,6 +697,7 @@ export function createInitialDataStore(): CalendarDataStore {
   return {
     version: 1,
     metadata,
+    categories: DEFAULT_CATEGORIES,
     stamps: DEFAULT_STAMP_PRESETS,
     shifts,
     events,
