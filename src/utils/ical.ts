@@ -1,12 +1,14 @@
-// iCal (.ics) インポート＆エクスポート機能ユーティリティ
+// iCal (.ics) インポート＆エクスポート ＆ ナスカレ（NurseKar）シフト自動振り分け連携ユーティリティ
 import {
   CalendarCategoryId,
   CalendarDataStore,
   PartnerId,
   ScheduleEvent,
+  ShiftEntry,
   StampPreset,
 } from '../types/calendar';
 import { CATEGORY_MAP } from './presets';
+import { matchShiftStampByText } from './voiceAndAi';
 
 // YYYY-MM-DD を YYYYMMDD 形式に変換
 function formatIcsDateOnly(dateStr: string): string {
@@ -82,8 +84,8 @@ export function exportToIcs(
       lines.push(`DTSTAMP:${dtstamp}`);
 
       if (startTime && endTime) {
-        // 終了時刻が開始時刻より小さい場合（夜勤など翌日またぎ）は翌日終了にする
-        const endDayStr = endTime < startTime ? getNextDayIcs(shift.date) : formatIcsDateOnly(shift.date);
+        const endDayStr =
+          endTime < startTime ? getNextDayIcs(shift.date) : formatIcsDateOnly(shift.date);
         lines.push(`DTSTART;TZID=Asia/Tokyo:${formatIcsDateTime(shift.date, startTime)}`);
         lines.push(`DTEND;TZID=Asia/Tokyo:${endDayStr}T${endTime.replace(':', '')}00`);
       } else {
@@ -102,8 +104,10 @@ export function exportToIcs(
   // 2. カレンダー予定データの出力
   for (const ev of Object.values(store.events)) {
     if (ev.deletedAt) continue;
-    if (target === 'partnerA' && ev.categoryId !== 'partnerA' && ev.categoryId !== 'shared') continue;
-    if (target === 'partnerB' && ev.categoryId !== 'partnerB' && ev.categoryId !== 'shared') continue;
+    if (target === 'partnerA' && ev.categoryId !== 'partnerA' && ev.categoryId !== 'shared')
+      continue;
+    if (target === 'partnerB' && ev.categoryId !== 'partnerB' && ev.categoryId !== 'shared')
+      continue;
 
     lines.push('BEGIN:VEVENT');
     lines.push(`UID:futarical-event-${ev.id}@futarical.local`);
@@ -136,17 +140,19 @@ export function exportToIcs(
   return lines.join('\r\n');
 }
 
-// .ics テキストをパースして ScheduleEvent 配列としてインポート
-export function parseIcsEvents(
+// .ics テキストをパースして「シフト」と「予定」に自動振り分けして返す（ナスカレ連携対応）
+export function parseIcsWithShiftDetection(
   icsContent: string,
   defaultCategoryId: CalendarCategoryId = 'shared',
-  createdBy: PartnerId = 'partnerA'
-): ScheduleEvent[] {
-  // 折り返し行（RFC 5545 line folding）を展開
+  targetPartnerId: PartnerId = 'partnerA',
+  stamps: StampPreset[] = [],
+  autoDetectShifts = true
+): { events: ScheduleEvent[]; shifts: ShiftEntry[] } {
   const unfolded = icsContent.replace(/\r?\n[ \t]/g, '');
   const rawLines = unfolded.split(/\r?\n/);
 
   const importedEvents: ScheduleEvent[] = [];
+  const importedShifts: ShiftEntry[] = [];
   let inEvent = false;
   let currentProps: Record<string, string> = {};
 
@@ -154,19 +160,19 @@ export function parseIcsEvents(
     rawVal: string
   ): { date: string; time?: string; isAllDay: boolean } | null => {
     const clean = rawVal.trim();
-    // YYYYMMDD
     if (/^\d{8}$/.test(clean)) {
       return {
         date: `${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}`,
         isAllDay: true,
       };
     }
-    // YYYYMMDDTHHMMSS or YYYYMMDDTHHMMSSZ
     const match = clean.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
     if (match) {
       const [, y, m, d, hh, mm, ss, isUtc] = match;
       if (isUtc) {
-        const dt = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss)));
+        const dt = new Date(
+          Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss))
+        );
         const jst = new Date(dt.getTime() + 9 * 60 * 60 * 1000);
         const jy = jst.getUTCFullYear();
         const jm = String(jst.getUTCMonth() + 1).padStart(2, '0');
@@ -213,21 +219,54 @@ export function parseIcsEvents(
         const parsedEnd = currentProps['DTEND'] ? parseIcsTimestamp(currentProps['DTEND']) : null;
 
         if (parsedStart) {
-          const id = `ics_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          importedEvents.push({
-            id,
-            date: parsedStart.date,
-            title: unescapeIcsText(summaryRaw),
-            categoryId: defaultCategoryId,
-            color: catInfo.accentColor,
-            isAllDay: parsedStart.isAllDay,
-            startTime: parsedStart.time,
-            endTime: parsedEnd?.time,
-            memo: currentProps['DESCRIPTION'] ? unescapeIcsText(currentProps['DESCRIPTION']) : undefined,
-            createdBy,
-            createdAt: nowIso,
-            updatedAt: nowIso,
-          });
+          const cleanTitle = unescapeIcsText(summaryRaw).trim();
+
+          // ナスカレ由来のシフト項目か判定（例: "[ナスカレ] 日勤", "日勤", "夜勤", "公休", "休み", "準夜" 等）
+          const strippedForShift = cleanTitle
+            .replace(/^(\[.*?\]|【.*?】)\s*/, '')
+            .trim();
+
+          const matchedStamp =
+            autoDetectShifts && strippedForShift.length <= 6
+              ? matchShiftStampByText(strippedForShift, stamps)
+              : undefined;
+
+          if (matchedStamp) {
+            const shiftId = `${parsedStart.date}_${targetPartnerId}`;
+            importedShifts.push({
+              id: shiftId,
+              date: parsedStart.date,
+              partnerId: targetPartnerId,
+              stampId: matchedStamp.id,
+              startTime: parsedStart.time || matchedStamp.startTime,
+              endTime: parsedEnd?.time || matchedStamp.endTime,
+              memo: currentProps['DESCRIPTION']
+                ? unescapeIcsText(currentProps['DESCRIPTION'])
+                : undefined,
+              createdBy: targetPartnerId,
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              deletedAt: null,
+            });
+          } else {
+            const id = `ics_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            importedEvents.push({
+              id,
+              date: parsedStart.date,
+              title: cleanTitle,
+              categoryId: defaultCategoryId,
+              color: catInfo.accentColor,
+              isAllDay: parsedStart.isAllDay,
+              startTime: parsedStart.time,
+              endTime: parsedEnd?.time,
+              memo: currentProps['DESCRIPTION']
+                ? unescapeIcsText(currentProps['DESCRIPTION'])
+                : undefined,
+              createdBy: targetPartnerId,
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+          }
         }
       }
       continue;
@@ -244,5 +283,95 @@ export function parseIcsEvents(
     }
   }
 
-  return importedEvents;
+  return { events: importedEvents, shifts: importedShifts };
+}
+
+export function parseIcsEvents(
+  icsContent: string,
+  defaultCategoryId: CalendarCategoryId = 'shared',
+  createdBy: PartnerId = 'partnerA'
+): ScheduleEvent[] {
+  return parseIcsWithShiftDetection(icsContent, defaultCategoryId, createdBy, [], false).events;
+}
+
+/**
+ * ナスカレの「LINEでシフト共有」テキストやメモ貼り付けからシフトと予定を一括解析
+ * 例:
+ * "11/1(日) 日勤 08:30-17:30"
+ * "11/2(月) 夜勤 / 歯医者"
+ * "3日 休み"
+ */
+export function parseNurseKarText(
+  rawText: string,
+  defaultYear: number,
+  defaultMonth: number,
+  targetPartnerId: PartnerId,
+  stamps: StampPreset[],
+  defaultCategoryId: CalendarCategoryId = 'shared'
+): { shifts: ShiftEntry[]; events: ScheduleEvent[] } {
+  const lines = rawText.split(/\r?\n/);
+  const shifts: ShiftEntry[] = [];
+  const events: ScheduleEvent[] = [];
+  const nowIso = new Date().toISOString();
+  const catInfo = CATEGORY_MAP[defaultCategoryId];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // 日付の抽出: "11/3(火) ..." または "11月3日 ..." または "3日 ..." または "3(火) ..."
+    let month = defaultMonth;
+    let day = 0;
+    let rest = '';
+
+    const m1 = line.match(/^(\d{1,2})[\/月](\d{1,2})日?(?:\s*\([日月火水木金土祝]+\))?[\s:：・]*(.+)$/);
+    if (m1) {
+      month = Number(m1[1]);
+      day = Number(m1[2]);
+      rest = m1[3].trim();
+    } else {
+      const m2 = line.match(/^(\d{1,2})(?:日|\s*\([日月火水木金土祝]+\))[\s:：・]*(.+)$/);
+      if (m2) {
+        day = Number(m2[1]);
+        rest = m2[2].trim();
+      }
+    }
+
+    if (!day || day < 1 || day > 31 || !rest) continue;
+
+    const dateStr = `${defaultYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const tokens = rest.split(/[\s\/／・,、]+/).filter(Boolean);
+
+    for (const token of tokens) {
+      const matchedStamp = matchShiftStampByText(token, stamps);
+      if (matchedStamp) {
+        shifts.push({
+          id: `${dateStr}_${targetPartnerId}`,
+          date: dateStr,
+          partnerId: targetPartnerId,
+          stampId: matchedStamp.id,
+          startTime: matchedStamp.startTime,
+          endTime: matchedStamp.endTime,
+          createdBy: targetPartnerId,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          deletedAt: null,
+        });
+      } else if (!/^\d{1,2}:\d{2}/.test(token)) {
+        events.push({
+          id: `nk_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          date: dateStr,
+          title: token,
+          categoryId: defaultCategoryId,
+          color: catInfo.accentColor,
+          isAllDay: true,
+          createdBy: targetPartnerId,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+    }
+  }
+
+  return { shifts, events };
 }
