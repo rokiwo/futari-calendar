@@ -218,36 +218,50 @@ export function matchShiftStampByText(
   );
   if (exact) return exact;
 
+  // 2夜・準早・準遅・遅A・遅B・早A・早B の優先マッチング
+  if (/2夜|２夜/.test(clean)) {
+    return stamps.find((s) => s.label === '２夜' || s.id === 'shift_a_2night');
+  }
+  if (/準早/.test(clean)) {
+    return stamps.find((s) => s.label === '準早' || s.id === 'shift_a_semi_early');
+  }
+  if (/準遅/.test(clean)) {
+    return stamps.find((s) => s.label === '準遅' || s.id === 'shift_a_semi_late');
+  }
+  if (/遅[BbＢ]/.test(clean)) {
+    return stamps.find((s) => s.label === '遅B' || s.id === 'shift_a_late_b');
+  }
+  if (/遅[AaＡ]/.test(clean)) {
+    return stamps.find((s) => s.label === '遅A' || s.id === 'shift_a_late_a');
+  }
+  if (/早[BbＢ]/.test(clean)) {
+    return stamps.find((s) => s.label === '早B' || s.id === 'shift_a_early_b');
+  }
+  if (/早[AaＡ]/.test(clean)) {
+    return stamps.find((s) => s.label === '早A' || s.id === 'shift_a_early_a');
+  }
+
   // キーワードによる柔軟マッチング（ナスカレ・病院・一般シフト表の略称に完全対応）
-  if (/^(日勤|日|A|D|日1|日2)$/i.test(clean) || clean.includes('日勤')) {
-    return stamps.find((s) => s.id === 'shift_day' || s.label.includes('日勤')) || stamps[0];
+  if (/^(日勤|日|D|日1|日2)$/i.test(clean) || clean.includes('日勤')) {
+    return stamps.find((s) => s.id === 'shift_a_day' || s.label.includes('日勤')) || stamps[0];
   }
   if (/^(夜勤|夜|深|深夜|N|入り|夜入)$/i.test(clean) || clean.includes('夜勤') || clean.includes('深夜')) {
-    return stamps.find((s) => s.id === 'shift_night' || s.label.includes('夜勤'));
-  }
-  if (/^(準夜|準|J|夕)$/i.test(clean) || clean.includes('準夜')) {
-    return stamps.find((s) => s.id === 'shift_semi_night' || s.label.includes('準夜'));
+    return stamps.find((s) => s.id === 'shift_a_night' || s.label.includes('夜勤'));
   }
   if (/^(早番|早|早出|E)$/i.test(clean) || clean.includes('早')) {
-    return stamps.find((s) => s.id === 'shift_early' || s.label.includes('早'));
+    return stamps.find((s) => s.id === 'shift_a_early_a' || s.label.includes('早'));
   }
   if (/^(遅番|遅|遅出|L)$/i.test(clean) || clean.includes('遅')) {
-    return stamps.find((s) => s.id === 'shift_late' || s.label.includes('遅'));
+    return stamps.find((s) => s.id === 'shift_a_late_a' || s.label.includes('遅'));
   }
-  if (/^(有休|有給|有|年休|夏休|特休)$/i.test(clean) || clean.includes('有休') || clean.includes('有給')) {
-    return stamps.find((s) => s.id === 'shift_paid' || s.label.includes('有休'));
+  if (/^(年休|有休|有給|有|年|夏休|特休)$/i.test(clean) || clean.includes('年休') || clean.includes('有休') || clean.includes('有給')) {
+    return stamps.find((s) => s.id === 'shift_a_paid' || s.label.includes('年休') || s.label.includes('有休'));
   }
   if (/^(明|明け|明休|／|\/)$/i.test(clean) || clean.includes('明')) {
-    return stamps.find((s) => s.id === 'shift_ake' || s.label.includes('明'));
-  }
-  if (/^(在宅|テレワーク|リモ)$/i.test(clean) || clean.includes('在宅')) {
-    return stamps.find((s) => s.id === 'shift_remote' || s.label.includes('在宅'));
-  }
-  if (/^(出張|外勤)$/i.test(clean) || clean.includes('出張')) {
-    return stamps.find((s) => s.id === 'shift_trip' || s.label.includes('出張'));
+    return stamps.find((s) => s.id === 'shift_a_ake' || s.label.includes('明'));
   }
   if (/^(休み|休|公休|公|週休|代休|振休|×|〇|○)$/i.test(clean) || clean.includes('休')) {
-    return stamps.find((s) => s.id === 'shift_off' || s.isHoliday);
+    return stamps.find((s) => s.id === 'shift_a_off' || s.label === '休み' || s.isHoliday);
   }
 
   // 部分一致フォールバック
