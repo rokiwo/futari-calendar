@@ -1,4 +1,4 @@
-// 初期スタンプ・カテゴリプリセット・日本の祝日判定・初期サンプルデータ定義
+// 初期シフトスタンプ・カテゴリプリセット・日本の祝日判定・初期サンプルデータ定義
 import {
   CalendarCategoryId,
   CalendarDataStore,
@@ -82,9 +82,8 @@ export const SUPPORT_BADGE_PRESETS: { id: string; label: string; short: string; 
   { id: '👶送り迎え', label: '👶 送り迎え担当', short: '👶送迎', desc: '保育園や習い事の送迎目印' },
 ];
 
-// デフォルトのシフト＆予定スタンププリセット
+// デフォルトのシフトスタンププリセット（予定スタンプは廃止しシフト入力に特化）
 export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
-  // シフト用スタンプ
   {
     id: 'shift_day',
     label: '日勤',
@@ -209,132 +208,35 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     isHoliday: false,
     order: 10,
   },
-
-  // 予定スタンプ（ワンタップ定型予定）
-  {
-    id: 'event_date',
-    label: 'お出かけ・デート',
-    shortLabel: '💕デート',
-    type: 'event',
-    color: '#FF8FAB',
-    textColor: '#9E2A47',
-    startTime: '10:30',
-    endTime: '19:00',
-    icon: '💕',
-    categoryId: 'shared',
-    order: 101,
-  },
-  {
-    id: 'event_hospital',
-    label: '🏥 通院・健診',
-    shortLabel: '🏥通院',
-    type: 'event',
-    color: '#56CFE1',
-    textColor: '#136370',
-    startTime: '10:00',
-    endTime: '12:00',
-    icon: '🏥',
-    categoryId: 'shared',
-    order: 102,
-  },
-  {
-    id: 'event_salon',
-    label: '💇‍♀️ 美容院・サロン',
-    shortLabel: '💇‍♀️美容院',
-    type: 'event',
-    color: '#B388EB',
-    textColor: '#59318F',
-    startTime: '13:00',
-    endTime: '15:30',
-    icon: '💇‍♀️',
-    categoryId: 'partnerB',
-    order: 103,
-  },
-  {
-    id: 'event_drink',
-    label: '🍻 飲み会・食事会',
-    shortLabel: '🍻飲み会',
-    type: 'event',
-    color: '#56CFE1',
-    textColor: '#136370',
-    startTime: '19:00',
-    endTime: '22:30',
-    icon: '🍻',
-    categoryId: 'partnerA',
-    order: 104,
-  },
-  {
-    id: 'event_parents',
-    label: '🏠 実家へ帰省・訪問',
-    shortLabel: '🏠実家',
-    type: 'event',
-    color: '#FF8FAB',
-    textColor: '#9E2A47',
-    icon: '🏠',
-    categoryId: 'shared',
-    order: 105,
-  },
-  {
-    id: 'event_dinner',
-    label: '🍽️ ふたりで外食',
-    shortLabel: '🍽️外食',
-    type: 'event',
-    color: '#FF8FAB',
-    textColor: '#9E2A47',
-    startTime: '18:30',
-    endTime: '21:00',
-    icon: '🍽️',
-    categoryId: 'shared',
-    order: 106,
-  },
-  {
-    id: 'event_trash',
-    label: '🗑️ 資源ごみ・粗大ごみ',
-    shortLabel: '🗑️資源ごみ',
-    type: 'event',
-    color: '#52B788',
-    textColor: '#1E6645',
-    startTime: '08:00',
-    endTime: '08:30',
-    icon: '🗑️',
-    categoryId: 'chore',
-    order: 107,
-  },
-  {
-    id: 'event_shopping',
-    label: '🛒 まとめ買い・コストコ',
-    shortLabel: '🛒買出し',
-    type: 'event',
-    color: '#52B788',
-    textColor: '#1E6645',
-    startTime: '11:00',
-    endTime: '14:00',
-    icon: '🛒',
-    categoryId: 'chore',
-    order: 108,
-  },
-  {
-    id: 'event_anniv',
-    label: '🎂 記念日・お祝い',
-    shortLabel: '🎂記念日',
-    type: 'event',
-    color: '#FFB703',
-    textColor: '#8A5A00',
-    icon: '🎂',
-    categoryId: 'anniversary',
-    order: 109,
-  },
 ];
 
-// パステルカラー選択肢（予定作成＆スタンプ作成モーダル用）
+// パステルカラー選択肢（シフトスタンプ＆予定カラー用）
 export const PASTEL_COLOR_PALETTE = [
-  { name: 'さくらピンク', hex: '#FF8FAB', bg: '#FFE5EC', text: '#9E2A47' },
-  { name: 'ミントブルー', hex: '#56CFE1', bg: '#E2F9FC', text: '#136370' },
-  { name: 'ラベンダー', hex: '#B388EB', bg: '#F3EAFF', text: '#59318F' },
-  { name: 'ミモザイエロー', hex: '#FFB703', bg: '#FFF6D6', text: '#8A5A00' },
+  { name: 'さくらピンク', hex: '#FF8FAB', bg: '#FFE5EC', text: '#B8335A' },
+  { name: 'ベビーローズ', hex: '#FF6B8B', bg: '#FFF0F5', text: '#E05277' },
+  { name: 'ミントブルー', hex: '#56CFE1', bg: '#E2F9FC', text: '#126875' },
+  { name: 'ラベンダー', hex: '#B388EB', bg: '#F3EAFF', text: '#6638A6' },
+  { name: 'ナイトパープル', hex: '#7C83FD', bg: '#E8E5FF', text: '#483D8B' },
+  { name: 'ミモザイエロー', hex: '#FFB703', bg: '#FFF3D6', text: '#996300' },
   { name: 'セージグリーン', hex: '#52B788', bg: '#E6F7EF', text: '#1E6645' },
   { name: 'ピーチコーラル', hex: '#FF9E7D', bg: '#FFECE5', text: '#9C3D1C' },
-  { name: 'ナイトインディゴ', hex: '#7C83FD', bg: '#E8E9FF', text: '#353C99' },
+];
+
+// シフト用アイコン絵文字のクイック選択リスト
+export const SHIFT_ICON_CHOICES = [
+  '☀️', '🌙', '🌆', '🌅', '⏰', '🏠', '🌴', '🍵', '💻', '🚄',
+  '🏥', '🏢', '🩺', '🚑', '🏪', '🍳', '✨', '💤', '🎉', '📅',
+];
+
+// シフト時間のワンタッププリセット
+export const SHIFT_TIME_PRESETS = [
+  { label: '時間なし（休日等）', start: '', end: '' },
+  { label: '08:30〜17:30 (日勤)', start: '08:30', end: '17:30' },
+  { label: '09:00〜18:00 (定時)', start: '09:00', end: '18:00' },
+  { label: '16:30〜09:00 (夜勤)', start: '16:30', end: '09:00' },
+  { label: '16:30〜01:00 (準夜)', start: '16:30', end: '01:00' },
+  { label: '07:00〜16:00 (早番)', start: '07:00', end: '16:00' },
+  { label: '11:00〜20:00 (遅番)', start: '11:00', end: '20:00' },
 ];
 
 // 日本の祝日リスト（2025〜2028年主要祝日＋固定祝日フォールバック）
@@ -400,7 +302,7 @@ const FIXED_HOLIDAYS: Record<string, string> = {
 
 export function getJapaneseHoliday(dateStr: string): string | null {
   if (FIXED_HOLIDAYS[dateStr]) return FIXED_HOLIDAYS[dateStr];
-  const [, monthDay] = [dateStr.slice(0, 4), dateStr.slice(5)];
+  const monthDay = dateStr.slice(5);
   const fallbackMap: Record<string, string> = {
     '01-01': '元日',
     '02-11': '建国記念の日',
@@ -449,7 +351,6 @@ export function createInitialDataStore(): CalendarDataStore {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const metadata = createDefaultMetadata();
 
-  // 相手（partnerB）の最終確認時刻より新しい時刻（未読ドット表示デモ用）と古い時刻（既読表示デモ用）
   const readTime = new Date(now.getTime() - 5 * 60 * 60 * 1000).toISOString();
   const unreadTime = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
 
@@ -648,19 +549,6 @@ export function createInitialDataStore(): CalendarDataStore {
     },
     ev_sample_4: {
       id: 'ev_sample_4',
-      date: d(3),
-      title: '📦 ふるさと納税フルーツ届く（午前指定）',
-      categoryId: 'chore',
-      color: '#52B788',
-      isAllDay: false,
-      startTime: '09:30',
-      endTime: '10:15',
-      createdBy: 'partnerB',
-      createdAt: readTime,
-      updatedAt: readTime,
-    },
-    ev_sample_5: {
-      id: 'ev_sample_5',
       date: d(5),
       title: '🍻 部署の歓迎会（二次会なし）',
       categoryId: 'partnerA',
@@ -673,8 +561,8 @@ export function createInitialDataStore(): CalendarDataStore {
       createdAt: unreadTime,
       updatedAt: unreadTime,
     },
-    ev_sample_6: {
-      id: 'ev_sample_6',
+    ev_sample_5: {
+      id: 'ev_sample_5',
       date: d(7),
       title: '💇‍♀️ 表参道ヘアサロン（カット＆カラー）',
       categoryId: 'partnerB',
@@ -686,21 +574,8 @@ export function createInitialDataStore(): CalendarDataStore {
       createdAt: readTime,
       updatedAt: readTime,
     },
-    ev_sample_7: {
-      id: 'ev_sample_7',
-      date: d(7),
-      title: '🛒 コストコ＆IKEAお買い物ドライブ',
-      categoryId: 'shared',
-      color: '#FF8FAB',
-      isAllDay: false,
-      startTime: '14:30',
-      endTime: '18:30',
-      createdBy: 'partnerA',
-      createdAt: unreadTime,
-      updatedAt: unreadTime,
-    },
-    ev_sample_8: {
-      id: 'ev_sample_8',
+    ev_sample_6: {
+      id: 'ev_sample_6',
       date: d(15),
       title: '🎂 結婚記念日ディナー＆ケーキ受取✨',
       categoryId: 'anniversary',
