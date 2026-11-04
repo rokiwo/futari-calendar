@@ -1,4 +1,3 @@
-// Googleカレンダー連携 ＆ パートナー端末別（夫の端末のみ／妻の端末のみ）通知ユーティリティ
 import {
   CalendarDataStore,
   CoupleMetadata,
@@ -6,6 +5,11 @@ import {
   PartnerId,
   ScheduleEvent,
 } from '../types/calendar';
+import {
+  formatMinutesShort,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
+} from './presets';
 
 export const REMINDER_PRESETS: { value: number; label: string }[] = [
   { value: 0, label: '開始時刻（定刻）' },
@@ -190,8 +194,10 @@ export function generatePartnerNotificationIcs(
     const dateCompact = `${y}${pad(m)}${pad(d)}`;
 
     const extraParts: string[] = [];
-    if ((s.overtimeHours || 0) > 0) extraParts.push(`残業+${s.overtimeHours}h`);
-    if ((s.holidayWorkHours || 0) > 0) extraParts.push(`休出${s.holidayWorkHours}h`);
+    const otMin = getShiftOvertimeMinutes(s);
+    const holMin = getShiftHolidayWorkMinutes(s);
+    if (otMin > 0) extraParts.push(`残業+${formatMinutesShort(otMin)}`);
+    if (holMin > 0) extraParts.push(`休出${formatMinutesShort(holMin)}`);
     if (s.subCustomLabel) extraParts.push(`+${s.subCustomLabel}`);
     const extraSuffix = extraParts.length > 0 ? ` (${extraParts.join('/')})` : '';
 
