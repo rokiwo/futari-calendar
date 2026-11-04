@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Stamp,
   ChevronLeft,
@@ -11,6 +11,10 @@ import {
   Camera,
   CalendarPlus,
   Smartphone,
+  Timer,
+  Zap,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   CoupleMetadata,
@@ -19,7 +23,9 @@ import {
   StampPreset,
 } from '../types/calendar';
 import {
+  calculateMinutesBetween,
   formatMinutesShort,
+  formatMinutesToJa,
   getPartnerShiftStamps,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
@@ -98,6 +104,20 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
     const w = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
     return `${m}/${d}(${w})`;
   };
+
+  // 残業の開始・終了時刻から自動計算＆直接分数入力用のローカルstate
+  const [showAutoCalc, setShowAutoCalc] = useState(false);
+  const [calcStart, setCalcStart] = useState('11:00');
+  const [calcEnd, setCalcEnd] = useState('11:35');
+  const [directMin, setDirectMin] = useState('');
+
+  useEffect(() => {
+    const curOt = getShiftOvertimeMinutes(currentShiftOnSelectedDate);
+    setDirectMin(curOt > 0 ? String(curOt) : '');
+    const shiftEnd = currentShiftOnSelectedDate?.endTime || '17:00';
+    setCalcStart(currentShiftOnSelectedDate?.overtimeStartTime || shiftEnd);
+    setCalcEnd(currentShiftOnSelectedDate?.overtimeEndTime || '17:35');
+  }, [currentShiftOnSelectedDate, selectedDate]);
 
   if (!isOpen) {
     return (
@@ -360,89 +380,223 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             )}
 
             {/* 選択日の「＋仕事終わり・休日のバイト」＆「⏱️残業・休日出勤」ワンタップ重ね記載バー */}
-            <div className="pt-1.5 border-t border-stone-100 flex items-center gap-1 overflow-x-auto no-scrollbar text-[10px]">
-              <span className="font-bold text-stone-400 shrink-0">
-                {formatSelectedDate(selectedDate)}に重ね書き:
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
-                    subStampId: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'shift_part',
-                    subCustomLabel: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'バイト',
-                    subStartTime: '18:30',
-                    subEndTime: '22:00',
-                  })
-                }
-                className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 ${
-                  currentShiftOnSelectedDate?.subCustomLabel
-                    ? 'bg-[#FFF3D6] border-[#FFB703] text-[#996300]'
-                    : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
-                }`}
-              >
-                ＋🏪バイト重ね書き
-              </button>
+            <div className="pt-1.5 border-t border-stone-100 space-y-1.5 text-[10px]">
+              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                <span className="font-bold text-stone-400 shrink-0">
+                  {formatSelectedDate(selectedDate)}:
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                      subStampId: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'shift_part',
+                      subCustomLabel: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'バイト',
+                      subStartTime: '18:30',
+                      subEndTime: '22:00',
+                    })
+                  }
+                  className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 ${
+                    currentShiftOnSelectedDate?.subCustomLabel
+                      ? 'bg-[#FFF3D6] border-[#FFB703] text-[#996300]'
+                      : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
+                  }`}
+                >
+                  ＋🏪バイト
+                </button>
 
-              {(() => {
-                const curOtMin = getShiftOvertimeMinutes(currentShiftOnSelectedDate);
-                const curHwMin = getShiftHolidayWorkMinutes(currentShiftOnSelectedDate);
-                return (
-                  <>
-                    {[
-                      { label: '+15分', min: 15 },
-                      { label: '+30分', min: 30 },
-                      { label: '+35分', min: 35 },
-                      { label: '+45分', min: 45 },
-                      { label: '+1h', min: 60 },
-                      { label: '+1.5h', min: 90 },
-                      { label: '+2h', min: 120 },
-                    ].map((b) => (
+                {/* ⚡ 開始〜終了時刻から自動計算のトグルボタン */}
+                <button
+                  type="button"
+                  onClick={() => setShowAutoCalc(!showAutoCalc)}
+                  className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 flex items-center gap-0.5 transition-all ${
+                    showAutoCalc
+                      ? 'bg-rose-500 text-white border-rose-500 shadow-2xs'
+                      : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                  }`}
+                >
+                  <Zap className="w-3 h-3 text-amber-300 shrink-0" />
+                  <span>⚡時間から自動計算</span>
+                  {showAutoCalc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+
+                {(() => {
+                  const curOtMin = getShiftOvertimeMinutes(currentShiftOnSelectedDate);
+                  const curHwMin = getShiftHolidayWorkMinutes(currentShiftOnSelectedDate);
+                  return (
+                    <>
+                      {[
+                        { label: '0分解除', min: 0 },
+                        { label: '+15分', min: 15 },
+                        { label: '+30分', min: 30 },
+                        { label: '+35分', min: 35 },
+                        { label: '+45分', min: 45 },
+                        { label: '+60分(1h)', min: 60 },
+                        { label: '+90分(1.5h)', min: 90 },
+                        { label: '+120分(2h)', min: 120 },
+                      ].map((b) => (
+                        <button
+                          key={b.min}
+                          type="button"
+                          onClick={() => {
+                            const nextMin = b.min === 0 ? 0 : curOtMin === b.min ? 0 : b.min;
+                            setDirectMin(nextMin > 0 ? String(nextMin) : '');
+                            onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                              overtimeMinutes: nextMin,
+                              overtimeHours: Math.round((nextMin / 60) * 10) / 10,
+                              isHolidayWork: false,
+                              holidayWorkMinutes: 0,
+                              holidayWorkHours: 0,
+                            });
+                          }}
+                          className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 text-[10px] transition-all ${
+                            curOtMin === b.min && curHwMin === 0 && b.min > 0
+                              ? 'bg-rose-500 border-rose-500 text-white shadow-2xs scale-105'
+                              : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
+                          }`}
+                        >
+                          {b.min === 0 ? '✕ 0分' : `⏱️${b.label}`}
+                        </button>
+                      ))}
+
                       <button
-                        key={b.min}
                         type="button"
                         onClick={() => {
-                          const nextMin = curOtMin === b.min ? 0 : b.min;
+                          const nextHwMin = curHwMin === 240 ? 0 : 240;
                           onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
-                            overtimeMinutes: nextMin,
-                            overtimeHours: Math.round((nextMin / 60) * 10) / 10,
+                            isHolidayWork: nextHwMin > 0,
+                            holidayWorkMinutes: nextHwMin,
+                            holidayWorkHours: nextHwMin > 0 ? 4 : 0,
+                            overtimeMinutes: 0,
+                            overtimeHours: 0,
+                          });
+                        }}
+                        className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 text-[10px] ${
+                          curHwMin === 240
+                            ? 'bg-amber-600 border-amber-600 text-white'
+                            : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
+                        }`}
+                      >
+                        💼休出4h(240分)
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* ⚡ インライン展開：開始・終了時刻から自動計算パネル（例: 11:00〜11:35 -> 35分） */}
+              {showAutoCalc && (() => {
+                const diffMin = calculateMinutesBetween(calcStart, calcEnd);
+                const shiftEnd = currentShiftOnSelectedDate?.endTime;
+                return (
+                  <div className="bg-gradient-to-r from-rose-50 via-amber-50/50 to-rose-50 p-2 rounded-xl border border-rose-200 shadow-2xs space-y-1.5 animate-pop">
+                    <div className="flex items-center justify-between">
+                      <span className="font-black text-rose-900 flex items-center gap-1">
+                        <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                        <span>残業時刻の自動計算（例：11:00〜11:35 → 35分）</span>
+                      </span>
+                      {shiftEnd && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCalcStart(shiftEnd);
+                            setCalcEnd(currentShiftOnSelectedDate?.overtimeEndTime || shiftEnd);
+                          }}
+                          className="px-2 py-0.5 rounded-md bg-white border border-rose-200 text-rose-700 font-bold text-[9px] hover:bg-rose-100"
+                        >
+                          💡 定時({shiftEnd})から開始
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-stone-200">
+                        <span className="text-stone-400 font-bold text-[9px]">開始</span>
+                        <input
+                          type="time"
+                          value={calcStart}
+                          onChange={(e) => setCalcStart(e.target.value)}
+                          className="font-black text-xs text-stone-800 bg-transparent outline-none"
+                        />
+                      </div>
+                      <span className="text-stone-400 font-black">〜</span>
+                      <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-stone-200">
+                        <span className="text-stone-400 font-bold text-[9px]">終了</span>
+                        <input
+                          type="time"
+                          value={calcEnd}
+                          onChange={(e) => setCalcEnd(e.target.value)}
+                          className="font-black text-xs text-stone-800 bg-transparent outline-none"
+                        />
+                      </div>
+
+                      <span className="px-2 py-1 rounded-lg bg-rose-500 text-white font-black text-xs shadow-2xs">
+                        ⚡ 自動計算: {diffMin}分
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                            overtimeMinutes: diffMin,
+                            overtimeHours: Math.round((diffMin / 60) * 10) / 10,
+                            overtimeStartTime: calcStart,
+                            overtimeEndTime: calcEnd,
                             isHolidayWork: false,
                             holidayWorkMinutes: 0,
                             holidayWorkHours: 0,
                           });
+                          setShowAutoCalc(false);
                         }}
-                        className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 text-[10px] ${
-                          curOtMin === b.min && curHwMin === 0
-                            ? 'bg-rose-500 border-rose-500 text-white shadow-2xs'
-                            : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
-                        }`}
+                        className="px-3 py-1 rounded-lg bg-gradient-to-r from-rose-500 to-amber-500 text-white font-black text-xs shadow-xs active:scale-95 transition-all ml-auto"
                       >
-                        ⏱️残業{b.label}
+                        ⏱️ この内容で反映
                       </button>
-                    ))}
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextHwMin = curHwMin === 240 ? 0 : 240;
-                        onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
-                          isHolidayWork: nextHwMin > 0,
-                          holidayWorkMinutes: nextHwMin,
-                          holidayWorkHours: nextHwMin > 0 ? 4 : 0,
-                          overtimeMinutes: 0,
-                          overtimeHours: 0,
-                        });
-                      }}
-                      className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 text-[10px] ${
-                        curHwMin === 240
-                          ? 'bg-amber-600 border-amber-600 text-white'
-                          : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
-                      }`}
-                    >
-                      💼休出4h
-                    </button>
-                  </>
+                    </div>
+                  </div>
                 );
               })()}
+
+              {/* 自由分数入力（例: [ 35 ] 分 反映） */}
+              <div className="flex items-center gap-1.5 pt-0.5 text-[10px]">
+                <span className="font-bold text-stone-500 shrink-0">直接分数入力:</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="1440"
+                  placeholder="35"
+                  value={directMin}
+                  onChange={(e) => setDirectMin(e.target.value)}
+                  className="w-16 px-1.5 py-0.5 rounded-md border border-stone-300 bg-white font-black text-center text-rose-600 text-xs"
+                />
+                <span className="font-bold text-stone-600">分</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = Math.max(0, parseInt(directMin, 10) || 0);
+                    onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                      overtimeMinutes: val,
+                      overtimeHours: Math.round((val / 60) * 10) / 10,
+                      isHolidayWork: false,
+                      holidayWorkMinutes: 0,
+                      holidayWorkHours: 0,
+                    });
+                  }}
+                  className="px-2 py-0.5 rounded-md bg-stone-800 text-white font-extrabold hover:bg-stone-900 active:scale-95 shadow-2xs"
+                >
+                  反映
+                </button>
+
+                {(() => {
+                  const curOt = getShiftOvertimeMinutes(currentShiftOnSelectedDate);
+                  const curHw = getShiftHolidayWorkMinutes(currentShiftOnSelectedDate);
+                  if (curOt === 0 && curHw === 0) return null;
+                  return (
+                    <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 font-extrabold text-[10px] ml-auto">
+                      {curHw > 0 ? `休出 ${curHw}分` : `残業 +${curOt}分`} 反映中
+                    </span>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         )}
