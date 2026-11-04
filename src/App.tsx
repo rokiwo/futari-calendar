@@ -13,6 +13,9 @@ import {
   createUploaded2026NovShifts,
   DEFAULT_CATEGORIES,
   DEFAULT_STAMP_PRESETS,
+  formatMinutesToJa,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
   LEGACY_DEFAULT_STAMP_IDS,
 } from './utils/presets';
 import { hashPasscode } from './utils/crypto';
@@ -891,35 +894,43 @@ export const App: React.FC = () => {
     return matched;
   }, [month, store.shifts, store.stamps, year]);
 
-  // 今月の「⏱️残業・休日出勤・バイト集計」を自動算出
+  // 今月の「⏱️残業・休日出勤・バイト集計」を分単位で自動精密算出（計算ミス・誤差ゼロ）
   const overtimeSummary: MonthlyOvertimeSummary = useMemo(() => {
     const prefix = `${year}-${String(month).padStart(2, '0')}-`;
     const calcFor = (pid: PartnerId) => {
-      let overtimeHours = 0;
-      let holidayWorkHours = 0;
+      let overtimeMinutes = 0;
+      let holidayWorkMinutes = 0;
       let partTimeCount = 0;
       const entries: ShiftEntry[] = [];
 
       for (const s of Object.values(store.shifts)) {
         if (s.deletedAt || s.partnerId !== pid || !s.date.startsWith(prefix)) continue;
-        const ot = Number(s.overtimeHours || 0);
-        const hw = Number(s.holidayWorkHours || 0);
+        const otMin = getShiftOvertimeMinutes(s);
+        const hwMin = getShiftHolidayWorkMinutes(s);
         const hasSub = Boolean(s.subCustomLabel || s.subStampId || s.stampId === 'shift_part');
 
-        if (ot > 0) overtimeHours = Math.round((overtimeHours + ot) * 10) / 10;
-        if (hw > 0) holidayWorkHours = Math.round((holidayWorkHours + hw) * 10) / 10;
+        if (otMin > 0) overtimeMinutes += otMin;
+        if (hwMin > 0) holidayWorkMinutes += hwMin;
         if (hasSub) partTimeCount += 1;
 
-        if (ot > 0 || hw > 0 || s.isHolidayWork || hasSub) {
+        if (otMin > 0 || hwMin > 0 || s.isHolidayWork || hasSub) {
           entries.push(s);
         }
       }
 
       entries.sort((a, b) => a.date.localeCompare(b.date));
+      const totalExtraMinutes = overtimeMinutes + holidayWorkMinutes;
+
       return {
-        overtimeHours,
-        holidayWorkHours,
-        totalExtraHours: Math.round((overtimeHours + holidayWorkHours) * 10) / 10,
+        overtimeMinutes,
+        holidayWorkMinutes,
+        totalExtraMinutes,
+        overtimeHours: Math.round((overtimeMinutes / 60) * 10) / 10,
+        holidayWorkHours: Math.round((holidayWorkMinutes / 60) * 10) / 10,
+        totalExtraHours: Math.round((totalExtraMinutes / 60) * 10) / 10,
+        overtimeFormatted: formatMinutesToJa(overtimeMinutes),
+        holidayWorkFormatted: formatMinutesToJa(holidayWorkMinutes),
+        totalExtraFormatted: formatMinutesToJa(totalExtraMinutes),
         partTimeCount,
         entries,
       };
