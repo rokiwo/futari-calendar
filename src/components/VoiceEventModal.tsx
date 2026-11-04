@@ -209,50 +209,28 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
       const rec = new SpeechRec();
       rec.lang = 'ja-JP';
       rec.interimResults = true;
-      // 連続認識モードをON
-      rec.continuous = true;
+      rec.continuous = false;
 
       rec.onresult = (event: SpeechRecognitionEvent) => {
-        let finalStr = '';
-        let interimStr = '';
+        let transcript = '';
         const resList = event.results;
         for (let i = 0; i < resList.length; i++) {
-          const res = resList[i];
-          const transcript = res[0]?.transcript || '';
-          if (res.isFinal) {
-            finalStr += transcript + ' ';
-          } else {
-            interimStr += transcript;
-          }
+          transcript += resList[i][0]?.transcript || '';
         }
-        const fullRaw = (finalStr + ' ' + interimStr).trim();
-        const cleaned = cleanDuplicateSpeech(fullRaw);
-        applyVoiceParse(cleaned);
+        applyVoiceParse(transcript);
       };
 
-      rec.onerror = (e) => {
-        if (e.error === 'no-speech') {
-          // 無音による中断の場合は無視して待機
-          return;
-        }
+      rec.onerror = () => {
+        setIsListening(false);
+        isListeningRef.current = false;
         setSpeechError(
           'マイクの読み取りが中断されました。もう一度マイクボタンを押すか、キーボードの音声入力をお使いください🐾'
         );
       };
 
-      // ブラウザが自動で止めてしまっても、ユーザーが「音声終了」を押していないなら自動再起動して聞き取りを維持！
       rec.onend = () => {
-        if (isListeningRef.current) {
-          try {
-            rec.start();
-          } catch {
-            // 再起動失敗時は一旦OFF
-            setIsListening(false);
-            isListeningRef.current = false;
-          }
-        } else {
-          setIsListening(false);
-        }
+        setIsListening(false);
+        isListeningRef.current = false;
       };
 
       recognitionRef.current = rec;
@@ -381,26 +359,11 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
               {isListening ? <MicOff className="w-9 h-9" /> : <Mic className="w-9 h-9" />}
             </button>
 
-            {/* 音声聞き取り中なら、大きく押しやすい「⏹️ 音声入力を終了」ボタンを常時表示 */}
-            {isListening ? (
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={stopListening}
-                  className="w-full py-3 px-4 rounded-2xl bg-rose-500 hover:bg-rose-600 active:scale-98 text-white font-black text-sm shadow-md flex items-center justify-center gap-2 animate-bounce"
-                >
-                  <Square className="w-4 h-4 fill-white" />
-                  <span>⏹️ 音声終了（話し終わったらここをタップ）</span>
-                </button>
-                <p className="text-[11px] font-bold text-rose-600">
-                  🔴 聞き取り中... 間が空いても勝手に止まりません。話し終わったら上のボタンを押してください
-                </p>
-              </div>
-            ) : (
-              <div className="font-extrabold text-sm text-stone-700">
-                上のマイクをタップして話してください
-              </div>
-            )}
+            <div className="font-extrabold text-sm text-stone-700">
+              {isListening
+                ? '🔴 聞き取り中...（話し終わると自動で解析されます）'
+                : '上のマイクをタップして話してください'}
+            </div>
 
             {/* 音声認識テキスト表示欄（手動での修正・キーボード音声入力もOK） */}
             <div>
