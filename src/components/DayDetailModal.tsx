@@ -17,6 +17,9 @@ import {
   CheckSquare,
   Square,
   ExternalLink,
+  Zap,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   CalendarCategoryId,
@@ -140,6 +143,14 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const [customOtInputA, setCustomOtInputA] = useState<string>('');
   const [customOtInputB, setCustomOtInputB] = useState<string>('');
 
+  // シフトカード内のインライン開始・終了時刻自動計算ステート
+  const [showCardCalcA, setShowCardCalcA] = useState<boolean>(false);
+  const [showCardCalcB, setShowCardCalcB] = useState<boolean>(false);
+  const [cardStartA, setCardStartA] = useState<string>('11:00');
+  const [cardEndA, setCardEndA] = useState<string>('11:35');
+  const [cardStartB, setCardStartB] = useState<string>('11:00');
+  const [cardEndB, setCardEndB] = useState<string>('11:35');
+
   useEffect(() => {
     if (initialOpenEventForm) {
       setShowEventForm(true);
@@ -175,6 +186,14 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     const minB = getShiftHolidayWorkMinutes(shiftB) || getShiftOvertimeMinutes(shiftB);
     setCustomOtInputA(minA > 0 ? String(minA) : '');
     setCustomOtInputB(minB > 0 ? String(minB) : '');
+
+    const shiftEndA = shiftA?.endTime || '17:00';
+    setCardStartA(shiftA?.overtimeStartTime || shiftEndA);
+    setCardEndA(shiftA?.overtimeEndTime || '17:35');
+
+    const shiftEndB = shiftB?.endTime || '17:00';
+    setCardStartB(shiftB?.overtimeStartTime || shiftEndB);
+    setCardEndB(shiftB?.overtimeEndTime || '17:35');
   }, [dateStr, shiftA, shiftB]);
 
   const stampA = shiftA ? stampMap.get(shiftA.stampId) : undefined;
@@ -808,7 +827,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           {otStartTime && otEndTime ? `${otStartTime} 〜 ${otEndTime} の計算結果:` : '計算結果:'}
                         </span>
                         <span className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-rose-500 to-amber-500 text-white font-black text-xs shadow-xs animate-pop">
-                          ⏱️ {formatMinutesToJa(otMinutes)} ({otMinutes}分)
+                          ⏱️ {otMinutes}分 {otMinutes >= 60 ? `(${formatMinutesToJa(otMinutes)})` : ''}
                         </span>
                       </div>
                     </div>
@@ -1551,149 +1570,231 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
                     {/* ③ 残業時間・休日出勤時間の記載欄（分単位） */}
                     <div className="pt-2 border-t border-stone-200/60 space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-extrabold text-stone-600 flex items-center gap-1">
-                          <Timer className="w-3 h-3 text-rose-500" />
-                          <span>残業・休日出勤時間</span>
-                        </span>
-                        {(otMin > 0 || hwMin > 0) ? (
-                          <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black shadow-2xs">
-                            {hwMin > 0 ? `💼 休日出勤 ${formatMinutesToJa(hwMin)} 反映中` : `⏱️ 残業 +${formatMinutesToJa(otMin)} 反映中`}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-stone-400 font-bold">0分</span>
-                        )}
-                      </div>
+                      {(() => {
+                        const isPidA = pid === 'partnerA';
+                        const showCardCalc = isPidA ? showCardCalcA : showCardCalcB;
+                        const setShowCardCalc = isPidA ? setShowCardCalcA : setShowCardCalcB;
+                        const cardStart = isPidA ? cardStartA : cardStartB;
+                        const setCardStart = isPidA ? setCardStartA : setCardStartB;
+                        const cardEnd = isPidA ? cardEndA : cardEndB;
+                        const setCardEnd = isPidA ? setCardEndA : setCardEndB;
+                        const cardDiffMin = calculateMinutesBetween(cardStart, cardEnd);
+                        const shiftEnd = shift?.endTime;
 
-                      {/* ワンタップ残業・休出ボタン（分単位対応：15分、30分、35分、45分、1時間、1.5時間、2時間） */}
-                      <div className="flex flex-wrap gap-1">
-                        {[
-                          { label: 'なし', min: 0 },
-                          { label: '+15分', min: 15 },
-                          { label: '+30分', min: 30 },
-                          { label: '+35分', min: 35 },
-                          { label: '+45分', min: 45 },
-                          { label: '+1h', min: 60 },
-                          { label: '+1.5h', min: 90 },
-                          { label: '+2h', min: 120 },
-                        ].map((b) => (
-                          <button
-                            key={b.min}
-                            type="button"
-                            onClick={() => {
-                              setCustomInputVal(b.min > 0 ? String(b.min) : '');
-                              onUpdateShiftDetails(dateStr, pid, {
-                                overtimeMinutes: b.min,
-                                overtimeHours: Math.round((b.min / 60) * 10) / 10,
-                                isHolidayWork: false,
-                                holidayWorkMinutes: 0,
-                                holidayWorkHours: 0,
-                              });
-                            }}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
-                              otMin === b.min && hwMin === 0
-                                ? 'bg-rose-500 border-rose-500 text-white shadow-2xs scale-105'
-                                : 'bg-white border-stone-200 text-stone-600'
-                            }`}
-                          >
-                            {b.label}
-                          </button>
-                        ))}
-                        {[
-                          { label: '💼休出4h', min: 240 },
-                          { label: '💼休出8h', min: 480 },
-                        ].map((hBtn) => (
-                          <button
-                            key={hBtn.label}
-                            type="button"
-                            onClick={() => {
-                              setCustomInputVal(String(hBtn.min));
-                              onUpdateShiftDetails(dateStr, pid, {
-                                isHolidayWork: true,
-                                holidayWorkMinutes: hBtn.min,
-                                holidayWorkHours: Math.round((hBtn.min / 60) * 10) / 10,
-                                overtimeMinutes: 0,
-                                overtimeHours: 0,
-                              });
-                            }}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
-                              hwMin === hBtn.min
-                                ? 'bg-amber-600 border-amber-600 text-white shadow-2xs scale-105'
-                                : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
-                            }`}
-                          >
-                            {hBtn.label}
-                          </button>
-                        ))}
-                      </div>
+                        return (
+                          <>
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-extrabold text-stone-600 flex items-center gap-1">
+                                <Timer className="w-3 h-3 text-rose-500" />
+                                <span>残業・休日出勤時間</span>
+                              </span>
+                              {otMin > 0 || hwMin > 0 ? (
+                                <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black shadow-2xs">
+                                  {hwMin > 0
+                                    ? `💼 休日出勤 ${hwMin}分 (${formatMinutesToJa(hwMin)}) 反映中`
+                                    : `⏱️ 残業 +${otMin}分 (${formatMinutesToJa(otMin)}) 反映中`}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-stone-400 font-bold">0分</span>
+                              )}
+                            </div>
 
-                      {/* 分単位の自由入力＋「反映」ボタン */}
-                      <div className="flex items-center gap-1.5 text-[11px] pt-0.5">
-                        <span className="text-stone-500 font-bold shrink-0">直接入力:</span>
-                        <input
-                          type="number"
-                          step="1"
-                          min="0"
-                          max="1440"
-                          placeholder="例: 35"
-                          value={customInputVal}
-                          onChange={(e) => {
-                            const raw = e.target.value;
-                            setCustomInputVal(raw);
-                            if (raw === '') {
-                              onUpdateShiftDetails(dateStr, pid, {
-                                overtimeMinutes: 0,
-                                overtimeHours: 0,
-                                isHolidayWork: false,
-                                holidayWorkMinutes: 0,
-                                holidayWorkHours: 0,
-                              });
-                              return;
-                            }
-                            const val = Math.max(0, parseInt(raw, 10));
-                            if (!Number.isNaN(val)) {
-                              if (hwMin > 0 || shift?.isHolidayWork) {
-                                onUpdateShiftDetails(dateStr, pid, {
-                                  isHolidayWork: val > 0,
-                                  holidayWorkMinutes: val,
-                                  holidayWorkHours: Math.round((val / 60) * 10) / 10,
-                                });
-                              } else {
-                                onUpdateShiftDetails(dateStr, pid, {
-                                  overtimeMinutes: val,
-                                  overtimeHours: Math.round((val / 60) * 10) / 10,
-                                });
-                              }
-                            }
-                          }}
-                          className="w-16 px-2 py-1 rounded-lg border border-stone-300 bg-white font-extrabold text-center text-rose-600"
-                        />
-                        <span className="font-bold text-stone-600">分</span>
-                        <span className="text-[10px] text-stone-400 font-bold">
-                          {customInputVal && Number(customInputVal) > 0 ? `(${formatMinutesToJa(Number(customInputVal))})` : ''}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const val = Math.max(0, parseInt(customInputVal, 10) || 0);
-                            if (hwMin > 0 || shift?.isHolidayWork) {
-                              onUpdateShiftDetails(dateStr, pid, {
-                                isHolidayWork: val > 0,
-                                holidayWorkMinutes: val,
-                                holidayWorkHours: Math.round((val / 60) * 10) / 10,
-                              });
-                            } else {
-                              onUpdateShiftDetails(dateStr, pid, {
-                                overtimeMinutes: val,
-                                overtimeHours: Math.round((val / 60) * 10) / 10,
-                              });
-                            }
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-extrabold text-[10px] shadow-2xs active:scale-95 ml-auto"
-                        >
-                          ⏱️ 反映
-                        </button>
-                      </div>
+                            {/* ⚡ 開始〜終了時刻から自動計算トグルボタン */}
+                            <div className="flex items-center justify-between gap-1 pt-0.5">
+                              <button
+                                type="button"
+                                onClick={() => setShowCardCalc(!showCardCalc)}
+                                className={`px-2 py-1 rounded-lg font-extrabold text-[10px] border flex items-center gap-1 transition-all ${
+                                  showCardCalc
+                                    ? 'bg-rose-500 text-white border-rose-500 shadow-2xs'
+                                    : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                                }`}
+                              >
+                                <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
+                                <span>⚡ 時刻から自動計算（例: 11:00〜11:35 → 35分）</span>
+                                {showCardCalc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              </button>
+                            </div>
+
+                            {/* ⚡ インライン展開：開始・終了時刻から自動計算パネル */}
+                            {showCardCalc && (
+                              <div className="bg-gradient-to-r from-rose-50 via-amber-50/50 to-rose-50 p-2.5 rounded-xl border border-rose-200 shadow-2xs space-y-2 animate-pop text-[10px]">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-black text-rose-900 flex items-center gap-1">
+                                    <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                                    <span>残業の開始〜終了時刻を入力</span>
+                                  </span>
+                                  {shiftEnd && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCardStart(shiftEnd);
+                                        setCardEnd(shift?.overtimeEndTime || shiftEnd);
+                                      }}
+                                      className="px-2 py-0.5 rounded-md bg-white border border-rose-200 text-rose-700 font-bold text-[9px] hover:bg-rose-100"
+                                    >
+                                      💡 定時({shiftEnd})から開始
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-stone-200">
+                                    <span className="text-stone-400 font-bold text-[9px]">開始</span>
+                                    <input
+                                      type="time"
+                                      value={cardStart}
+                                      onChange={(e) => setCardStart(e.target.value)}
+                                      className="font-black text-xs text-stone-800 bg-transparent outline-none"
+                                    />
+                                  </div>
+                                  <span className="text-stone-400 font-black">〜</span>
+                                  <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-stone-200">
+                                    <span className="text-stone-400 font-bold text-[9px]">終了</span>
+                                    <input
+                                      type="time"
+                                      value={cardEnd}
+                                      onChange={(e) => setCardEnd(e.target.value)}
+                                      className="font-black text-xs text-stone-800 bg-transparent outline-none"
+                                    />
+                                  </div>
+
+                                  <span className="px-2 py-1 rounded-lg bg-rose-500 text-white font-black text-xs shadow-2xs">
+                                    ⚡ 自動計算: {cardDiffMin}分
+                                  </span>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCustomInputVal(String(cardDiffMin));
+                                      onUpdateShiftDetails(dateStr, pid, {
+                                        overtimeMinutes: cardDiffMin,
+                                        overtimeHours: Math.round((cardDiffMin / 60) * 10) / 10,
+                                        overtimeStartTime: cardStart,
+                                        overtimeEndTime: cardEnd,
+                                        isHolidayWork: false,
+                                        holidayWorkMinutes: 0,
+                                        holidayWorkHours: 0,
+                                      });
+                                      setShowCardCalc(false);
+                                    }}
+                                    className="px-3 py-1 rounded-lg bg-gradient-to-r from-rose-500 to-amber-500 text-white font-black text-xs shadow-xs active:scale-95 transition-all ml-auto"
+                                  >
+                                    ⏱️ この内容で反映
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* ワンタップ残業・休出ボタン（分単位：0分解除、15分、30分、35分、45分、60分、90分、120分） */}
+                            <div className="flex flex-wrap gap-1">
+                              {[
+                                { label: '0分解除', min: 0 },
+                                { label: '+15分', min: 15 },
+                                { label: '+30分', min: 30 },
+                                { label: '+35分', min: 35 },
+                                { label: '+45分', min: 45 },
+                                { label: '+60分(1h)', min: 60 },
+                                { label: '+90分(1.5h)', min: 90 },
+                                { label: '+120分(2h)', min: 120 },
+                              ].map((b) => (
+                                <button
+                                  key={b.min}
+                                  type="button"
+                                  onClick={() => {
+                                    setCustomInputVal(b.min > 0 ? String(b.min) : '');
+                                    onUpdateShiftDetails(dateStr, pid, {
+                                      overtimeMinutes: b.min,
+                                      overtimeHours: Math.round((b.min / 60) * 10) / 10,
+                                      isHolidayWork: false,
+                                      holidayWorkMinutes: 0,
+                                      holidayWorkHours: 0,
+                                    });
+                                  }}
+                                  className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
+                                    otMin === b.min && hwMin === 0 && b.min > 0
+                                      ? 'bg-rose-500 border-rose-500 text-white shadow-2xs scale-105'
+                                      : 'bg-white border-stone-200 text-stone-600'
+                                  }`}
+                                >
+                                  {b.min === 0 ? '✕ 0分' : b.label}
+                                </button>
+                              ))}
+                              {[
+                                { label: '💼休出4h(240分)', min: 240 },
+                                { label: '💼休出8h(480分)', min: 480 },
+                              ].map((hBtn) => (
+                                <button
+                                  key={hBtn.label}
+                                  type="button"
+                                  onClick={() => {
+                                    setCustomInputVal(String(hBtn.min));
+                                    onUpdateShiftDetails(dateStr, pid, {
+                                      isHolidayWork: true,
+                                      holidayWorkMinutes: hBtn.min,
+                                      holidayWorkHours: Math.round((hBtn.min / 60) * 10) / 10,
+                                      overtimeMinutes: 0,
+                                      overtimeHours: 0,
+                                    });
+                                  }}
+                                  className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
+                                    hwMin === hBtn.min
+                                      ? 'bg-amber-600 border-amber-600 text-white shadow-2xs scale-105'
+                                      : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
+                                  }`}
+                                >
+                                  {hBtn.label}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* 分単位の自由入力＋「反映」ボタン */}
+                            <div className="flex items-center gap-1.5 text-[11px] pt-0.5">
+                              <span className="text-stone-500 font-bold shrink-0">直接分数入力:</span>
+                              <input
+                                type="number"
+                                step="1"
+                                min="0"
+                                max="1440"
+                                placeholder="例: 35"
+                                value={customInputVal}
+                                onChange={(e) => setCustomInputVal(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    const val = Math.max(0, parseInt(customInputVal, 10) || 0);
+                                    onUpdateShiftDetails(dateStr, pid, {
+                                      overtimeMinutes: val,
+                                      overtimeHours: Math.round((val / 60) * 10) / 10,
+                                      isHolidayWork: false,
+                                      holidayWorkMinutes: 0,
+                                      holidayWorkHours: 0,
+                                    });
+                                  }
+                                }}
+                                className="w-16 px-2 py-1 rounded-lg border border-stone-300 bg-white font-extrabold text-center text-rose-600"
+                              />
+                              <span className="font-bold text-stone-600">分</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const val = Math.max(0, parseInt(customInputVal, 10) || 0);
+                                  onUpdateShiftDetails(dateStr, pid, {
+                                    overtimeMinutes: val,
+                                    overtimeHours: Math.round((val / 60) * 10) / 10,
+                                    isHolidayWork: false,
+                                    holidayWorkMinutes: 0,
+                                    holidayWorkHours: 0,
+                                  });
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-[10px] shadow-2xs active:scale-95 ml-auto"
+                              >
+                                ⏱️ 反映
+                              </button>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
 
                     {shift &&
