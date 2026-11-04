@@ -1303,6 +1303,7 @@ export const App: React.FC = () => {
           categories={activeCategories}
           onClose={() => closeNavLayer(() => setVoiceModalOpen(false))}
           onSaveEvent={handleSaveEvent}
+          onUpdateShiftDetails={handleUpdateShiftDetails}
         />
       )}
 
