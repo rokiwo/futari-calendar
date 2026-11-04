@@ -119,6 +119,15 @@ export interface PartnerProfile {
   lastSeenAt: string;     // ISO 8601
 }
 
+// 起動時お気に入り画像・ウェルカム画面設定
+export interface WelcomeImageConfig {
+  enabled: boolean;          // 起動時に表示するかどうか
+  dataUrl?: string;          // Base64画像データ または 画像URL
+  message?: string;          // 表示メッセージ（例：「今日も1日お疲れ様💕」）
+  mode?: 'always' | 'daily'; // 'always'=毎回 / 'daily'=1日1回
+  lastShownDate?: string;    // 最終表示日付 "YYYY-MM-DD"
+}
+
 export interface CoupleMetadata {
   partners: {
     partnerA: PartnerProfile;
@@ -126,6 +135,7 @@ export interface CoupleMetadata {
   };
   lastSyncedAt: string;
   updatedAt?: string;
+  welcomeImageConfig?: WelcomeImageConfig;
 }
 
 // カレンダー全体の保存データストア構造（Conflict-Free Merge対応）
