@@ -478,8 +478,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                           const hwA = getShiftHolidayWorkMinutes(actA);
                           if (otA === 0 && hwA === 0) return null;
                           return (
-                            <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
-                              {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `+${formatMinutesShort(otA)}`}
+                            <span className="px-1 rounded bg-rose-500 text-white text-[10px] font-black">
+                              {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `+残${formatMinutesShort(otA)}`}
                             </span>
                           );
                         })()}
@@ -505,8 +505,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                           const hwB = getShiftHolidayWorkMinutes(actB);
                           if (otB === 0 && hwB === 0) return null;
                           return (
-                            <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
-                              {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `+${formatMinutesShort(otB)}`}
+                            <span className="px-1 rounded bg-rose-500 text-white text-[10px] font-black">
+                              {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `+残${formatMinutesShort(otB)}`}
                             </span>
                           );
                         })()}
