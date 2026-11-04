@@ -13,6 +13,9 @@ import {
   Check,
   KeyRound,
   FolderGit2,
+  Camera,
+  Eye,
+  Trash2,
 } from 'lucide-react';
 import {
   CalendarCategoryId,
@@ -21,6 +24,7 @@ import {
   EncryptedPayload,
   PartnerId,
   ScheduleEvent,
+  WelcomeImageConfig,
 } from '../types/calendar';
 import { decryptCalendarStore, encryptCalendarStore } from '../utils/crypto';
 import { exportToIcs, IcsExportTarget, parseIcsEvents } from '../utils/ical';
@@ -47,9 +51,11 @@ interface SettingsAndSyncModalProps {
     partnerBName: string,
     partnerBAvatar: string
   ) => void;
+  onUpdateWelcomeImageConfig?: (config: WelcomeImageConfig) => void;
+  onPreviewWelcomeImage?: (config: WelcomeImageConfig) => void;
 }
 
-type SettingsTab = 'sync' | 'ical_backup' | 'profile';
+type SettingsTab = 'sync' | 'ical_backup' | 'profile' | 'welcome_image';
 
 const AVATAR_CHOICES = ['🐻', '🐰', '🐱', '🐶', '🦊', '🐼', '🐨', '🦁', '🐥', '🐧', '🧑', '👩', '🤵', '👰'];
 
@@ -68,6 +74,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   onClearAllShifts,
   onClearAllData,
   onUpdatePartnerProfiles,
+  onUpdateWelcomeImageConfig,
+  onPreviewWelcomeImage,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('sync');
 
@@ -91,6 +99,18 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   const [nameB, setNameB] = useState(store.metadata.partners.partnerB.name);
   const [avatarB, setAvatarB] = useState(store.metadata.partners.partnerB.avatar);
 
+  // 起動時お気に入り写真設定状態
+  const initialWelcome = store.metadata.welcomeImageConfig || {
+    enabled: true,
+    dataUrl: '',
+    message: '今日も一日お疲れ様💕',
+    mode: 'always',
+  };
+  const [welcomeEnabled, setWelcomeEnabled] = useState(initialWelcome.enabled);
+  const [welcomeDataUrl, setWelcomeDataUrl] = useState(initialWelcome.dataUrl || '');
+  const [welcomeMessage, setWelcomeMessage] = useState(initialWelcome.message || '今日も一日お疲れ様💕');
+  const [welcomeMode, setWelcomeMode] = useState<'always' | 'daily'>(initialWelcome.mode || 'always');
+
   // iCal設定状態
   const [icsExportTarget, setIcsExportTarget] = useState<IcsExportTarget>('all');
   const [icsImportCategory, setIcsImportCategory] = useState<CalendarCategoryId>('shared');
@@ -102,6 +122,64 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
   const icsFileInputRef = useRef<HTMLInputElement>(null);
   const jsonRestoreInputRef = useRef<HTMLInputElement>(null);
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSelectWelcomeImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const rawDataUrl = event.target?.result as string;
+      if (!rawDataUrl) return;
+
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1200;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', 0.82);
+          setWelcomeDataUrl(compressed);
+          setWelcomeEnabled(true);
+        } else {
+          setWelcomeDataUrl(rawDataUrl);
+          setWelcomeEnabled(true);
+        }
+      };
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveWelcomeConfig = () => {
+    const newConfig: WelcomeImageConfig = {
+      enabled: welcomeEnabled,
+      dataUrl: welcomeDataUrl,
+      message: welcomeMessage.trim() || '今日も一日お疲れ様💕',
+      mode: welcomeMode,
+      lastShownDate: store.metadata.welcomeImageConfig?.lastShownDate,
+    };
+    onUpdateWelcomeImageConfig?.(newConfig);
+    setStatusMsg({
+      type: 'ok',
+      text: '📸 起動時のお気に入り写真・ウェルカム設定を保存しました✨',
+    });
+  };
 
   const buildCurrentConfig = (overrideGistId?: string): CloudSyncConfig => ({
     enabled: Boolean(githubToken.trim() && (mode === 'repo' ? repoOwner.trim() : (overrideGistId ?? gistId).trim())),
@@ -432,21 +510,21 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
         </div>
 
         {/* タブバー */}
-        <div className="grid grid-cols-3 gap-1 bg-white px-4 pt-2 pb-2 border-b border-stone-100">
+        <div className="grid grid-cols-4 gap-1 bg-white px-2 sm:px-4 pt-2 pb-2 border-b border-stone-100">
           <button
             type="button"
             onClick={() => {
               setActiveTab('sync');
               setStatusMsg(null);
             }}
-            className={`py-2 px-2 rounded-2xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all ${
+            className={`py-2 px-1 rounded-2xl text-[10px] sm:text-xs font-extrabold flex items-center justify-center gap-1 transition-all ${
               activeTab === 'sync'
                 ? 'bg-[#FFE5EC] text-[#9E2A47] shadow-2xs'
                 : 'text-stone-500 hover:bg-stone-50'
             }`}
           >
-            <Cloud className="w-4 h-4" />
-            <span>📲 かんたん夫婦共有</span>
+            <Cloud className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="truncate">📲 夫婦共有</span>
           </button>
 
           <button
@@ -455,14 +533,14 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
               setActiveTab('ical_backup');
               setStatusMsg(null);
             }}
-            className={`py-2 px-2 rounded-2xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all ${
+            className={`py-2 px-1 rounded-2xl text-[10px] sm:text-xs font-extrabold flex items-center justify-center gap-1 transition-all ${
               activeTab === 'ical_backup'
                 ? 'bg-[#E2F9FC] text-[#136370] shadow-2xs'
                 : 'text-stone-500 hover:bg-stone-50'
             }`}
           >
-            <Calendar className="w-4 h-4" />
-            <span>📅 カレンダー連携</span>
+            <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="truncate">📅 カレンダー</span>
           </button>
 
           <button
@@ -471,14 +549,30 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
               setActiveTab('profile');
               setStatusMsg(null);
             }}
-            className={`py-2 px-2 rounded-2xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all ${
+            className={`py-2 px-1 rounded-2xl text-[10px] sm:text-xs font-extrabold flex items-center justify-center gap-1 transition-all ${
               activeTab === 'profile'
                 ? 'bg-[#F3EAFF] text-[#59318F] shadow-2xs'
                 : 'text-stone-500 hover:bg-stone-50'
             }`}
           >
-            <Users className="w-4 h-4" />
-            <span>👫 ふたりの設定</span>
+            <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="truncate">👫 ふたり設定</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('welcome_image');
+              setStatusMsg(null);
+            }}
+            className={`py-2 px-1 rounded-2xl text-[10px] sm:text-xs font-extrabold flex items-center justify-center gap-1 transition-all ${
+              activeTab === 'welcome_image'
+                ? 'bg-[#FFF0F5] text-rose-600 shadow-2xs'
+                : 'text-stone-500 hover:bg-stone-50'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500 shrink-0" />
+            <span className="truncate">📸 起動フォト</span>
           </button>
         </div>
 
@@ -1140,7 +1234,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   onUpdatePartnerProfiles(
                     nameA.trim() || '夫',
                     avatarA || '🐻',
-                    nameB.trim() || '妻',
+                    nameB.trim() || 'さや',
                     avatarB || '🐰'
                   );
                   setStatusMsg({
@@ -1152,6 +1246,200 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
               >
                 プロフィールを保存する
               </button>
+            </div>
+          )}
+
+          {/* タブ4：📸 起動時のお気に入り写真・ウェルカム設定 */}
+          {activeTab === 'welcome_image' && (
+            <div className="bg-white rounded-2xl p-4 border border-stone-200/90 space-y-4 shadow-2xs">
+              <div>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-extrabold text-stone-800 flex items-center gap-1.5">
+                    <span>📸</span>
+                    <span>起動時のお気に入り写真・ウェルカム設定</span>
+                  </h3>
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <span className="text-[11px] font-bold text-stone-600">起動時に表示:</span>
+                    <input
+                      type="checkbox"
+                      checked={welcomeEnabled}
+                      onChange={(e) => setWelcomeEnabled(e.target.checked)}
+                      className="w-4 h-4 rounded text-rose-500 focus:ring-rose-400"
+                    />
+                  </label>
+                </div>
+                <p className="text-stone-500 text-[11px] mt-1 leading-relaxed">
+                  ペアカレを起動した際に、設定したふたりの写真や大切な思い出の写真、その日のふたりのシフトがウェルカム画面としてパッと表示されます💕
+                </p>
+              </div>
+
+              {/* 写真選択＆プレビュー */}
+              <div className="p-3 rounded-2xl bg-[#FFF9FB] border border-pink-200/80 space-y-3">
+                <input
+                  ref={imageFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleSelectWelcomeImage}
+                  className="hidden"
+                />
+
+                {welcomeDataUrl ? (
+                  <div className="space-y-2.5">
+                    <div className="relative rounded-2xl overflow-hidden border-2 border-pink-200 max-h-56 bg-black flex items-center justify-center">
+                      <img
+                        src={welcomeDataUrl}
+                        alt="設定中のお気に入り写真"
+                        className="w-full h-56 object-cover"
+                      />
+                      <div className="absolute top-2 right-2 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onPreviewWelcomeImage) {
+                              onPreviewWelcomeImage({
+                                enabled: welcomeEnabled,
+                                dataUrl: welcomeDataUrl,
+                                message: welcomeMessage,
+                                mode: welcomeMode,
+                              });
+                            }
+                          }}
+                          className="px-2.5 py-1 rounded-xl bg-black/60 hover:bg-black/80 text-white text-[11px] font-black flex items-center gap-1 shadow-md"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>プレビュー</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => imageFileInputRef.current?.click()}
+                        className="flex-1 py-2 px-3 rounded-xl bg-white border border-stone-200 hover:bg-stone-50 text-stone-700 font-extrabold text-xs shadow-2xs flex items-center justify-center gap-1.5"
+                      >
+                        <Camera className="w-4 h-4 text-rose-500" />
+                        <span>別の写真に変更する</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWelcomeDataUrl('');
+                          setWelcomeEnabled(false);
+                        }}
+                        className="py-2 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-extrabold text-xs flex items-center justify-center gap-1"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>写真を削除</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-6 px-4 space-y-3">
+                    <div className="w-16 h-16 rounded-full bg-[#FFE5EC] text-rose-500 flex items-center justify-center mx-auto text-2xl shadow-inner">
+                      📸
+                    </div>
+                    <div>
+                      <div className="font-extrabold text-stone-800 text-xs sm:text-sm">
+                        お気に入りの写真がまだ選ばれていません
+                      </div>
+                      <p className="text-[11px] text-stone-400 mt-0.5">
+                        スマホの写真アルバムやカメラから画像を選んでください
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => imageFileInputRef.current?.click()}
+                      className="py-2.5 px-5 rounded-2xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] hover:from-[#FF758F] hover:to-[#9E6EE6] text-white font-black text-xs shadow-md active:scale-95 transition-all inline-flex items-center gap-1.5"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>📁 スマホの写真から選ぶ</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* 表示モード＆メッセージ設定 */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-stone-600 mb-1">
+                    💬 写真の上に添えるメッセージ
+                  </label>
+                  <input
+                    type="text"
+                    value={welcomeMessage}
+                    onChange={(e) => setWelcomeMessage(e.target.value)}
+                    placeholder="例: 今日も一日お疲れ様💕 / おかえりなさい🐻🐰"
+                    className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white font-extrabold text-xs sm:text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-stone-600 mb-1">
+                    ⏱️ 表示するタイミング
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setWelcomeMode('always')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        welcomeMode === 'always'
+                          ? 'bg-[#FFE5EC] border-rose-300 text-[#9E2A47] font-black shadow-2xs'
+                          : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50 font-bold'
+                      }`}
+                    >
+                      <div className="text-xs">毎回表示</div>
+                      <div className="text-[10px] opacity-75 mt-0.5">アプリを開くたびに出す</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setWelcomeMode('daily')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        welcomeMode === 'daily'
+                          ? 'bg-[#FFE5EC] border-rose-300 text-[#9E2A47] font-black shadow-2xs'
+                          : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50 font-bold'
+                      }`}
+                    >
+                      <div className="text-xs">1日1回だけ</div>
+                      <div className="text-[10px] opacity-75 mt-0.5">今日最初の起動時のみ</div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 保存＆プレビューボタン */}
+              <div className="pt-2 flex items-center gap-2">
+                {welcomeDataUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onPreviewWelcomeImage) {
+                        onPreviewWelcomeImage({
+                          enabled: welcomeEnabled,
+                          dataUrl: welcomeDataUrl,
+                          message: welcomeMessage,
+                          mode: welcomeMode,
+                        });
+                      }
+                    }}
+                    className="py-3 px-4 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span>プレビュー確認</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleSaveWelcomeConfig}
+                  className="flex-1 py-3 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white font-extrabold text-sm shadow-sm transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>お気に入り写真設定を保存</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
