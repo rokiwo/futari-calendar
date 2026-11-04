@@ -8,7 +8,13 @@ import {
   ShiftEntry,
   StampPreset,
 } from '../types/calendar';
-import { getJapaneseHoliday, resolveCategoryInfo } from '../utils/presets';
+import {
+  formatMinutesShort,
+  getJapaneseHoliday,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
+  resolveCategoryInfo,
+} from '../utils/presets';
 
 interface MonthlyCalendarGridProps {
   year: number;
@@ -217,9 +223,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     const subStamp = shift?.subStampId ? stampMap.get(shift.subStampId) : undefined;
     const subLabel = shift?.subCustomLabel || subStamp?.shortLabel || '';
     const hasSubWork = Boolean(shift?.subCustomLabel || subStamp);
-    const overtime = shift?.overtimeHours || 0;
-    const holWork = shift?.holidayWorkHours || 0;
-    const hasExtra = hasSubWork || overtime > 0 || holWork > 0;
+    const otMin = getShiftOvertimeMinutes(shift);
+    const hwMin = getShiftHolidayWorkMinutes(shift);
+    const hasExtra = hasSubWork || otMin > 0 || hwMin > 0;
 
     const timeInfo =
       shift?.startTime || stamp?.startTime
@@ -260,10 +266,10 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           </div>
         )}
 
-        {/* 残業時間・休日出勤時間のバッジ表示 */}
-        {(overtime > 0 || holWork > 0) && (
-          <div className="w-full mt-[1px] px-0.5 rounded-xs bg-rose-500 text-white text-[8.5px] sm:text-[8.5px] font-black text-center truncate leading-tight">
-            {holWork > 0 ? `休${holWork}h` : `残+${overtime}h`}
+        {/* 残業時間・休日出勤時間のバッジ表示（分単位対応） */}
+        {(otMin > 0 || hwMin > 0) && (
+          <div className="w-full mt-[1px] px-0.5 rounded-xs bg-rose-500 text-white text-[8px] sm:text-[8.5px] font-black text-center truncate leading-tight">
+            {hwMin > 0 ? `休${formatMinutesShort(hwMin)}` : `残${formatMinutesShort(otMin)}`}
           </div>
         )}
 
@@ -467,13 +473,16 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                             +🏪{actA.subCustomLabel || 'バイト'}
                           </span>
                         )}
-                        {((actA?.overtimeHours || 0) > 0 || (actA?.holidayWorkHours || 0) > 0) && (
-                          <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
-                            {(actA?.holidayWorkHours || 0) > 0
-                              ? `休出${actA?.holidayWorkHours}h`
-                              : `+${actA?.overtimeHours}h`}
-                          </span>
-                        )}
+                        {(() => {
+                          const otA = getShiftOvertimeMinutes(actA);
+                          const hwA = getShiftHolidayWorkMinutes(actA);
+                          if (otA === 0 && hwA === 0) return null;
+                          return (
+                            <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
+                              {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `+${formatMinutesShort(otA)}`}
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       <div
@@ -491,13 +500,16 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                             +🏪{actB.subCustomLabel || 'バイト'}
                           </span>
                         )}
-                        {((actB?.overtimeHours || 0) > 0 || (actB?.holidayWorkHours || 0) > 0) && (
-                          <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
-                            {(actB?.holidayWorkHours || 0) > 0
-                              ? `休出${actB?.holidayWorkHours}h`
-                              : `+${actB?.overtimeHours}h`}
-                          </span>
-                        )}
+                        {(() => {
+                          const otB = getShiftOvertimeMinutes(actB);
+                          const hwB = getShiftHolidayWorkMinutes(actB);
+                          if (otB === 0 && hwB === 0) return null;
+                          return (
+                            <span className="px-1 rounded bg-rose-500 text-white text-[10px]">
+                              {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `+${formatMinutesShort(otB)}`}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -788,8 +800,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
                   selStampA
                     ? ''
-                    : Number(activeSelShiftA?.overtimeHours || 0) > 0 ||
-                      Number(activeSelShiftA?.holidayWorkHours || 0) > 0 ||
+                    : getShiftOvertimeMinutes(activeSelShiftA) > 0 ||
+                      getShiftHolidayWorkMinutes(activeSelShiftA) > 0 ||
                       activeSelShiftA?.subCustomLabel
                     ? 'bg-rose-50 text-rose-900 border border-rose-200'
                     : 'bg-stone-100 text-stone-400'
@@ -806,14 +818,16 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                     +🏪{activeSelShiftA.subCustomLabel}
                   </span>
                 )}
-                {(Number(activeSelShiftA?.overtimeHours || 0) > 0 ||
-                  Number(activeSelShiftA?.holidayWorkHours || 0) > 0) && (
-                  <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
-                    {Number(activeSelShiftA?.holidayWorkHours || 0) > 0
-                      ? `休出${activeSelShiftA?.holidayWorkHours}h`
-                      : `残業+${activeSelShiftA?.overtimeHours}h`}
-                  </span>
-                )}
+                {(() => {
+                  const otA = getShiftOvertimeMinutes(activeSelShiftA);
+                  const hwA = getShiftHolidayWorkMinutes(activeSelShiftA);
+                  if (otA === 0 && hwA === 0) return null;
+                  return (
+                    <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
+                      {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `残業+${formatMinutesShort(otA)}`}
+                    </span>
+                  );
+                })()}
               </div>
 
               <div
@@ -825,8 +839,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
                   selStampB
                     ? ''
-                    : Number(activeSelShiftB?.overtimeHours || 0) > 0 ||
-                      Number(activeSelShiftB?.holidayWorkHours || 0) > 0 ||
+                    : getShiftOvertimeMinutes(activeSelShiftB) > 0 ||
+                      getShiftHolidayWorkMinutes(activeSelShiftB) > 0 ||
                       activeSelShiftB?.subCustomLabel
                     ? 'bg-rose-50 text-rose-900 border border-rose-200'
                     : 'bg-stone-100 text-stone-400'
@@ -843,14 +857,16 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                     +🏪{activeSelShiftB.subCustomLabel}
                   </span>
                 )}
-                {(Number(activeSelShiftB?.overtimeHours || 0) > 0 ||
-                  Number(activeSelShiftB?.holidayWorkHours || 0) > 0) && (
-                  <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
-                    {Number(activeSelShiftB?.holidayWorkHours || 0) > 0
-                      ? `休出${activeSelShiftB?.holidayWorkHours}h`
-                      : `残業+${activeSelShiftB?.overtimeHours}h`}
-                  </span>
-                )}
+                {(() => {
+                  const otB = getShiftOvertimeMinutes(activeSelShiftB);
+                  const hwB = getShiftHolidayWorkMinutes(activeSelShiftB);
+                  if (otB === 0 && hwB === 0) return null;
+                  return (
+                    <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
+                      {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `残業+${formatMinutesShort(otB)}`}
+                    </span>
+                  );
+                })()}
               </div>
             </div>
 
