@@ -613,17 +613,20 @@ export const App: React.FC = () => {
     [activePartner, commitStore, store]
   );
 
-  // 月間カレンダーの日付セルを「シングルタップ」した時の処理（その日に選択移動。勝手にスタンプされるバグを防止）
+  // 月間カレンダーの日付セルを「シングルタップ」した時の処理（その日に選択移動。勝手にスタンプされるバグを完全に防止）
   const handleCellSingleTap = useCallback(
     (dateStr: string) => {
       setSelectedDate(dateStr);
-      const [ny, nm] = dateStr.split('-').map(Number);
+      const [ny, nm, nd] = dateStr.split('-').map(Number);
       if (ny !== year || nm !== month) {
         setYear(ny);
         setMonth(nm);
       }
+      if (stampDrawerOpen) {
+        showToast(`🎯 ${nm}/${nd} を選択中（下のボタンでシフト入力できます）`);
+      }
     },
-    [month, year]
+    [month, showToast, stampDrawerOpen, year]
   );
 
   // 月間カレンダーの日付セルを「ダブルタップ」した時の処理（TimeTree風：その日のすべての予定を表示）
