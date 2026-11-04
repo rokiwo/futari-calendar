@@ -46,6 +46,7 @@ import { CategoryManagerModal } from './components/CategoryManagerModal';
 import { ExportPartnerMode, ShiftExportModal } from './components/ShiftExportModal';
 import { TaskManagerModal } from './components/TaskManagerModal';
 import { WelcomeImageModal } from './components/WelcomeImageModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // 日付文字列 "YYYY-MM-DD" に deltaDays 日を加算した "YYYY-MM-DD" を返す
 function addDaysToDateStr(dateStr: string, deltaDays: number): string {
@@ -1318,30 +1319,40 @@ export const App: React.FC = () => {
 
       {/* 日付詳細＆シフト・予定・タスクモーダル */}
       {dayDetailOpen && (
-        <DayDetailModal
-          dateStr={selectedDate}
-          store={store}
-          activePartner={activePartner}
-          initialOpenEventForm={openEventFormDirectly}
-          onClose={() =>
+        <ErrorBoundary
+          fallbackTitle={`${selectedDate} の予定・シフト表示中に一時的なエラーが発生しました`}
+          onReset={() =>
             closeNavLayer(() => {
               setDayDetailOpen(false);
               setOpenEventFormDirectly(false);
             })
           }
-          onMoveDate={moveSelectedDate}
-          onSetShiftAndAdvance={handleSetShiftAndAdvance}
-          onUpdateShiftDetails={handleUpdateShiftDetails}
-          onToggleDaySupportBadge={handleToggleDaySupportBadge}
-          onSaveEvent={handleSaveEvent}
-          onToggleTaskComplete={handleToggleTaskComplete}
-          onDeleteEvent={handleDeleteEvent}
-          onOpenVoiceModal={() => openVoiceModal(selectedDate)}
-          onOpenShiftStampManager={(pid) => {
-            openShiftManagerModal(pid || activePartner);
-          }}
-          onOpenCategoryManager={openCategoryManagerModal}
-        />
+        >
+          <DayDetailModal
+            dateStr={selectedDate}
+            store={store}
+            activePartner={activePartner}
+            initialOpenEventForm={openEventFormDirectly}
+            onClose={() =>
+              closeNavLayer(() => {
+                setDayDetailOpen(false);
+                setOpenEventFormDirectly(false);
+              })
+            }
+            onMoveDate={moveSelectedDate}
+            onSetShiftAndAdvance={handleSetShiftAndAdvance}
+            onUpdateShiftDetails={handleUpdateShiftDetails}
+            onToggleDaySupportBadge={handleToggleDaySupportBadge}
+            onSaveEvent={handleSaveEvent}
+            onToggleTaskComplete={handleToggleTaskComplete}
+            onDeleteEvent={handleDeleteEvent}
+            onOpenVoiceModal={() => openVoiceModal(selectedDate)}
+            onOpenShiftStampManager={(pid) => {
+              openShiftManagerModal(pid || activePartner);
+            }}
+            onOpenCategoryManager={openCategoryManagerModal}
+          />
+        </ErrorBoundary>
       )}
 
       {/* 🗂️ カレンダー予定項目の追加・削除モーダル（デフォ：二人予定・夫予定・妻予定） */}
