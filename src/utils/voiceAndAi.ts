@@ -30,7 +30,9 @@ export interface ParsedVoiceSchedule {
   categoryId: CalendarCategoryId;
   supportBadges: string[];
   shiftLabel?: string;    // 「12日は夜勤」のようにシフトを話した場合
+  overtimeMinutes?: number; // 「35分残業」「1時間20分残業」など分単位
   overtimeHours?: number; // 「残業2時間」など残業時間（h）
+  holidayWorkMinutes?: number; // 休日出勤（分単位）
   holidayWorkHours?: number; // 「休日出勤4時間」など休出時間（h）
   targetPartner?: PartnerId; // 「夫が」「妻が」など対象パートナー
 }
@@ -160,39 +162,56 @@ export function parseSpokenScheduleText(
     text = text.replace(/(お迎えお願い|迎えに来て)/g, ' ');
   }
 
-  // 4. 残業時間・休日出勤時間の解析
+  // 4. 残業時間・休日出勤時間の解析（分単位対応：35分、45分、1時間20分など）
+  let overtimeMinutes: number | undefined;
   let overtimeHours: number | undefined;
+  let holidayWorkMinutes: number | undefined;
   let holidayWorkHours: number | undefined;
 
   const otMatch1 = text.match(/残業(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
   const otMatch2 = text.match(/(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)\s*(?:の)?残業/);
-  const otMatchMinutes = text.match(/(?:残業\s*)?30\s*分(?:の残業)?/);
+  const otHoursAndMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(\d+)\s*時間(?:半|(\d+)\s*分)?(?:の残業)?/);
+  const otMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(\d+)\s*分(?:の残業)?/);
 
   if (text.includes('1時間半残業') || text.includes('残業1時間半') || text.includes('残業一時間半')) {
-    overtimeHours = 1.5;
+    overtimeMinutes = 90;
   } else if (text.includes('2時間半残業') || text.includes('残業2時間半')) {
-    overtimeHours = 2.5;
-  } else if (text.includes('30分残業') || text.includes('残業30分')) {
-    overtimeHours = 0.5;
+    overtimeMinutes = 150;
+  } else if (/残業/.test(text) && otHoursAndMinutesMatch) {
+    const h = parseInt(otHoursAndMinutesMatch[1], 10);
+    const m = otHoursAndMinutesMatch[0].includes('半')
+      ? 30
+      : otHoursAndMinutesMatch[2]
+      ? parseInt(otHoursAndMinutesMatch[2], 10)
+      : 0;
+    overtimeMinutes = h * 60 + m;
+  } else if (/残業/.test(text) && otMinutesMatch) {
+    overtimeMinutes = parseInt(otMinutesMatch[1], 10);
   } else if (otMatch1) {
-    overtimeHours = parseFloat(otMatch1[1]);
-    if (otMatch1[0].includes('時間半')) overtimeHours += 0.5;
+    const h = parseFloat(otMatch1[1]);
+    const extra = otMatch1[0].includes('時間半') ? 0.5 : 0;
+    overtimeMinutes = Math.round((h + extra) * 60);
   } else if (otMatch2) {
-    overtimeHours = parseFloat(otMatch2[1]);
-    if (otMatch2[0].includes('時間半')) overtimeHours += 0.5;
-  } else if (otMatchMinutes) {
-    overtimeHours = 0.5;
-  } else if (/残業/.test(text) && !overtimeHours) {
+    const h = parseFloat(otMatch2[1]);
+    const extra = otMatch2[0].includes('時間半') ? 0.5 : 0;
+    overtimeMinutes = Math.round((h + extra) * 60);
+  } else if (/残業/.test(text) && !overtimeMinutes) {
     // 時間指定のない「残業」の場合はデフォルト1時間をセット
     const simpleDigit = text.match(/(\d+(?:\.\d+)?)/);
-    overtimeHours = simpleDigit ? parseFloat(simpleDigit[1]) : 1;
+    overtimeMinutes = simpleDigit ? Math.round(parseFloat(simpleDigit[1]) * 60) : 60;
+  }
+
+  if (overtimeMinutes !== undefined) {
+    overtimeHours = Math.round((overtimeMinutes / 60) * 10) / 10;
   }
 
   const holMatch = text.match(/(?:休日出勤|休出)(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
   if (holMatch) {
     holidayWorkHours = parseFloat(holMatch[1]);
+    holidayWorkMinutes = Math.round(holidayWorkHours * 60);
   } else if (/休日出勤|休出/.test(text)) {
     holidayWorkHours = 8;
+    holidayWorkMinutes = 480;
   }
 
   // 5. 対象パートナーの自動推測（「夫が」「妻が」「パパが」「ママが」）
@@ -222,8 +241,10 @@ export function parseSpokenScheduleText(
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (overtimeHours && (!cleanedTitle || cleanedTitle === '残業')) {
-    cleanedTitle = `残業 +${overtimeHours}h`;
+  if (overtimeMinutes && (!cleanedTitle || cleanedTitle === '残業')) {
+    const h = Math.floor(overtimeMinutes / 60);
+    const m = overtimeMinutes % 60;
+    cleanedTitle = h === 0 ? `残業 +${m}分` : m === 0 ? `残業 +${h}h` : `残業 +${h}h${m}m`;
   } else if (holidayWorkHours && (!cleanedTitle || cleanedTitle === '休日出勤' || cleanedTitle === '休出')) {
     cleanedTitle = `休日出勤 ${holidayWorkHours}h`;
   }
@@ -236,7 +257,9 @@ export function parseSpokenScheduleText(
     endTime,
     categoryId,
     supportBadges,
+    overtimeMinutes,
     overtimeHours,
+    holidayWorkMinutes,
     holidayWorkHours,
     targetPartner,
   };
