@@ -70,7 +70,7 @@ export const PasscodeModal: React.FC<PasscodeModalProps> = ({
             AES-GCM 256bit 暗号化保護
           </div>
           <h1 className="text-2xl font-extrabold text-stone-800 tracking-tight">
-            ふたりカレ <span className="text-[#FF8FAB] font-bold text-lg">FutariCal</span>
+            ペアカレ <span className="text-[#FF8FAB] font-bold text-lg">PairCal</span>
           </h1>
           <p className="text-xs sm:text-sm text-stone-500 mt-1">
             {hasSavedPasscode
