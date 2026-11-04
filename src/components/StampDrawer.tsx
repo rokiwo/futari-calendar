@@ -32,6 +32,8 @@ interface StampDrawerProps {
   onSelectStamp: (stampId: string | null) => void;
   selectedDate: string;
   onMoveDate: (deltaDays: number) => void;
+  autoAdvance: boolean;
+  onToggleAutoAdvance: (next: boolean) => void;
   onApplyShiftAndAdvance: (stamp: StampPreset, targetPartner: PartnerId) => void;
   onClearShiftAndAdvance: (targetPartner: PartnerId) => void;
   onUpdateShiftDetailsOnSelectedDate: (
@@ -59,6 +61,8 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   onSelectStamp,
   selectedDate,
   onMoveDate,
+  autoAdvance,
+  onToggleAutoAdvance,
   onApplyShiftAndAdvance,
   onClearShiftAndAdvance,
   onUpdateShiftDetailsOnSelectedDate,
@@ -152,9 +156,9 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 bg-white/98 backdrop-blur-md rounded-t-3xl shadow-2xl border-t-2 border-[#FF8FAB] pb-[env(safe-area-inset-bottom)] animate-pop">
-      <div className="max-w-xl mx-auto px-3 pt-2.5 pb-3 space-y-2">
-        {/* 1. ドロワー上部：選択日表示（1つ入れたら自動で次へ移動）＆ シフト種類編集ボタン */}
-        <div className="flex items-center justify-between gap-1.5 border-b border-stone-100 pb-2">
+      <div className="max-w-xl mx-auto px-3 pt-2 pb-2.5 space-y-1.5">
+        {/* 1. ドロワー上部：選択日表示（カレンダーの日付タップで自由移動）＆ 連続翌日移動ON/OFF ＆ シフト種類編集 */}
+        <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-stone-100 pb-1.5">
           <div className="flex items-center gap-1 bg-[#FFF0F5] px-2 py-1 rounded-2xl border border-[#FFC2D1]">
             <button
               type="button"
@@ -167,9 +171,9 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             <button
               type="button"
               onClick={onOpenDayDetail}
-              className="px-2 text-xs sm:text-sm font-extrabold text-[#9E2A47]"
+              className="px-1.5 text-xs sm:text-sm font-extrabold text-[#9E2A47]"
             >
-              🎯 {formatSelectedDate(selectedDate)} に入力中⏩
+              🎯 {formatSelectedDate(selectedDate)}
             </button>
             <button
               type="button"
@@ -181,14 +185,27 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onToggleAutoAdvance(!autoAdvance)}
+              className={`px-2 py-1.5 rounded-2xl text-[11px] font-extrabold transition-all border ${
+                autoAdvance
+                  ? 'bg-[#E2F9FC] border-[#56CFE1] text-[#136370]'
+                  : 'bg-stone-100 border-stone-300 text-stone-600'
+              }`}
+              title="シフトボタンを押したあとに自動で翌日に進むかどうかを切り替えます"
+            >
+              {autoAdvance ? '⏩ 連続翌日移動:ON' : '📌 同日留まり:OFF'}
+            </button>
+
             <button
               type="button"
               onClick={() => onOpenShiftStampManager(currentShiftPartner)}
-              className="px-2.5 py-1.5 rounded-2xl bg-[#FFE5EC] hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-xs font-extrabold transition-colors flex items-center gap-1 shadow-2xs"
+              className="px-2 py-1.5 rounded-2xl bg-[#FFE5EC] hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-[11px] font-extrabold transition-colors flex items-center gap-1 shadow-2xs"
             >
               <Settings2 className="w-3.5 h-3.5" />
-              <span>勤務リストの追加・編集</span>
+              <span>勤務リスト編集</span>
             </button>
 
             <button
@@ -200,6 +217,10 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        <div className="text-[10px] font-bold text-stone-500 flex items-center justify-between px-1">
+          <span>💡 カレンダーの数字をタップするとその日へ移動し、下のボタンでシフトが入ります</span>
         </div>
 
         {/* 2. 対象切替タブ：[🐻夫のシフト] [🐰妻のシフト] [🍳ごはん・お迎え目印] */}
