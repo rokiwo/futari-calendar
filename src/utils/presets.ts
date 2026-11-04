@@ -711,16 +711,33 @@ export function formatMinutesToJa(minutes: number): string {
 }
 
 /**
- * 分数を短縮形式に変換（例: 35 -> "35分", 90 -> "1h30m", 120 -> "2h"）
+ * 分数を「◯◯分」形式の純粋な分数文字列に変換（ユーザー要望：1時間を60分として◯◯分のみ表示）
+ * 例: 35 -> "35分", 90 -> "90分", 120 -> "120分", 335 -> "335分"
+ */
+export function formatMinutesOnly(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes || 0));
+  return `${m}分`;
+}
+
+/**
+ * 分数を「◯◯分 (◯時間◯分)」形式に変換（分数を最優先しつつ時間も併記）
+ * 例: 35 -> "35分", 90 -> "90分 (1時間30分)", 120 -> "120分 (2時間)"
+ */
+export function formatMinutesWithJa(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes || 0));
+  if (m === 0) return '0分';
+  if (m < 60) return `${m}分`;
+  return `${m}分 (${formatMinutesToJa(m)})`;
+}
+
+/**
+ * 分数を短縮・コンパクト形式に変換（マス目・バッジ用：分単位を常に明瞭表示）
+ * 例: 35 -> "35分", 90 -> "90分", 120 -> "120分"
  */
 export function formatMinutesShort(minutes: number): string {
   const m = Math.max(0, Math.round(minutes || 0));
   if (m === 0) return '0分';
-  const hours = Math.floor(m / 60);
-  const mins = m % 60;
-  if (hours === 0) return `${mins}分`;
-  if (mins === 0) return `${hours}h`;
-  return `${hours}h${mins}m`;
+  return `${m}分`;
 }
 
 /**
