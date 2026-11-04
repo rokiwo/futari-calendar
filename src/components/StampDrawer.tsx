@@ -15,6 +15,7 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
+  CheckSquare,
 } from 'lucide-react';
 import {
   CoupleMetadata,
@@ -60,6 +61,7 @@ interface StampDrawerProps {
   onOpenVoiceModal: () => void;
   onOpenImageOcrModal: () => void;
   onOpenWidgetModal: () => void;
+  onOpenTaskManager?: () => void;
   onOpenShiftExport?: () => void;
   metadata: CoupleMetadata;
 }
@@ -87,6 +89,7 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   onOpenVoiceModal,
   onOpenImageOcrModal,
   onOpenWidgetModal,
+  onOpenTaskManager,
   onOpenShiftExport,
   metadata,
 }) => {
@@ -169,12 +172,13 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
 
           <button
             type="button"
-            onClick={onOpenWidgetModal}
-            className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl bg-[#FFF6D6]/80 text-[#8A5A00] active:scale-95 transition-all"
+            onClick={onOpenTaskManager || onOpenWidgetModal}
+            className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl bg-[#E6F7EF]/90 text-[#1E6645] active:scale-95 transition-all"
+            title="タスク専用カレンダー ＆ Googleタスク連携を開く"
           >
-            <Smartphone className="w-5 h-5 text-[#FFB703]" />
+            <CheckSquare className="w-5 h-5 text-[#52B788]" />
             <span className="text-[10px] font-extrabold mt-0.5 leading-tight">
-              ウィジェット
+              タスク
             </span>
           </button>
         </div>
