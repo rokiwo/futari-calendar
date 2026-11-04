@@ -240,9 +240,8 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
         customLabel: st.shortLabel,
         startTime: item.startTime || st.startTime,
         endTime: item.endTime || st.endTime,
-        color: st.color,
-        textColor: st.textColor,
-        isHoliday: st.isHoliday,
+        createdBy: activePartner,
+        createdAt: nowIso,
         updatedBy: activePartner,
         updatedAt: nowIso,
       };
