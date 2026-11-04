@@ -126,9 +126,21 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const lastTapRef = useRef<{ dateStr: string; time: number } | null>(null);
+  const lastDoubleTapTimeRef = useRef<number>(0);
+
+  // ダブルタップ実行（400ms以内の二重発火をガード）
+  const triggerDoubleTap = (dateStr: string) => {
+    if (!dateStr) return;
+    const now = Date.now();
+    if (now - lastDoubleTapTimeRef.current < 450) return;
+    lastDoubleTapTimeRef.current = now;
+    lastTapRef.current = null;
+    onCellDoubleTap(dateStr);
+  };
 
   // シングルタップ＝その日に移動、ダブルタップ＝その日のすべての予定一覧（DayDetailModal）を表示
   const handleDateCellTap = (dateStr: string) => {
+    if (!dateStr) return;
     if (stampModeActive) {
       onCellSingleTap(dateStr);
       return;
@@ -140,8 +152,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
       lastTapRef.current.dateStr === dateStr &&
       nowMs - lastTapRef.current.time < 400
     ) {
-      lastTapRef.current = null;
-      onCellDoubleTap(dateStr);
+      triggerDoubleTap(dateStr);
       return;
     }
 
@@ -152,18 +163,20 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   const cells = buildMonthGrid(year, month);
 
   const stampMap = new Map<string, StampPreset>();
-  for (const s of store.stamps) {
+  for (const s of store.stamps || []) {
     stampMap.set(s.id, s);
   }
 
-  const partnerA = store.metadata.partners.partnerA;
-  const partnerB = store.metadata.partners.partnerB;
+  const partnerA = store.metadata?.partners?.partnerA || { name: '夫', avatar: '🐻' };
+  const partnerB = store.metadata?.partners?.partnerB || { name: 'さや', avatar: '🐰' };
   const otherPartnerId: PartnerId = activePartner === 'partnerA' ? 'partnerB' : 'partnerA';
-  const otherLastSeenMs = Date.parse(store.metadata.partners[otherPartnerId].lastSeenAt || '') || 0;
+  const otherPartner =
+    store.metadata?.partners?.[otherPartnerId] || (otherPartnerId === 'partnerB' ? partnerB : partnerA);
+  const otherLastSeenMs = Date.parse(otherPartner?.lastSeenAt || '') || 0;
 
   const eventsByDate = new Map<string, ScheduleEvent[]>();
-  for (const ev of Object.values(store.events)) {
-    if (ev.deletedAt) continue;
+  for (const ev of Object.values(store.events || {})) {
+    if (!ev || ev.deletedAt) continue;
     if (filterCategory !== 'all' && ev.categoryId !== filterCategory) continue;
 
     const list = eventsByDate.get(ev.date) || [];
@@ -647,7 +660,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 <div
                   key={cell.dateStr}
                   onClick={() => handleDateCellTap(cell.dateStr)}
-                  onDoubleClick={() => onCellDoubleTap(cell.dateStr)}
+                  onDoubleClick={() => triggerDoubleTap(cell.dateStr)}
                   className={`rounded-2xl p-2.5 border transition-all cursor-pointer select-none ${
                     isBothHol
                       ? 'bg-gradient-to-r from-[#FFF0F5] via-white to-[#FFF9FB] border-[#FFB3C6]'
@@ -867,7 +880,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
               <div
                 key={cell.dateStr}
                 onClick={() => handleDateCellTap(cell.dateStr)}
-                onDoubleClick={() => onCellDoubleTap(cell.dateStr)}
+                onDoubleClick={() => triggerDoubleTap(cell.dateStr)}
                 className={`group relative flex flex-col rounded-lg sm:rounded-2xl border transition-all cursor-pointer select-none overflow-hidden ${
                   isExpandedView ? 'min-h-[118px] sm:min-h-[146px]' : 'min-h-[112px] sm:min-h-[136px]'
                 } ${
