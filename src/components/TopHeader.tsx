@@ -160,9 +160,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 type="button"
                 onClick={onOpenWidgetHome}
                 className="px-2.5 py-1 rounded-2xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[11px] font-extrabold shadow-2xs active:scale-95"
-                title="デフォルトのウィジェット（ホーム）画面へ戻る"
+                title="日々の予定とシフトが縦に並ぶタイムライン（ホーム）画面へ"
               >
-                🏠 ウィジェット
+                📜 タイムライン
               </button>
             )}
 
