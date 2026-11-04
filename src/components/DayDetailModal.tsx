@@ -373,7 +373,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
     // もし「保存時にGoogleカレンダー通知をセット」がONで、かつ自分の端末が通知対象の場合のみGoogleカレンダーを起動！
     if (autoOpenGoogleCal && shouldNotifyPartner(newEvent, activePartner)) {
-      const gcalUrl = buildGoogleCalendarUrl(newEvent, store);
+      const gcalUrl = buildGoogleCalendarUrl(newEvent, store.metadata);
       window.open(gcalUrl, '_blank', 'noopener,noreferrer');
     }
 
@@ -941,11 +941,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                         <span className="text-[11px] font-bold text-stone-600">通知時間:</span>
                         {REMINDER_PRESETS.map((rm) => (
                           <button
-                            key={rm.minutes}
+                            key={rm.value}
                             type="button"
-                            onClick={() => setReminderMinutes(rm.minutes)}
+                            onClick={() => setReminderMinutes(rm.value)}
                             className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border ${
-                              reminderMinutes === rm.minutes
+                              reminderMinutes === rm.value
                                 ? 'bg-sky-600 text-white border-sky-600'
                                 : 'bg-white text-stone-600 border-stone-200'
                             }`}
@@ -1020,7 +1020,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                 {dayEvents.map((ev) => {
                   const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
                   const isMyNotificationTarget = shouldNotifyPartner(ev, activePartner);
-                  const notifyLabel = getNotifyTargetLabel(ev, store);
+                  const notifyInfo = getNotifyTargetLabel(ev, store.metadata);
 
                   return (
                     <div
@@ -1076,7 +1076,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
                             <span className="px-2 py-0.5 rounded-full bg-white/80 text-stone-700 text-[10px] font-extrabold flex items-center gap-0.5">
                               <Bell className="w-2.5 h-2.5 text-sky-600" />
-                              <span>{notifyLabel}</span>
+                              <span>{notifyInfo.label}</span>
                             </span>
                           </div>
 
@@ -1099,7 +1099,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           {isMyNotificationTarget && (
                             <div className="pt-1">
                               <a
-                                href={buildGoogleCalendarUrl(ev, store)}
+                                href={buildGoogleCalendarUrl(ev, store.metadata)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 text-[11px] font-extrabold shadow-2xs transition-all"
