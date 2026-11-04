@@ -134,7 +134,7 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
               <span className="text-lg">🐻💕🐰</span>
               <div>
                 <h1 className="font-extrabold text-sm sm:text-base text-stone-800 leading-tight">
-                  ふたりカレ
+                  ペアカレ
                 </h1>
                 <p className="text-[10px] font-bold text-stone-400 leading-none">
                   {otherProfile.avatar}{otherProfile.name}の確認: {formatLastSeen(otherProfile.lastSeenAt)}
@@ -649,7 +649,7 @@ export const WidgetGuideModal: React.FC<WidgetGuideModalProps> = ({
       };
     });
 
-    return `// ふたりカレ (FutariCal) iPhone ホーム画面ウィジェット用スクリプト (Scriptable用)
+    return `// ペアカレ (PairCal) iPhone ホーム画面ウィジェット用スクリプト (Scriptable用)
 const APP_URL = "${window.location.origin}${window.location.pathname}";
 const DAYS = ${JSON.stringify(summaryRows, null, 2)};
 
@@ -659,7 +659,7 @@ w.url = APP_URL;
 w.setPadding(12, 14, 12, 14);
 
 let header = w.addStack();
-let title = header.addText("🐻💕🐰 ふたりカレ");
+let title = header.addText("🐻💕🐰 ペアカレ");
 title.font = Font.boldRoundedSystemFont(13);
 title.textColor = new Color("#9E2A47");
 w.addSpacer(6);
@@ -764,7 +764,7 @@ w.presentMedium();`;
               <span>② iPhone ホーム画面ウィジェット（Scriptable用コード自動生成）</span>
             </div>
             <p className="text-stone-600 leading-relaxed">
-              iPhoneの無料定番アプリ「Scriptable」に以下の自動生成コードを貼り付けるだけで、iPhoneのホーム画面に本物のネイティブウィジェットとして2人のシフト＆予定を表示できます（タップするとふたりカレが開きます）。
+              iPhoneの無料定番アプリ「Scriptable」に以下の自動生成コードを貼り付けるだけで、iPhoneのホーム画面に本物のネイティブウィジェットとして2人のシフト＆予定を表示できます（タップするとペアカレが開きます）。
             </p>
             <button
               type="button"
