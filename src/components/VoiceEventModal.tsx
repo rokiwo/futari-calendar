@@ -12,6 +12,7 @@ import {
   Minus,
   Timer,
   User,
+  Zap,
 } from 'lucide-react';
 import {
   CalendarCategoryId,
@@ -139,13 +140,31 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   // 残業・休日出勤の音声解析フィールド（分単位）
   const [targetPartner, setTargetPartner] = useState<PartnerId>(activePartner);
   const [overtimeMinutes, setOvertimeMinutes] = useState<number | null>(null);
-  const [holidayWorkMinutes, setHolidayWorkMinutes] = useState<number | null>(null);
   const [overtimeHours, setOvertimeHours] = useState<number | null>(null);
+  const [overtimeStartTime, setOvertimeStartTime] = useState<string | null>(null);
+  const [overtimeEndTime, setOvertimeEndTime] = useState<string | null>(null);
+  const [holidayWorkMinutes, setHolidayWorkMinutes] = useState<number | null>(null);
   const [holidayWorkHours, setHolidayWorkHours] = useState<number | null>(null);
   const [applyToShift, setApplyToShift] = useState<boolean>(true);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const isListeningRef = useRef(false);
+
+  // 時刻範囲から残業分数を再計算するヘルパー（1分単位）
+  const handleRecalculateOvertime = (start: string, end: string) => {
+    setOvertimeStartTime(start);
+    setOvertimeEndTime(end);
+    if (!start || !end) return;
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    if (Number.isNaN(sh) || Number.isNaN(sm) || Number.isNaN(eh) || Number.isNaN(em)) return;
+    let diff = (eh * 60 + em) - (sh * 60 + sm);
+    if (diff < 0) diff += 24 * 60; // 日またぎ
+    if (diff >= 0) {
+      setOvertimeMinutes(diff);
+      setOvertimeHours(Math.round((diff / 60) * 10) / 10);
+    }
+  };
 
   // 音声テキストが変化したらリアルタイムに日付・時間・残業・タイトルを自動解析
   const applyVoiceParse = (raw: string) => {
@@ -168,6 +187,12 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     } else if (parsed.overtimeHours !== undefined) {
       setOvertimeMinutes(Math.round(parsed.overtimeHours * 60));
       setOvertimeHours(parsed.overtimeHours);
+    }
+    if (parsed.overtimeStartTime !== undefined) {
+      setOvertimeStartTime(parsed.overtimeStartTime);
+    }
+    if (parsed.overtimeEndTime !== undefined) {
+      setOvertimeEndTime(parsed.overtimeEndTime);
     }
     if (parsed.holidayWorkMinutes !== undefined) {
       setHolidayWorkMinutes(parsed.holidayWorkMinutes);
@@ -278,28 +303,46 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     e.preventDefault();
     stopListening();
 
+    const hasOtOrHw =
+      overtimeMinutes !== null ||
+      overtimeHours !== null ||
+      holidayWorkMinutes !== null ||
+      holidayWorkHours !== null;
+
+    // 純粋な残業のみ（タイトルが「残業」や空文字）かどうかの判定
+    const cleanTitle = title.trim();
+    const isPureOvertime =
+      hasOtOrHw &&
+      (!cleanTitle || /^(残業|残業申請|仕事|仕事残業)$/.test(cleanTitle));
+
     const finalTitle =
-      title.trim() ||
-      spokenText.trim() ||
-      (overtimeMinutes ? `残業 +${formatMinutesToJa(overtimeMinutes)}` : overtimeHours ? `残業 +${overtimeHours}h` : '');
-    if (!finalTitle && !overtimeMinutes && !overtimeHours && !holidayWorkMinutes && !holidayWorkHours) return;
+      cleanTitle ||
+      (!isPureOvertime ? spokenText.trim() : '') ||
+      (overtimeMinutes ? `残業 +${overtimeMinutes}分` : overtimeHours ? `残業 +${Math.round(overtimeHours * 60)}分` : '');
+
+    if (!finalTitle && !hasOtOrHw) return;
 
     const nowIso = new Date().toISOString();
     const cat = resolveCategoryInfo(categoryId, categoryList);
 
     // 1. もし残業・休日出勤が指定されていて、シフト反映がONならシフトデータを更新！
-    if (applyToShift && onUpdateShiftDetails && (overtimeMinutes !== null || holidayWorkMinutes !== null || overtimeHours !== null || holidayWorkHours !== null)) {
+    if (applyToShift && onUpdateShiftDetails && hasOtOrHw) {
+      const otM = overtimeMinutes !== null ? overtimeMinutes : overtimeHours ? Math.round(overtimeHours * 60) : undefined;
+      const hwM = holidayWorkMinutes !== null ? holidayWorkMinutes : holidayWorkHours ? Math.round(holidayWorkHours * 60) : undefined;
+
       onUpdateShiftDetails(dateStr, targetPartner, {
-        overtimeMinutes: overtimeMinutes !== null ? overtimeMinutes : overtimeHours ? Math.round(overtimeHours * 60) : undefined,
-        overtimeHours: overtimeHours !== null ? overtimeHours : overtimeMinutes ? Math.round((overtimeMinutes / 60) * 10) / 10 : undefined,
-        holidayWorkMinutes: holidayWorkMinutes !== null ? holidayWorkMinutes : holidayWorkHours ? Math.round(holidayWorkHours * 60) : undefined,
-        holidayWorkHours: holidayWorkHours !== null ? holidayWorkHours : holidayWorkMinutes ? Math.round((holidayWorkMinutes / 60) * 10) / 10 : undefined,
-        isHolidayWork: (holidayWorkMinutes !== null && holidayWorkMinutes > 0) || (holidayWorkHours !== null && holidayWorkHours > 0),
+        overtimeMinutes: otM,
+        overtimeHours: otM !== undefined ? Math.round((otM / 60) * 10) / 10 : undefined,
+        overtimeStartTime: overtimeStartTime ?? undefined,
+        overtimeEndTime: overtimeEndTime ?? undefined,
+        holidayWorkMinutes: hwM,
+        holidayWorkHours: hwM !== undefined ? Math.round((hwM / 60) * 10) / 10 : undefined,
+        isHolidayWork: (hwM !== undefined && hwM > 0),
       });
     }
 
-    // 2. カレンダーの予定としても保存（残業の場合もカレンダー上で一目でわかるよう登録）
-    if (finalTitle) {
+    // 2. カレンダーの個別予定としても保存（純粋な残業のみの場合は二重表示防止のためスキップ）
+    if (finalTitle && (!isPureOvertime || !applyToShift)) {
       const ev: ScheduleEvent = {
         id: `voice_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         date: dateStr,
@@ -392,13 +435,14 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
               />
             </div>
 
-            {/* サンプルフレーズ1タップ体験チップ（残業フレーズも充実！） */}
+            {/* サンプルフレーズ1タップ体験チップ（1分単位の残業計算フレーズを最優先配置！） */}
             <div className="flex flex-wrap justify-center gap-1 pt-0.5">
               {[
+                '11時から11時35分まで残業',
+                '17時から18時42分まで残業',
+                '今日35分残業',
                 '明日2時間残業',
-                '今日1.5時間残業 夜ご飯不要',
-                '15日の19時から記念日ディナー',
-                '金曜19時から飲み会',
+                '15日の19時から飲み会 夜ご飯不要',
               ].map((sample) => (
                 <button
                   key={sample}
@@ -419,8 +463,8 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
           </div>
 
           {/* 2. 残業・休日出勤の音声解析カード（話した言葉から自動検出された場合に大きく表示！） */}
-          {(overtimeHours !== null || holidayWorkHours !== null) && (
-            <div className="bg-gradient-to-r from-[#FFF0F5] to-[#FFF9FB] rounded-2xl p-3.5 border-2 border-[#FFB3C6] space-y-2.5 shadow-xs animate-pop">
+          {(overtimeMinutes !== null || overtimeHours !== null || holidayWorkMinutes !== null || holidayWorkHours !== null) && (
+            <div className="bg-gradient-to-r from-[#FFF0F5] to-[#FFF9FB] rounded-2xl p-3.5 border-2 border-[#FFB3C6] space-y-3 shadow-xs animate-pop">
               <div className="flex items-center justify-between">
                 <div className="font-black text-rose-700 flex items-center gap-1.5 text-xs sm:text-sm">
                   <Timer className="w-4 h-4 text-rose-500" />
@@ -468,40 +512,119 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                 </div>
               </div>
 
-              {/* 残業時間の微調整カウンター（分単位） */}
-              {(overtimeMinutes !== null || overtimeHours !== null) && (
-                <div className="flex items-center justify-between gap-2 bg-white rounded-xl p-2 border border-rose-200">
-                  <span className="font-black text-stone-700">残業時間:</span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const cur = overtimeMinutes ?? Math.round((overtimeHours || 0) * 60);
-                        const next = Math.max(0, cur - 15);
-                        setOvertimeMinutes(next);
-                        setOvertimeHours(Math.round((next / 60) * 10) / 10);
-                      }}
-                      className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-black"
-                      title="15分減らす"
-                    >
-                      -15分
-                    </button>
-                    <span className="text-sm font-black text-rose-600 min-w-[70px] text-center">
-                      +{formatMinutesToJa(overtimeMinutes ?? Math.round((overtimeHours || 0) * 60))}
+              {/* 時刻範囲（何時何分から何時何分まで）の自動計算バナー */}
+              {(overtimeStartTime || overtimeEndTime) && (
+                <div className="bg-amber-50/90 border-2 border-amber-300 rounded-xl p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-amber-900 text-xs flex items-center gap-1">
+                      <Zap className="w-4 h-4 text-amber-500 fill-amber-400 animate-bounce" />
+                      <span>⚡ 時刻から1分単位で自動計算！</span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const cur = overtimeMinutes ?? Math.round((overtimeHours || 0) * 60);
-                        const next = cur + 15;
-                        setOvertimeMinutes(next);
-                        setOvertimeHours(Math.round((next / 60) * 10) / 10);
+                    <span className="text-[10px] font-extrabold text-amber-800 bg-amber-200/80 px-2 py-0.5 rounded-full">
+                      自動計算: {overtimeMinutes ?? 0}分
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1.5 text-xs font-extrabold">
+                    <div className="flex items-center gap-1 flex-1">
+                      <input
+                        type="time"
+                        value={overtimeStartTime || '11:00'}
+                        onChange={(e) => handleRecalculateOvertime(e.target.value, overtimeEndTime || '11:35')}
+                        className="px-2 py-1 bg-white rounded-lg border border-amber-300 text-xs font-black text-stone-800 focus:outline-none"
+                      />
+                      <span className="text-stone-500">〜</span>
+                      <input
+                        type="time"
+                        value={overtimeEndTime || '11:35'}
+                        onChange={(e) => handleRecalculateOvertime(overtimeStartTime || '11:00', e.target.value)}
+                        className="px-2 py-1 bg-white rounded-lg border border-amber-300 text-xs font-black text-stone-800 focus:outline-none"
+                      />
+                    </div>
+                    <span className="text-sm font-black text-rose-600">
+                      ＝ {overtimeMinutes ?? 0}分
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* 残業時間の微調整カウンター（分単位最優先！） */}
+              {(overtimeMinutes !== null || overtimeHours !== null) && (
+                <div className="bg-white rounded-xl p-2.5 border border-rose-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-stone-700 text-xs">残業時間（1分単位）:</span>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-lg font-black text-rose-600">
+                        +{overtimeMinutes ?? Math.round((overtimeHours || 0) * 60)}
+                      </span>
+                      <span className="text-xs font-black text-rose-500">分</span>
+                    </div>
+                  </div>
+
+                  {/* 1分刻み & 5分刻み微調整ボタン */}
+                  <div className="grid grid-cols-6 gap-1">
+                    {[
+                      { label: '-5分', diff: -5 },
+                      { label: '-1分', diff: -1 },
+                      { label: '+1分', diff: +1 },
+                      { label: '+5分', diff: +5 },
+                      { label: '-15分', diff: -15 },
+                      { label: '+15分', diff: +15 },
+                    ].map((btn) => (
+                      <button
+                        key={btn.label}
+                        type="button"
+                        onClick={() => {
+                          const cur = overtimeMinutes ?? Math.round((overtimeHours || 0) * 60);
+                          const next = Math.max(0, cur + btn.diff);
+                          setOvertimeMinutes(next);
+                          setOvertimeHours(Math.round((next / 60) * 10) / 10);
+                        }}
+                        className="py-1 rounded-lg bg-stone-100 hover:bg-rose-50 hover:text-rose-600 text-stone-700 text-[10px] font-black border border-stone-200 transition-colors"
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* ワンタップ分数プリセット（35分など即反映！） */}
+                  <div className="flex items-center gap-1 overflow-x-auto pt-1 no-scrollbar">
+                    <span className="text-[10px] font-extrabold text-stone-400 shrink-0">プリセット:</span>
+                    {[15, 30, 35, 45, 60, 90, 120].map((mins) => (
+                      <button
+                        key={mins}
+                        type="button"
+                        onClick={() => {
+                          setOvertimeMinutes(mins);
+                          setOvertimeHours(Math.round((mins / 60) * 10) / 10);
+                        }}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-black shrink-0 transition-all ${
+                          overtimeMinutes === mins
+                            ? 'bg-rose-500 text-white shadow-xs'
+                            : 'bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200'
+                        }`}
+                      >
+                        {mins}分
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 直接分数入力 */}
+                  <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-stone-100 text-stone-500">
+                    <span className="text-[11px] font-extrabold">直接分数入力:</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={720}
+                      value={overtimeMinutes ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? null : Math.max(0, parseInt(e.target.value, 10) || 0);
+                        setOvertimeMinutes(val);
+                        setOvertimeHours(val !== null ? Math.round((val / 60) * 10) / 10 : null);
                       }}
-                      className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-black"
-                      title="15分増やす"
-                    >
-                      +15分
-                    </button>
+                      placeholder="例: 35"
+                      className="w-16 px-2 py-0.5 rounded-lg border border-stone-200 bg-[#FFFBF7] font-black text-xs text-center text-rose-600 focus:outline-none focus:border-rose-400"
+                    />
+                    <span className="text-[11px] font-black text-stone-600">分</span>
                   </div>
                 </div>
               )}
@@ -665,7 +788,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
             <Check className="w-4 h-4" />
             <span>
               {(overtimeMinutes !== null || overtimeHours !== null)
-                ? `⏱️ ${currentPartner.name}の残業(+${formatMinutesToJa(overtimeMinutes ?? Math.round((overtimeHours || 0) * 60))})を登録する`
+                ? `⏱️ ${currentPartner.name}の残業(+${overtimeMinutes ?? Math.round((overtimeHours || 0) * 60)}分)を反映する`
                 : 'この内容でカレンダーに登録する'}
             </span>
           </button>
