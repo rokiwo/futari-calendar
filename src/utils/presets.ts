@@ -665,3 +665,88 @@ export function createInitialDataStore(): CalendarDataStore {
   };
 }
 
+// ==========================================
+// ⏱️ 残業・休日出勤の分単位計算＆フォーマットユーティリティ
+// ==========================================
+
+/**
+ * シフトエントリから分単位の残業時間を取得（overtimeMinutes または過去の overtimeHours から算出）
+ */
+export function getShiftOvertimeMinutes(shift?: ShiftEntry): number {
+  if (!shift) return 0;
+  if (typeof shift.overtimeMinutes === 'number') {
+    return Math.max(0, Math.round(shift.overtimeMinutes));
+  }
+  if (typeof shift.overtimeHours === 'number' && shift.overtimeHours > 0) {
+    return Math.max(0, Math.round(shift.overtimeHours * 60));
+  }
+  return 0;
+}
+
+/**
+ * シフトエントリから分単位の休日出勤時間を取得
+ */
+export function getShiftHolidayWorkMinutes(shift?: ShiftEntry): number {
+  if (!shift) return 0;
+  if (typeof shift.holidayWorkMinutes === 'number') {
+    return Math.max(0, Math.round(shift.holidayWorkMinutes));
+  }
+  if (typeof shift.holidayWorkHours === 'number' && shift.holidayWorkHours > 0) {
+    return Math.max(0, Math.round(shift.holidayWorkHours * 60));
+  }
+  return 0;
+}
+
+/**
+ * 分数を「◯時間◯分」形式の日本語文字列に変換（例: 35 -> "35分", 90 -> "1時間30分", 120 -> "2時間"）
+ */
+export function formatMinutesToJa(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes || 0));
+  if (m === 0) return '0分';
+  const hours = Math.floor(m / 60);
+  const mins = m % 60;
+  if (hours === 0) return `${mins}分`;
+  if (mins === 0) return `${hours}時間`;
+  return `${hours}時間${mins}分`;
+}
+
+/**
+ * 分数を短縮形式に変換（例: 35 -> "35分", 90 -> "1h30m", 120 -> "2h"）
+ */
+export function formatMinutesShort(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes || 0));
+  if (m === 0) return '0分';
+  const hours = Math.floor(m / 60);
+  const mins = m % 60;
+  if (hours === 0) return `${mins}分`;
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h${mins}m`;
+}
+
+/**
+ * 開始時刻 "HH:mm" と終了時刻 "HH:mm" から経過分数（分単位）を自動計算（日跨ぎ対応）
+ * 例: "11:00" と "11:35" -> 35
+ * 例: "17:30" と "19:15" -> 105 (1時間45分)
+ * 例: "22:00" と "01:30" -> 210 (3時間30分)
+ */
+export function calculateMinutesBetween(startTime: string, endTime: string): number {
+  if (!startTime || !endTime) return 0;
+  const sParts = startTime.split(':').map(Number);
+  const eParts = endTime.split(':').map(Number);
+  if (sParts.length < 2 || eParts.length < 2) return 0;
+  const [sh, sm] = sParts;
+  const [eh, em] = eParts;
+  if (Number.isNaN(sh) || Number.isNaN(sm) || Number.isNaN(eh) || Number.isNaN(em)) return 0;
+
+  const startTotal = sh * 60 + sm;
+  let endTotal = eh * 60 + em;
+
+  if (endTotal < startTotal) {
+    // 翌日の時刻（日跨ぎ）
+    endTotal += 24 * 60;
+  }
+
+  return Math.max(0, endTotal - startTotal);
+}
+
+
