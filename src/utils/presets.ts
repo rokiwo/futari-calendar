@@ -5,6 +5,7 @@ import {
   CalendarDataStore,
   CoupleMetadata,
   PartnerId,
+  ShiftEntry,
   StampPreset,
 } from '../types/calendar';
 
@@ -208,6 +209,20 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     order: 5,
   },
   {
+    id: 'shift_a_2early',
+    partnerId: 'partnerA',
+    label: '２早',
+    shortLabel: '２早',
+    type: 'shift',
+    color: '#D8F8EE',
+    textColor: '#0F6E56',
+    startTime: '07:20',
+    endTime: '16:35',
+    icon: '🌅',
+    isHoliday: false,
+    order: 6,
+  },
+  {
     id: 'shift_a_night',
     partnerId: 'partnerA',
     label: '夜勤',
@@ -219,7 +234,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '23:59',
     icon: '🌙',
     isHoliday: false,
-    order: 6,
+    order: 7,
   },
   {
     id: 'shift_a_2night',
@@ -233,7 +248,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '23:59',
     icon: '🌌',
     isHoliday: false,
-    order: 7,
+    order: 8,
   },
   {
     id: 'shift_a_ake',
@@ -247,7 +262,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '09:45',
     icon: '🍵',
     isHoliday: false,
-    order: 8,
+    order: 9,
   },
   {
     id: 'shift_a_semi_early',
@@ -261,7 +276,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '17:05',
     icon: '🌤️',
     isHoliday: false,
-    order: 9,
+    order: 10,
   },
   {
     id: 'shift_a_semi_late',
@@ -275,7 +290,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     endTime: '19:05',
     icon: '🌥️',
     isHoliday: false,
-    order: 10,
+    order: 11,
   },
   {
     id: 'shift_a_off',
@@ -287,7 +302,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     textColor: '#D63864',
     icon: '🏠',
     isHoliday: true,
-    order: 11,
+    order: 12,
   },
   {
     id: 'shift_a_paid',
@@ -299,7 +314,7 @@ export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
     textColor: '#1B5E3A',
     icon: '🌴',
     isHoliday: true,
-    order: 12,
+    order: 13,
   },
 ];
 
@@ -565,7 +580,77 @@ export function createDefaultMetadata(): CoupleMetadata {
   };
 }
 
-// 初期ストアを作成（初期登録されていたサンプル予定はすべて削除し、まっさらな状態からスタート）
+// ご添付いただいた2026年11月ナスカレ勤務表（1日〜30日）の正確なシフト一覧
+export const UPLOADED_2026_11_NURSECAL_LABELS: Record<number, string> = {
+  1: '明け',
+  2: '休み',
+  3: '２早',
+  4: '遅A',
+  5: '休み',
+  6: '休み',
+  7: '２夜',
+  8: '明け',
+  9: '休み',
+  10: '休み',
+  11: '遅A',
+  12: '遅B',
+  13: '日勤',
+  14: '夜勤',
+  15: '明け',
+  16: '休み',
+  17: '早A',
+  18: '早B',
+  19: '遅A',
+  20: '休み',
+  21: '日勤',
+  22: '夜勤',
+  23: '明け',
+  24: '休み',
+  25: '早B',
+  26: '遅A',
+  27: '準早',
+  28: '夜勤',
+  29: '明け',
+  30: '休み',
+};
+
+// 2026年11月の30日分のシフトデータを生成（夫のデフォルト勤務表として初期反映＆ワンタップ復元可能）
+export function createUploaded2026NovShifts(
+  partnerId: PartnerId = 'partnerA',
+  stamps: StampPreset[] = DEFAULT_STAMP_PRESETS
+): Record<string, ShiftEntry> {
+  const result: Record<string, ShiftEntry> = {};
+  const partnerStamps = getPartnerShiftStamps(stamps, partnerId);
+  const pool = partnerStamps.length > 0 ? partnerStamps : DEFAULT_STAMP_PRESETS;
+  const nowIso = '2026-11-04T00:00:00.000Z';
+
+  for (let day = 1; day <= 30; day++) {
+    const label = UPLOADED_2026_11_NURSECAL_LABELS[day];
+    if (!label) continue;
+    const stamp =
+      pool.find((s) => s.label === label || s.shortLabel === label) ||
+      DEFAULT_STAMP_PRESETS.find((s) => s.label === label || s.shortLabel === label);
+    if (!stamp) continue;
+    const dateStr = `2026-11-${String(day).padStart(2, '0')}`;
+    result[`${dateStr}_${partnerId}`] = {
+      id: `shift_${dateStr}_${partnerId}`,
+      date: dateStr,
+      partnerId,
+      stampId: stamp.id,
+      customLabel: stamp.shortLabel,
+      startTime: stamp.startTime,
+      endTime: stamp.endTime,
+      color: stamp.color,
+      textColor: stamp.textColor,
+      isHoliday: stamp.isHoliday,
+      updatedAt: nowIso,
+      updatedBy: partnerId,
+    };
+  }
+  return result;
+}
+
+// 初期ストアを作成（初期登録されていたサンプル予定はすべて削除し、2026年11月ナスカレ勤務表を初期セット）
 export function createInitialDataStore(): CalendarDataStore {
   const now = new Date();
   const metadata = createDefaultMetadata();
@@ -575,9 +660,10 @@ export function createInitialDataStore(): CalendarDataStore {
     metadata,
     categories: DEFAULT_CATEGORIES,
     stamps: DEFAULT_STAMP_PRESETS,
-    shifts: {},
+    shifts: createUploaded2026NovShifts('partnerA', DEFAULT_STAMP_PRESETS),
     events: {},
     daySupports: {},
     updatedAt: now.toISOString(),
   };
 }
+
