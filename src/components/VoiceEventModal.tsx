@@ -42,18 +42,71 @@ interface VoiceEventModalProps {
   ) => void;
 }
 
+/**
+ * 音声認識（Web Speech API）で一度しか言っていない言葉が何度も繰り返し入力されるバグを防止する重複除去ユーティリティ
+ * 例: "明日2時間残業 明日2時間残業" -> "明日2時間残業"
+ * 例: "明日2時間残業明日2時間残業" -> "明日2時間残業"
+ */
+function cleanDuplicateSpeech(text: string): string {
+  if (!text) return '';
+  let str = text.trim();
+
+  // 1. スペース区切りの連続する同一単語・フレーズの除去
+  const words = str.split(/\s+/).filter(Boolean);
+  const dedupedWords: string[] = [];
+  for (const w of words) {
+    if (dedupedWords.length === 0 || dedupedWords[dedupedWords.length - 1] !== w) {
+      dedupedWords.push(w);
+    }
+  }
+  str = dedupedWords.join(' ');
+
+  // 2. スペースなしで結合された同一フレーズの重複（例: '残業2時間残業2時間'）の除去
+  for (let len = Math.floor(str.length / 2); len >= 2; len--) {
+    let replaced = true;
+    while (replaced) {
+      replaced = false;
+      for (let i = 0; i <= str.length - 2 * len; i++) {
+        const chunk1 = str.slice(i, i + len);
+        const chunk2 = str.slice(i + len, i + 2 * len);
+        if (chunk1 === chunk2) {
+          str = str.slice(0, i + len) + str.slice(i + 2 * len);
+          replaced = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return str.trim();
+}
+
 // ブラウザの SpeechRecognition 型宣言
+interface SpeechRecognitionResultItem {
+  transcript: string;
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  length: number;
+  [index: number]: SpeechRecognitionResultItem;
+}
+
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionResult;
+  };
+}
+
 interface SpeechRecognitionInstance {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
   start: () => void;
   stop: () => void;
-  onresult:
-    | ((event: {
-        results: { [index: number]: { [index: number]: { transcript: string } } };
-      }) => void)
-    | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
 }
@@ -93,9 +146,10 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
   // 音声テキストが変化したらリアルタイムに日付・時間・残業・タイトルを自動解析
   const applyVoiceParse = (raw: string) => {
-    setSpokenText(raw);
-    if (!raw.trim()) return;
-    const parsed = parseSpokenScheduleText(raw, selectedDate, 'shared');
+    const cleaned = cleanDuplicateSpeech(raw);
+    setSpokenText(cleaned);
+    if (!cleaned.trim()) return;
+    const parsed = parseSpokenScheduleText(cleaned, selectedDate, 'shared');
     setDateStr(parsed.date);
     setTitle(parsed.title);
     setCategoryId(parsed.categoryId);
@@ -158,14 +212,22 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
       // 連続認識モードをON
       rec.continuous = true;
 
-      rec.onresult = (event) => {
-        let transcript = '';
-        const resObj = event.results;
-        const len = Object.keys(resObj).length;
-        for (let i = 0; i < len; i++) {
-          transcript += resObj[i][0].transcript;
+      rec.onresult = (event: SpeechRecognitionEvent) => {
+        let finalStr = '';
+        let interimStr = '';
+        const resList = event.results;
+        for (let i = 0; i < resList.length; i++) {
+          const res = resList[i];
+          const transcript = res[0]?.transcript || '';
+          if (res.isFinal) {
+            finalStr += transcript + ' ';
+          } else {
+            interimStr += transcript;
+          }
         }
-        applyVoiceParse(transcript);
+        const fullRaw = (finalStr + ' ' + interimStr).trim();
+        const cleaned = cleanDuplicateSpeech(fullRaw);
+        applyVoiceParse(cleaned);
       };
 
       rec.onerror = (e) => {
