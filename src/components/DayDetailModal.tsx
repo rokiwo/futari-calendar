@@ -28,10 +28,15 @@ import {
   StampPreset,
 } from '../types/calendar';
 import {
+  calculateMinutesBetween,
   DEFAULT_CATEGORIES,
   EVENT_PATTERN_CATEGORIES,
+  formatMinutesShort,
+  formatMinutesToJa,
   getJapaneseHoliday,
   getPartnerShiftStamps,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
   resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
@@ -123,12 +128,15 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const [memo, setMemo] = useState('');
   const [eventBadges, setEventBadges] = useState<string[]>([]);
 
-  // フォーム内の「⏱️残業・休出登録」タブ用ステート
+  // フォーム内の「⏱️残業・休出登録」タブ用ステート（分単位＆開始・終了時刻連動）
   const [otPartner, setOtPartner] = useState<PartnerId>(activePartner);
   const [otType, setOtType] = useState<'overtime' | 'holidayWork'>('overtime');
-  const [otHoursStr, setOtHoursStr] = useState<string>('2');
+  const [otStartTime, setOtStartTime] = useState<string>('17:00');
+  const [otEndTime, setOtEndTime] = useState<string>('17:35');
+  const [otMinutes, setOtMinutes] = useState<number>(35);
+  const [otDirectMinutesStr, setOtDirectMinutesStr] = useState<string>('35');
 
-  // シフト欄の自由入力用ステート（スマホで0が邪魔して入力しづらくなるのを防ぐ）
+  // シフト欄の自由入力用ステート（分単位）
   const [customOtInputA, setCustomOtInputA] = useState<string>('');
   const [customOtInputB, setCustomOtInputB] = useState<string>('');
 
@@ -163,11 +171,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const shiftB = rawShiftB && !rawShiftB.deletedAt ? rawShiftB : undefined;
 
   useEffect(() => {
-    const valA = Number(shiftA?.holidayWorkHours || shiftA?.overtimeHours || 0);
-    const valB = Number(shiftB?.holidayWorkHours || shiftB?.overtimeHours || 0);
-    setCustomOtInputA(valA > 0 ? String(valA) : '');
-    setCustomOtInputB(valB > 0 ? String(valB) : '');
-  }, [dateStr, shiftA?.holidayWorkHours, shiftA?.overtimeHours, shiftB?.holidayWorkHours, shiftB?.overtimeHours]);
+    const minA = getShiftHolidayWorkMinutes(shiftA) || getShiftOvertimeMinutes(shiftA);
+    const minB = getShiftHolidayWorkMinutes(shiftB) || getShiftOvertimeMinutes(shiftB);
+    setCustomOtInputA(minA > 0 ? String(minA) : '');
+    setCustomOtInputB(minB > 0 ? String(minB) : '');
+  }, [dateStr, shiftA, shiftB]);
 
   const stampA = shiftA ? stampMap.get(shiftA.stampId) : undefined;
   const stampB = shiftB ? stampMap.get(shiftB.stampId) : undefined;
@@ -234,6 +242,35 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     );
   };
 
+  // 開始・終了時刻の変更（経過分数を自動計算）
+  const handleTimeChange = (start: string, end: string) => {
+    setOtStartTime(start);
+    setOtEndTime(end);
+    if (start && end) {
+      const diff = calculateMinutesBetween(start, end);
+      setOtMinutes(diff);
+      setOtDirectMinutesStr(String(diff));
+    }
+  };
+
+  // 分数の変更（プリセットボタンや微調整・直接入力から連動）
+  const handleMinutesChange = (nextMin: number) => {
+    const validMin = Math.max(0, Math.round(nextMin));
+    setOtMinutes(validMin);
+    setOtDirectMinutesStr(String(validMin));
+
+    // 開始時刻が設定されていれば、終了時刻も自動連動
+    if (otStartTime && otStartTime.includes(':')) {
+      const [sh, sm] = otStartTime.split(':').map(Number);
+      if (!Number.isNaN(sh) && !Number.isNaN(sm)) {
+        const endTot = (sh * 60 + sm + validMin) % (24 * 60);
+        const eh = String(Math.floor(endTot / 60)).padStart(2, '0');
+        const em = String(endTot % 60).padStart(2, '0');
+        setOtEndTime(`${eh}:${em}`);
+      }
+    }
+  };
+
   const handleOpenNewForm = (
     defaultCatId?: CalendarCategoryId,
     mode: 'event' | 'task' | 'overtime' = 'event'
@@ -260,6 +297,38 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     setEndTime('11:00');
     setMemo('');
     setEventBadges([]);
+
+    // 残業モード初期化（分単位＆シフト定時連動）
+    if (mode === 'overtime') {
+      const targetShift = activePartner === 'partnerB' ? shiftB : shiftA;
+      const existingOtMin = getShiftOvertimeMinutes(targetShift);
+      const existingHwMin = getShiftHolidayWorkMinutes(targetShift);
+      const isHw = Boolean(existingHwMin > 0 || targetShift?.isHolidayWork);
+      const initMin = isHw ? (existingHwMin || 240) : (existingOtMin || 35);
+
+      const initStart =
+        targetShift?.overtimeStartTime ||
+        targetShift?.holidayWorkStartTime ||
+        targetShift?.endTime ||
+        '17:00';
+      setOtStartTime(initStart);
+
+      // 初期終了時刻を算出
+      const [sh, sm] = initStart.split(':').map(Number);
+      if (!Number.isNaN(sh) && !Number.isNaN(sm)) {
+        const endTot = (sh * 60 + sm + initMin) % (24 * 60);
+        const eh = String(Math.floor(endTot / 60)).padStart(2, '0');
+        const em = String(endTot % 60).padStart(2, '0');
+        setOtEndTime(targetShift?.overtimeEndTime || targetShift?.holidayWorkEndTime || `${eh}:${em}`);
+      } else {
+        setOtEndTime('17:35');
+      }
+
+      setOtMinutes(initMin);
+      setOtDirectMinutesStr(String(initMin));
+      setOtType(isHw ? 'holidayWork' : 'overtime');
+    }
+
     setShowEventForm(true);
   };
 
@@ -288,20 +357,30 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     setShowEventForm(true);
   };
 
-  // 「⏱️ 残業・休出登録」タブから直接残業時間を保存する処理
+  // 「⏱️ 残業・休出登録」タブから直接残業時間を保存する処理（分単位保存）
   const handleSaveOvertimeFromForm = (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedHours = Math.max(0, Number(otHoursStr) || 0);
+    const finalMinutes = Math.max(0, Math.round(otMinutes || 0));
+    const hoursDecimal = Math.round((finalMinutes / 60) * 10) / 10;
+
     if (otType === 'holidayWork') {
       onUpdateShiftDetails(dateStr, otPartner, {
-        isHolidayWork: parsedHours > 0,
-        holidayWorkHours: parsedHours,
+        isHolidayWork: finalMinutes > 0,
+        holidayWorkMinutes: finalMinutes,
+        holidayWorkHours: hoursDecimal,
+        holidayWorkStartTime: otStartTime || undefined,
+        holidayWorkEndTime: otEndTime || undefined,
+        overtimeMinutes: 0,
         overtimeHours: 0,
       });
     } else {
       onUpdateShiftDetails(dateStr, otPartner, {
-        overtimeHours: parsedHours,
+        overtimeMinutes: finalMinutes,
+        overtimeHours: hoursDecimal,
+        overtimeStartTime: otStartTime || undefined,
+        overtimeEndTime: otEndTime || undefined,
         isHolidayWork: false,
+        holidayWorkMinutes: 0,
         holidayWorkHours: 0,
       });
     }
@@ -602,7 +681,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   </button>
                 </div>
 
-                {/* ⏱️ 残業・休日出勤 専用登録パネル */}
+                {/* ⏱️ 残業・休日出勤 専用登録パネル（分単位＆開始・終了時刻から自動計算） */}
                 {formTabMode === 'overtime' ? (
                   <div className="bg-rose-50/70 rounded-2xl p-3.5 border border-rose-200 space-y-3">
                     {/* 1. 誰の残業か */}
@@ -618,7 +697,13 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                             <button
                               key={pid}
                               type="button"
-                              onClick={() => setOtPartner(pid)}
+                              onClick={() => {
+                                setOtPartner(pid);
+                                const currentShift = pid === 'partnerB' ? shiftB : shiftA;
+                                if (currentShift?.endTime) {
+                                  handleTimeChange(currentShift.endTime, otEndTime || currentShift.endTime);
+                                }
+                              }}
                               className={`py-2 px-3 rounded-xl text-xs font-extrabold border flex items-center justify-center gap-1.5 transition-all ${
                                 active
                                   ? 'bg-rose-500 text-white border-rose-500 shadow-xs'
@@ -664,45 +749,144 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       </div>
                     </div>
 
-                    {/* 3. 時間選択（ワンタップ or 自由入力） */}
+                    {/* 3. ⚡ 開始・終了時刻から自動計算（例: 11:00 〜 11:35 -> 35分） */}
+                    <div className="bg-white rounded-xl p-3 border border-rose-200 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold text-stone-700 flex items-center gap-1">
+                          <span>⚡</span>
+                          <span>開始・終了時刻から自動計算</span>
+                        </span>
+                        {/* 該当パートナーの定時退勤時刻があればワンタップ設定ボタン */}
+                        {(() => {
+                          const currentShift = otPartner === 'partnerB' ? shiftB : shiftA;
+                          const shiftEnd = currentShift?.endTime;
+                          if (!shiftEnd) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleTimeChange(shiftEnd, otEndTime || shiftEnd);
+                              }}
+                              className="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200"
+                              title={`この日のシフト定時(${shiftEnd})を開始時刻にセット`}
+                            >
+                              💡 定時({shiftEnd})から開始
+                            </button>
+                          );
+                        })()}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <label className="text-[10px] font-extrabold text-stone-500 block mb-0.5">
+                            開始時刻
+                          </label>
+                          <input
+                            type="time"
+                            value={otStartTime}
+                            onChange={(e) => handleTimeChange(e.target.value, otEndTime)}
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-stone-300 font-black text-sm text-stone-800 bg-stone-50 text-center"
+                          />
+                        </div>
+                        <span className="text-stone-400 font-extrabold pt-4">〜</span>
+                        <div className="flex-1">
+                          <label className="text-[10px] font-extrabold text-stone-500 block mb-0.5">
+                            終了時刻
+                          </label>
+                          <input
+                            type="time"
+                            value={otEndTime}
+                            onChange={(e) => handleTimeChange(otStartTime, e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-stone-300 font-black text-sm text-stone-800 bg-stone-50 text-center"
+                          />
+                        </div>
+                      </div>
+
+                      {/* 自動計算結果ハイライトバッジ */}
+                      <div className="flex items-center justify-between pt-1 border-t border-rose-100">
+                        <span className="text-[11px] font-bold text-stone-600">
+                          {otStartTime && otEndTime ? `${otStartTime} 〜 ${otEndTime} の計算結果:` : '計算結果:'}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-rose-500 to-amber-500 text-white font-black text-xs shadow-xs animate-pop">
+                          ⏱️ {formatMinutesToJa(otMinutes)} ({otMinutes}分)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 4. ワンタップ選択・微調整 */}
                     <div className="space-y-1.5">
                       <span className="text-xs font-extrabold text-stone-700">
-                        3. 何時間ですか？（ボタン選択または数値入力）
+                        4. ワンタップ選択・微調整
                       </span>
                       <div className="flex flex-wrap gap-1.5">
-                        {[0, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8].map((h) => (
+                        {[
+                          { label: '0分(解除)', min: 0 },
+                          { label: '+15分', min: 15 },
+                          { label: '+30分', min: 30 },
+                          { label: '+35分', min: 35 },
+                          { label: '+45分', min: 45 },
+                          { label: '+1時間', min: 60 },
+                          { label: '+1時間15分', min: 75 },
+                          { label: '+1.5時間', min: 90 },
+                          { label: '+2時間', min: 120 },
+                          { label: '+3時間', min: 180 },
+                        ].map((btn) => (
                           <button
-                            key={h}
+                            key={btn.min}
                             type="button"
-                            onClick={() => setOtHoursStr(String(h))}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
-                              Number(otHoursStr) === h
+                            onClick={() => handleMinutesChange(btn.min)}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
+                              otMinutes === btn.min
                                 ? 'bg-stone-800 text-white border-stone-800 shadow-xs scale-105'
-                                : 'bg-white text-stone-700 border-stone-200'
+                                : 'bg-white text-stone-700 border-stone-200 hover:border-rose-300'
                             }`}
                           >
-                            {h === 0 ? '0h(解除)' : `+${h}時間`}
+                            {btn.label}
                           </button>
                         ))}
                       </div>
 
-                      <div className="flex items-center gap-2 pt-1">
-                        <span className="text-xs font-bold text-stone-600">直接入力:</span>
+                      {/* 細かい微調整 (+5分 / -5分 / +10分 / -10分) */}
+                      <div className="flex items-center gap-1.5 pt-1">
+                        <span className="text-[11px] font-bold text-stone-500">微調整:</span>
+                        {[-10, -5, +5, +10].map((delta) => (
+                          <button
+                            key={delta}
+                            type="button"
+                            onClick={() => handleMinutesChange(Math.max(0, otMinutes + delta))}
+                            className="px-2 py-1 rounded-lg bg-white border border-stone-300 hover:bg-stone-100 text-stone-700 text-xs font-black active:scale-95 shadow-2xs"
+                          >
+                            {delta > 0 ? `+${delta}分` : `${delta}分`}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* 分単位の直接入力 */}
+                      <div className="flex items-center gap-2 pt-1.5">
+                        <span className="text-xs font-bold text-stone-600">直接分数入力:</span>
                         <input
                           type="number"
-                          step="0.5"
+                          step="1"
                           min="0"
-                          max="24"
-                          value={otHoursStr}
-                          onChange={(e) => setOtHoursStr(e.target.value)}
-                          placeholder="例: 2.5"
-                          className="w-24 px-3 py-1.5 rounded-xl border border-rose-300 bg-white font-black text-sm text-center text-rose-700"
+                          max="1440"
+                          value={otDirectMinutesStr}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setOtDirectMinutesStr(raw);
+                            const val = Math.max(0, parseInt(raw, 10) || 0);
+                            handleMinutesChange(val);
+                          }}
+                          placeholder="例: 35"
+                          className="w-20 px-2.5 py-1.5 rounded-xl border border-rose-300 bg-white font-black text-sm text-center text-rose-700"
                         />
-                        <span className="text-xs font-extrabold text-stone-700">時間</span>
+                        <span className="text-xs font-extrabold text-stone-700">分</span>
+                        <span className="text-xs text-stone-500 font-bold">
+                          ＝ {formatMinutesToJa(otMinutes)}
+                        </span>
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2 pt-1">
+                    <div className="flex justify-end gap-2 pt-2 border-t border-rose-200/80">
                       <button
                         type="button"
                         onClick={() => setShowEventForm(false)}
@@ -712,9 +896,9 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-extrabold shadow-sm"
+                        className="px-5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-extrabold shadow-sm active:scale-95 transition-all"
                       >
-                        ⏱️ {m}/{d} の残業時間を保存・反映する
+                        ⏱️ {m}/{d} の{otType === 'holidayWork' ? '休日出勤' : '残業'}（{formatMinutesToJa(otMinutes)}）を保存する
                       </button>
                     </div>
                   </div>
@@ -1177,8 +1361,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                 const partnerStamps = getPartnerShiftStamps(store.stamps, pid);
 
                 const hasSubWork = Boolean(shift?.subCustomLabel || shift?.subStampId);
-                const overtime = Number(shift?.overtimeHours || 0);
-                const holWork = Number(shift?.holidayWorkHours || 0);
+                const otMin = getShiftOvertimeMinutes(shift);
+                const hwMin = getShiftHolidayWorkMinutes(shift);
                 const customInputVal = pid === 'partnerA' ? customOtInputA : customOtInputB;
                 const setCustomInputVal =
                   pid === 'partnerA' ? setCustomOtInputA : setCustomOtInputB;
@@ -1365,122 +1549,147 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       )}
                     </div>
 
-                    {/* ③ 残業時間・休日出勤時間の記載欄 */}
+                    {/* ③ 残業時間・休日出勤時間の記載欄（分単位） */}
                     <div className="pt-2 border-t border-stone-200/60 space-y-1.5">
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="font-extrabold text-stone-600 flex items-center gap-1">
                           <Timer className="w-3 h-3 text-rose-500" />
                           <span>残業・休日出勤時間</span>
                         </span>
-                        {(overtime > 0 || holWork > 0) ? (
+                        {(otMin > 0 || hwMin > 0) ? (
                           <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black shadow-2xs">
-                            {holWork > 0 ? `💼 休日出勤 ${holWork}h 反映中` : `⏱️ 残業 +${overtime}h 反映中`}
+                            {hwMin > 0 ? `💼 休日出勤 ${formatMinutesToJa(hwMin)} 反映中` : `⏱️ 残業 +${formatMinutesToJa(otMin)} 反映中`}
                           </span>
                         ) : (
-                          <span className="text-[10px] text-stone-400 font-bold">0時間</span>
+                          <span className="text-[10px] text-stone-400 font-bold">0分</span>
                         )}
                       </div>
 
-                      {/* ワンタップ残業・休出ボタン */}
+                      {/* ワンタップ残業・休出ボタン（分単位対応：15分、30分、35分、45分、1時間、1.5時間、2時間） */}
                       <div className="flex flex-wrap gap-1">
-                        {[0, 0.5, 1, 1.5, 2, 2.5, 3, 4].map((hrs) => (
+                        {[
+                          { label: 'なし', min: 0 },
+                          { label: '+15分', min: 15 },
+                          { label: '+30分', min: 30 },
+                          { label: '+35分', min: 35 },
+                          { label: '+45分', min: 45 },
+                          { label: '+1h', min: 60 },
+                          { label: '+1.5h', min: 90 },
+                          { label: '+2h', min: 120 },
+                        ].map((b) => (
                           <button
-                            key={hrs}
+                            key={b.min}
                             type="button"
                             onClick={() => {
-                              setCustomInputVal(hrs > 0 ? String(hrs) : '');
+                              setCustomInputVal(b.min > 0 ? String(b.min) : '');
                               onUpdateShiftDetails(dateStr, pid, {
-                                overtimeHours: hrs,
+                                overtimeMinutes: b.min,
+                                overtimeHours: Math.round((b.min / 60) * 10) / 10,
                                 isHolidayWork: false,
+                                holidayWorkMinutes: 0,
                                 holidayWorkHours: 0,
                               });
                             }}
                             className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
-                              overtime === hrs && !holWork
+                              otMin === b.min && hwMin === 0
                                 ? 'bg-rose-500 border-rose-500 text-white shadow-2xs scale-105'
                                 : 'bg-white border-stone-200 text-stone-600'
                             }`}
                           >
-                            {hrs === 0 ? 'なし' : `+${hrs}h`}
+                            {b.label}
                           </button>
                         ))}
-                        {[4, 8].map((hHrs) => (
+                        {[
+                          { label: '💼休出4h', min: 240 },
+                          { label: '💼休出8h', min: 480 },
+                        ].map((hBtn) => (
                           <button
-                            key={`hol_${hHrs}`}
+                            key={hBtn.label}
                             type="button"
                             onClick={() => {
-                              setCustomInputVal(String(hHrs));
+                              setCustomInputVal(String(hBtn.min));
                               onUpdateShiftDetails(dateStr, pid, {
                                 isHolidayWork: true,
-                                holidayWorkHours: hHrs,
+                                holidayWorkMinutes: hBtn.min,
+                                holidayWorkHours: Math.round((hBtn.min / 60) * 10) / 10,
+                                overtimeMinutes: 0,
                                 overtimeHours: 0,
                               });
                             }}
                             className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
-                              holWork === hHrs
+                              hwMin === hBtn.min
                                 ? 'bg-amber-600 border-amber-600 text-white shadow-2xs scale-105'
                                 : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
                             }`}
                           >
-                            💼休出{hHrs}h
+                            {hBtn.label}
                           </button>
                         ))}
                       </div>
 
-                      {/* 0.5h単位の自由入力＋「反映」ボタン */}
+                      {/* 分単位の自由入力＋「反映」ボタン */}
                       <div className="flex items-center gap-1.5 text-[11px] pt-0.5">
-                        <span className="text-stone-500 font-bold shrink-0">自由入力:</span>
+                        <span className="text-stone-500 font-bold shrink-0">直接入力:</span>
                         <input
                           type="number"
-                          step="0.5"
+                          step="1"
                           min="0"
-                          max="24"
-                          placeholder="例: 2"
+                          max="1440"
+                          placeholder="例: 35"
                           value={customInputVal}
                           onChange={(e) => {
                             const raw = e.target.value;
                             setCustomInputVal(raw);
                             if (raw === '') {
                               onUpdateShiftDetails(dateStr, pid, {
+                                overtimeMinutes: 0,
                                 overtimeHours: 0,
                                 isHolidayWork: false,
+                                holidayWorkMinutes: 0,
                                 holidayWorkHours: 0,
                               });
                               return;
                             }
-                            const val = Math.max(0, Number(raw));
+                            const val = Math.max(0, parseInt(raw, 10));
                             if (!Number.isNaN(val)) {
-                              if (holWork > 0 || shift?.isHolidayWork) {
+                              if (hwMin > 0 || shift?.isHolidayWork) {
                                 onUpdateShiftDetails(dateStr, pid, {
                                   isHolidayWork: val > 0,
-                                  holidayWorkHours: val,
+                                  holidayWorkMinutes: val,
+                                  holidayWorkHours: Math.round((val / 60) * 10) / 10,
                                 });
                               } else {
                                 onUpdateShiftDetails(dateStr, pid, {
-                                  overtimeHours: val,
+                                  overtimeMinutes: val,
+                                  overtimeHours: Math.round((val / 60) * 10) / 10,
                                 });
                               }
                             }
                           }}
                           className="w-16 px-2 py-1 rounded-lg border border-stone-300 bg-white font-extrabold text-center text-rose-600"
                         />
-                        <span className="font-bold text-stone-600">h</span>
+                        <span className="font-bold text-stone-600">分</span>
+                        <span className="text-[10px] text-stone-400 font-bold">
+                          {customInputVal && Number(customInputVal) > 0 ? `(${formatMinutesToJa(Number(customInputVal))})` : ''}
+                        </span>
                         <button
                           type="button"
                           onClick={() => {
-                            const val = Math.max(0, Number(customInputVal) || 0);
-                            if (holWork > 0 || shift?.isHolidayWork) {
+                            const val = Math.max(0, parseInt(customInputVal, 10) || 0);
+                            if (hwMin > 0 || shift?.isHolidayWork) {
                               onUpdateShiftDetails(dateStr, pid, {
                                 isHolidayWork: val > 0,
-                                holidayWorkHours: val,
+                                holidayWorkMinutes: val,
+                                holidayWorkHours: Math.round((val / 60) * 10) / 10,
                               });
                             } else {
                               onUpdateShiftDetails(dateStr, pid, {
-                                overtimeHours: val,
+                                overtimeMinutes: val,
+                                overtimeHours: Math.round((val / 60) * 10) / 10,
                               });
                             }
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-extrabold text-[10px] shadow-2xs active:scale-95"
+                          className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-extrabold text-[10px] shadow-2xs active:scale-95 ml-auto"
                         >
                           ⏱️ 反映
                         </button>
