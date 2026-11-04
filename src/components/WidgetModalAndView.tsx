@@ -520,7 +520,7 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
 
                         {isMyNotif && (
                           <a
-                            href={buildGoogleCalendarUrl(ev, store)}
+                            href={buildGoogleCalendarUrl(ev, store.metadata)}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
