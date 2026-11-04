@@ -77,6 +77,7 @@ interface TopHeaderProps {
   onLockScreen: () => void;
   onOpenWidgetHome?: () => void;
   onOpenShiftExport?: () => void;
+  onOpenWelcomeImage?: () => void;
 }
 
 export function formatLastSeen(isoStr?: string): string {
@@ -135,6 +136,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onLockScreen,
   onOpenWidgetHome,
   onOpenShiftExport,
+  onOpenWelcomeImage,
 }) => {
   const [showHolidayPopup, setShowHolidayPopup] = useState(false);
   const [showOvertimePopup, setShowOvertimePopup] = useState(false);
@@ -163,6 +165,18 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 title="日々の予定とシフトが縦に並ぶタイムライン（ホーム）画面へ"
               >
                 📜 タイムライン
+              </button>
+            )}
+
+            {onOpenWelcomeImage && metadata.welcomeImageConfig?.dataUrl && (
+              <button
+                type="button"
+                onClick={onOpenWelcomeImage}
+                className="px-2 py-1 rounded-2xl bg-white border border-pink-200 text-stone-700 text-[11px] font-extrabold shadow-2xs hover:bg-[#FFF5F8] active:scale-95 flex items-center gap-1"
+                title="お気に入り写真・ウェルカム画面を表示"
+              >
+                <span>📸</span>
+                <span className="hidden min-[420px]:inline">フォト</span>
               </button>
             )}
 
