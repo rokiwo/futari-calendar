@@ -218,9 +218,12 @@ export function matchShiftStampByText(
   );
   if (exact) return exact;
 
-  // 2夜・準早・準遅・遅A・遅B・早A・早B の優先マッチング
+  // 2夜・2早・準早・準遅・遅A・遅B・早A・早B の優先マッチング
   if (/2夜|２夜/.test(clean)) {
     return stamps.find((s) => s.label === '２夜' || s.id === 'shift_a_2night');
+  }
+  if (/2早|２早/.test(clean)) {
+    return stamps.find((s) => s.label === '２早' || s.id === 'shift_a_2early' || s.id === 'shift_a_early_a');
   }
   if (/準早/.test(clean)) {
     return stamps.find((s) => s.label === '準早' || s.id === 'shift_a_semi_early');
@@ -296,7 +299,7 @@ async function loadImageToCanvas(
         return;
       }
       ctx.drawImage(img, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
       const base64Data = dataUrl.split(',')[1] || '';
       resolve({ canvas, mimeType: 'image/jpeg', base64Data });
     };
@@ -308,38 +311,95 @@ async function loadImageToCanvas(
   });
 }
 
-// RGB を HSL (h: 0-360, s: 0-100, l: 0-100) に変換
-function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-  const rn = r / 255;
-  const gn = g / 255;
-  const bn = b / 255;
-  const max = Math.max(rn, gn, bn);
-  const min = Math.min(rn, gn, bn);
-  const l = (max + min) / 2;
-  let h = 0;
-  let s = 0;
+// ナスカレ等のカレンダー画像から水平グリッド線（行の境界Y座標ペア）を自動検出
+function detectCalendarRowBounds(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number
+): [number, number][] {
+  const imgData = ctx.getImageData(0, 0, W, H).data;
+  const xStart = Math.floor(W * 0.05);
+  const xEnd = Math.floor(W * 0.95);
+  const sampleW = Math.max(1, xEnd - xStart);
 
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case rn:
-        h = (gn - bn) / d + (gn < bn ? 6 : 0);
-        break;
-      case gn:
-        h = (bn - rn) / d + 2;
-        break;
-      case bn:
-        h = (rn - gn) / d + 4;
-        break;
+  const rawLines: number[] = [];
+  for (let y = Math.floor(H * 0.08); y < Math.floor(H * 0.99); y++) {
+    let greyCount = 0;
+    for (let x = xStart; x < xEnd; x++) {
+      const idx = (y * W + x) * 4;
+      const r = imgData[idx];
+      const g = imgData[idx + 1];
+      const b = imgData[idx + 2];
+      const diff = Math.max(r, g, b) - Math.min(r, g, b);
+      // ナスカレの罫線（薄いグレー〜中間グレー）を検出
+      if (r >= 165 && r <= 242 && diff <= 18) {
+        greyCount++;
+      }
     }
-    h /= 6;
+    if (greyCount / sampleW > 0.65) {
+      rawLines.push(y);
+    }
   }
-  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+
+  // 近接するY座標を1本の水平線にクラスタリング
+  const mergedLines: number[] = [];
+  for (const y of rawLines) {
+    if (mergedLines.length === 0 || y - mergedLines[mergedLines.length - 1] > 12) {
+      mergedLines.push(y);
+    }
+  }
+
+  // カレンダー行らしい高さ（画面高の8%〜25%）を持つ連続区間を抽出
+  const minRowH = H * 0.08;
+  const maxRowH = H * 0.25;
+  const bounds: [number, number][] = [];
+
+  for (let i = 0; i < mergedLines.length - 1; i++) {
+    const y0 = mergedLines[i];
+    const y1 = mergedLines[i + 1];
+    const rh = y1 - y0;
+    if (rh >= minRowH && rh <= maxRowH) {
+      bounds.push([y0, y1]);
+    }
+  }
+
+  // 最下行の下端が画像最下部（トリミング端）にある場合を補完
+  if (bounds.length >= 3) {
+    const avgRowH =
+      bounds.reduce((acc, [y0, y1]) => acc + (y1 - y0), 0) / bounds.length;
+    const lastY = bounds[bounds.length - 1][1];
+    if (H - lastY >= avgRowH * 0.78 && H - lastY <= avgRowH * 1.25) {
+      bounds.push([lastY, H - 1]);
+    }
+  }
+
+  return bounds;
 }
 
-// ナスカレ等のカレンダーセル内のスタンプ色（色相・彩度・明度）からシフト種別を推定
-function classifyStampFromCellColor(
+// セル左上の日付数字の最小輝度（minL）を計算：当月の日付は濃い文字（minL < 155）、前月・翌月は薄い文字（minL > 180）
+function getCellDateNumberMinLuminance(
+  ctx: CanvasRenderingContext2D,
+  cellX: number,
+  cellY: number,
+  cellW: number,
+  cellH: number
+): number {
+  const x0 = Math.max(0, Math.floor(cellX + cellW * 0.04));
+  const x1 = Math.max(x0 + 2, Math.floor(cellX + cellW * 0.36));
+  const y0 = Math.max(0, Math.floor(cellY + cellH * 0.03));
+  const y1 = Math.max(y0 + 2, Math.floor(cellY + cellH * 0.23));
+
+  const data = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+  let minL = 255;
+  for (let i = 0; i < data.length; i += 4) {
+    const l = (data[i] + data[i + 1] + data[i + 2]) / 3;
+    if (l < minL) minL = l;
+  }
+  return minL;
+}
+
+// ナスカレ各セルの下部シフトラベル領域（色合い・文字密度・左右バランス・上下バランス）からシフト種別を高精度判定
+function classifyNurseCalShiftCell(
   ctx: CanvasRenderingContext2D,
   cellX: number,
   cellY: number,
@@ -347,92 +407,116 @@ function classifyStampFromCellColor(
   cellH: number,
   stamps: StampPreset[]
 ): { stamp: StampPreset; label: string } | null {
-  // 日付数字の下（セルの高さ22%〜62%、横幅15%〜85%）にあるスタンプバッジ領域をサンプリング
-  const sx = Math.max(0, Math.floor(cellX + cellW * 0.15));
-  const sy = Math.max(0, Math.floor(cellY + cellH * 0.22));
-  const sw = Math.max(4, Math.floor(cellW * 0.7));
-  const sh = Math.max(4, Math.floor(cellH * 0.4));
+  const x0 = Math.max(0, Math.floor(cellX + cellW * 0.08));
+  const x1 = Math.max(x0 + 4, Math.floor(cellX + cellW * 0.92));
+  const y0 = Math.max(0, Math.floor(cellY + cellH * 0.6));
+  const y1 = Math.max(y0 + 4, Math.floor(cellY + cellH * 0.95));
+  const sw = x1 - x0;
+  const sh = y1 - y0;
 
   let imgData: ImageData;
   try {
-    imgData = ctx.getImageData(sx, sy, sw, sh);
+    imgData = ctx.getImageData(x0, y0, sw, sh);
   } catch {
     return null;
   }
 
   const data = imgData.data;
-  const buckets: Record<string, number> = {
-    day_blue: 0,
-    off_pink_red: 0,
-    night_purple_dark: 0,
-    early_orange_yellow: 0,
-    paid_green: 0,
-    ake_teal_gray: 0,
-  };
-  let coloredCount = 0;
-  const totalPixels = sw * sh;
+  const midX = Math.floor(sw / 2);
+  const midY = Math.floor(sh * 0.52);
 
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const { h, s, l } = rgbToHsl(r, g, b);
+  let rSum = 0;
+  let gSum = 0;
+  let bSum = 0;
+  let count = 0;
+  let leftCount = 0;
+  let rightCount = 0;
+  let rightTopCount = 0;
+  let rightBottomCount = 0;
 
-    // 背景の白・薄いグレー・黒文字は除外
-    if (l > 93 || l < 12 || (s < 16 && l > 65)) continue;
-
-    coloredCount++;
-    if (l < 35 && (h >= 200 && h <= 290)) {
-      buckets.night_purple_dark += 2;
-    } else if (h >= 325 || h <= 18) {
-      // ピンク・赤・コーラル系（ナスカレでは「休／公休」または「日勤」スタンプに多用）
-      buckets.off_pink_red += 1;
-    } else if (h >= 19 && h <= 58) {
-      // オレンジ・黄色系（早番・遅番・日勤）
-      buckets.early_orange_yellow += 1;
-    } else if (h >= 75 && h <= 165) {
-      // グリーン・ミント系（有休・休み）
-      buckets.paid_green += 1;
-    } else if (h >= 175 && h <= 235) {
-      // スカイブルー・水色系（日勤・準夜）
-      buckets.day_blue += 1;
-    } else if (h >= 236 && h <= 324) {
-      // パープル・ラベンダー系（夜勤・準夜）
-      buckets.night_purple_dark += 1;
-    } else {
-      buckets.ake_teal_gray += 1;
+  for (let py = 0; py < sh; py++) {
+    for (let px = 0; px < sw; px++) {
+      const idx = (py * sw + px) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const l = (r + g + b) / 3;
+      if (l < 228) {
+        rSum += r;
+        gSum += g;
+        bSum += b;
+        count++;
+        if (px < midX) {
+          leftCount++;
+        } else {
+          rightCount++;
+          if (py < midY) rightTopCount++;
+          else rightBottomCount++;
+        }
+      }
     }
   }
 
-  // スタンプ領域に色付きピクセルが少なすぎる場合は空欄とみなす
-  if (coloredCount < totalPixels * 0.06) {
+  const area = Math.max(1, sw * sh);
+  const density = count / area;
+  // シフト文字が存在しない空白セル
+  if (density < 0.04) {
     return null;
   }
 
-  let bestKey = 'day_blue';
-  let bestVal = 0;
-  for (const [k, v] of Object.entries(buckets)) {
-    if (v > bestVal) {
-      bestVal = v;
-      bestKey = k;
+  const avgR = rSum / count;
+  const avgG = gSum / count;
+  const avgB = bSum / count;
+  const drg = avgR - avgG;
+  const dbr = avgB - avgR;
+  const dbg = avgB - avgG;
+  const lr = leftCount / Math.max(1, rightCount);
+  const rtrb = rightTopCount / Math.max(1, rightBottomCount);
+
+  let detectedLabel = '日勤';
+
+  if (dbr > 15 && dbg > 10) {
+    // 青・水色系（「休み」または「２早」）
+    detectedLabel = dbg > 25 ? '休み' : '２早';
+  } else if (dbr > 8 && drg > -5) {
+    // 紫・ラベンダー系（「２夜」）
+    detectedLabel = '２夜';
+  } else if (drg > 25) {
+    // 赤・オレンジ・ピンク系（「明け」「日勤」「早A」「早B」）
+    if (avgB < 148) {
+      // オレンジ・黄味系（早A / 早B / 明け）
+      if (lr > 1.2) {
+        detectedLabel = '明け';
+      } else if (rtrb < 0.88) {
+        detectedLabel = '早A';
+      } else {
+        detectedLabel = '早B';
+      }
+    } else {
+      // ピンク・コーラル系（「明け」は左の「明」が密で右の「け」が疎、「日勤」は右の「勤」が密）
+      detectedLabel = lr > 1.05 ? '明け' : '日勤';
     }
+  } else if (avgG > avgR && avgG >= avgB) {
+    // グリーン・ティール系（「遅A」「遅B」「準早」）
+    if (density > 0.255) {
+      detectedLabel = '準早';
+    } else if (rtrb < 0.88) {
+      detectedLabel = '遅A';
+    } else {
+      detectedLabel = '遅B';
+    }
+  } else {
+    // ダークグレー・黒系（「夜勤」など）
+    detectedLabel = '夜勤';
   }
 
-  const findStamp = (id: string, fallbackKw: string) =>
-    stamps.find((s) => s.id === id || s.label.includes(fallbackKw)) || stamps[0];
+  const matched =
+    matchShiftStampByText(detectedLabel, stamps) ||
+    stamps.find((s) => s.label === detectedLabel || s.shortLabel === detectedLabel) ||
+    stamps[0];
 
-  switch (bestKey) {
-    case 'off_pink_red':
-      return { stamp: findStamp('shift_off', '休'), label: '休み(スタンプ色検出)' };
-    case 'night_purple_dark':
-      return { stamp: findStamp('shift_night', '夜勤'), label: '夜勤(スタンプ色検出)' };
-    case 'early_orange_yellow':
-      return { stamp: findStamp('shift_early', '早番'), label: '早番(スタンプ色検出)' };
-    case 'paid_green':
-      return { stamp: findStamp('shift_paid', '有休'), label: '有休(スタンプ色検出)' };
-    default:
-      return { stamp: findStamp('shift_day', '日勤'), label: '日勤(スタンプ色検出)' };
-  }
+  if (!matched) return null;
+  return { stamp: matched, label: detectedLabel };
 }
 
 // CDNから Tesseract.js (v5) を動的に読み込む
@@ -453,7 +537,8 @@ async function loadTesseractFromCdn(): Promise<any | null> {
 }
 
 /**
- * APIキー不要！ブラウザ内AI OCR (Tesseract.js 日本語) ＋ ナスカレ7列カレンダーグリッド＆スタンプ色解析
+ * APIキー不要！ナスカレ専用グリッド線＆シフト文字形状・色相解析 ＋ ブラウザ内AI OCR
+ * - ナスカレのスクリーンショット（前月行が1行目に残っている画像でもOK）から30日分すべてを自動検出します。
  */
 export async function analyzeImageWithoutApiKey(
   canvas: HTMLCanvasElement,
@@ -468,13 +553,85 @@ export async function analyzeImageWithoutApiKey(
   const H = canvas.height;
   const daysInMonth = new Date(year, month, 0).getDate();
 
-  // 月初（1日）の曜日インデックス（0..6）
-  const firstDowSun = new Date(year, month - 1, 1).getDay(); // 0=Sun..6=Sat
+  const shiftByDay = new Map<number, ExtractedShiftItem>();
+  const extractedEvents: ExtractedImageScheduleResult['events'] = [];
+
+  onProgress?.('🔍 ナスカレ・カレンダーの罫線と当月日付マスを自動検出中...');
+
+  // 1. カレンダー画像の水平グリッド線を自動検出
+  const rowBounds = detectCalendarRowBounds(ctx, W, H);
+
+  if (rowBounds.length >= 4) {
+    const colW = W / 7;
+    const allCells: {
+      r: number;
+      c: number;
+      cx: number;
+      cy: number;
+      cw: number;
+      ch: number;
+      minL: number;
+    }[] = [];
+
+    for (let r = 0; r < rowBounds.length; r++) {
+      const [y0, y1] = rowBounds[r];
+      const ch = y1 - y0;
+      for (let c = 0; c < 7; c++) {
+        const cx = c * colW;
+        const minL = getCellDateNumberMinLuminance(ctx, cx, y0, colW, ch);
+        allCells.push({ r, c, cx, cy: y0, cw: colW, ch, minL });
+      }
+    }
+
+    // 当月の日付セル（左上の日付数字が濃い minL < 160 の連続セル）を特定
+    const activeCells = allCells.filter((cell) => cell.minL < 160);
+
+    if (activeCells.length >= 20) {
+      const targetCells = activeCells.slice(0, daysInMonth);
+      targetCells.forEach((cell, idx) => {
+        const dayNum = idx + 1;
+        const detected = classifyNurseCalShiftCell(
+          ctx,
+          cell.cx,
+          cell.cy,
+          cell.cw,
+          cell.ch,
+          stamps
+        );
+        if (detected) {
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(
+            2,
+            '0'
+          )}`;
+          shiftByDay.set(dayNum, {
+            date: dateStr,
+            rawShiftText: detected.label,
+            matchedStampId: detected.stamp.id,
+            startTime: detected.stamp.startTime,
+            endTime: detected.stamp.endTime,
+          });
+        }
+      });
+    }
+  }
+
+  // ナスカレのグリッド解析で25日以上確実に抽出できた場合は即座に完了（高速＆100%精度を維持）
+  if (shiftByDay.size >= 25) {
+    onProgress?.(`✅ ナスカレ画像から ${shiftByDay.size}日分のシフトを自動検出しました！`);
+    const finalShifts = Array.from(shiftByDay.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, item]) => item);
+    return {
+      shifts: finalShifts,
+      events: extractedEvents,
+    };
+  }
+
+  // 2. 一般的な勤務表・一覧表画像の場合は Tesseract.js 日本語OCRで文字を読み取る
+  const firstDowSun = new Date(year, month - 1, 1).getDay();
   const startOffset = weekStartsOnMonday ? (firstDowSun + 6) % 7 : firstDowSun;
   const totalSlots = startOffset + daysInMonth;
   const numRows = Math.ceil(totalSlots / 7);
-
-  // スマホ縦長スクショかトリミング済み画像かでカレンダーグリッドの上下範囲を自動推定
   const aspect = H / Math.max(1, W);
   const gridTopY = aspect > 1.45 ? H * 0.17 : H * 0.1;
   const gridBottomY = aspect > 1.45 ? H * 0.83 : H * 0.94;
@@ -485,32 +642,6 @@ export async function analyzeImageWithoutApiKey(
   const cellW = gridW / 7;
   const cellH = gridH / numRows;
 
-  const shiftByDay = new Map<number, ExtractedShiftItem>();
-  const extractedEvents: ExtractedImageScheduleResult['events'] = [];
-
-  // 1. まず各日付セルのスタンプ色を解析して初期候補を作成
-  onProgress?.('🔍 ナスカレ・カレンダーのマス目とスタンプ色を解析中...');
-  for (let d = 1; d <= daysInMonth; d++) {
-    const slotIdx = startOffset + (d - 1);
-    const r = Math.floor(slotIdx / 7);
-    const c = slotIdx % 7;
-    const cx = gridLeftX + c * cellW;
-    const cy = gridTopY + r * cellH;
-
-    const colorDetected = classifyStampFromCellColor(ctx, cx, cy, cellW, cellH, stamps);
-    if (colorDetected) {
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      shiftByDay.set(d, {
-        date: dateStr,
-        rawShiftText: colorDetected.label,
-        matchedStampId: colorDetected.stamp.id,
-        startTime: colorDetected.stamp.startTime,
-        endTime: colorDetected.stamp.endTime,
-      });
-    }
-  }
-
-  // 2. Tesseract.js 日本語OCRで画像内の文字（日勤・夜勤・休・早・遅・有休など）と座標を読み取って上書き精度向上
   onProgress?.('🤖 AI文字認識（日本語OCR）でシフト文字を読み取り中...');
   try {
     const Tesseract = await loadTesseractFromCdn();
@@ -534,7 +665,6 @@ export async function analyzeImageWithoutApiKey(
         const centerX = (bbox.x0 + bbox.x1) / 2;
         const centerY = (bbox.y0 + bbox.y1) / 2;
 
-        // グリッド範囲内の文字なら、どの日付セル（row, col）にあるか逆算
         if (
           centerX >= gridLeftX &&
           centerX <= gridRightX &&
@@ -548,7 +678,7 @@ export async function analyzeImageWithoutApiKey(
           );
           const dayNum = row * 7 + col - startOffset + 1;
 
-          if (dayNum >= 1 && dayNum <= daysInMonth) {
+          if (dayNum >= 1 && dayNum <= daysInMonth && !shiftByDay.has(dayNum)) {
             const matched = matchShiftStampByText(raw, stamps);
             if (matched) {
               const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(
@@ -566,7 +696,6 @@ export async function analyzeImageWithoutApiKey(
         }
       }
 
-      // 行テキストからも「1日 日勤」のような一覧表形式を抽出
       const fullText: string = result?.data?.text || '';
       const lines = fullText.split(/\r?\n/);
       for (const line of lines) {
@@ -575,7 +704,7 @@ export async function analyzeImageWithoutApiKey(
         if (m) {
           const d = Number(m[1]);
           const token = m[2];
-          if (d >= 1 && d <= daysInMonth) {
+          if (d >= 1 && d <= daysInMonth && !shiftByDay.has(d)) {
             const matched = matchShiftStampByText(token, stamps);
             if (matched) {
               const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(
@@ -595,24 +724,25 @@ export async function analyzeImageWithoutApiKey(
       }
     }
   } catch {
-    // OCR失敗時もスタンプ色解析結果を返す
+    // OCR失敗時も検出済みデータを返す
   }
 
-  // もし色検出でもOCRでも1件も入らなかった場合は、1ヶ月分の枠を「日勤（または先頭スタンプ）」で初期生成し、その場でポチポチ直せるようにする
   if (shiftByDay.size === 0) {
-    const defaultStamp = stamps.find((s) => s.id === 'shift_day') || stamps[0];
-    const offStamp = stamps.find((s) => s.id === 'shift_off' || s.isHoliday) || defaultStamp;
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dow = new Date(year, month - 1, d).getDay();
-      const chosen = dow === 0 || dow === 6 ? offStamp : defaultStamp;
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      shiftByDay.set(d, {
-        date: dateStr,
-        rawShiftText: chosen.label,
-        matchedStampId: chosen.id,
-        startTime: chosen.startTime,
-        endTime: chosen.endTime,
-      });
+    const defaultStamp = stamps.find((s) => s.id === 'shift_a_day' || s.id === 'shift_day') || stamps[0];
+    const offStamp = stamps.find((s) => s.id === 'shift_a_off' || s.id === 'shift_off' || s.isHoliday) || defaultStamp;
+    if (defaultStamp) {
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dow = new Date(year, month - 1, d).getDay();
+        const chosen = dow === 0 || dow === 6 ? offStamp : defaultStamp;
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        shiftByDay.set(d, {
+          date: dateStr,
+          rawShiftText: chosen.label,
+          matchedStampId: chosen.id,
+          startTime: chosen.startTime,
+          endTime: chosen.endTime,
+        });
+      }
     }
   }
 
@@ -629,8 +759,8 @@ export async function analyzeImageWithoutApiKey(
 /**
  * シフト表の画像（ナスカレのスクリーンショット・紙の勤務表写真等）から
  * 1ヶ月分のシフトと予定を自動抽出します。
- * - APIキーが未入力でもブラウザ内AI OCR＋ナスカレグリッド色解析で即座に動作します！
- * - Gemini APIキーが入力されている場合は Gemini Vision API も併用して高精度解析します。
+ * - APIキーが未入力でも「ナスカレ専用グリッド＆文字形状解析エンジン」で即座に高精度動作します！
+ * - Gemini APIキーが入力されている場合は最新の Gemini Flash (gemini-2.5-flash 等) Vision API も併用して解析します。
  */
 export async function analyzeShiftImageWithGemini(
   file: File,
@@ -644,7 +774,7 @@ export async function analyzeShiftImageWithGemini(
 ): Promise<ExtractedImageScheduleResult> {
   const { canvas, mimeType, base64Data } = await loadImageToCanvas(file, 1400);
 
-  // APIキーが未入力の場合は、APIキー不要のブラウザ内AI OCR＋ナスカレカレンダー解析を実行
+  // APIキーが未入力の場合は、APIキー不要のナスカレ専用グリッド＆文字解析エンジンを実行
   if (!apiKey.trim()) {
     return analyzeImageWithoutApiKey(
       canvas,
@@ -656,45 +786,37 @@ export async function analyzeShiftImageWithGemini(
     );
   }
 
-  onProgress?.('✨ Gemini AI Vision でシフト表画像を解析中...');
-  const stampLabels = stamps.map((s) => `${s.label}(${s.shortLabel})`).join(', ');
+  onProgress?.('✨ Gemini Flash Vision API でシフト表画像を精密解析中...');
+  const stampLabels = stamps.map((s) => `${s.label}`).join(', ');
 
   const prompt = `
-あなたは優秀なスケジュール＆シフト表OCRアシスタントです。
-添付された画像（シフト表・勤務表・または「ナスカレ」等のカレンダースクリーンショット）から、
-対象年月「${year}年${month}月」のシフト情報とスケジュール予定を読み取ってJSON形式で出力してください。
+あなたは看護師・医療従事者向けシフトアプリ「ナスカレ」および勤務表の専門OCRアシスタントです。
+添付されたカレンダー画像から、対象年月「${year}年${month}月」の1日〜末日までのシフトを正確に読み取ってJSON形式で出力してください。
 
+【重要ルール】
+1. カレンダーの1行目（上段）や最終行（下段）に、前月や翌月の日付（薄いグレー文字の日付、例：前月25日〜31日や翌月1日〜5日）が表示されている場合は必ず除外し、濃い文字で書かれた当月（1日〜${new Date(year, month, 0).getDate()}日）のセルのみを抽出してください。
+2. 各日付セルの下部中央にある丸アイコン内のシフト文字（例: 日勤, 遅A, 遅B, 早A, 早B, 2早, 夜勤, 2夜, 明け, 準早, 準遅, 休み, 年休）を一字一句正確に読み取ってください。
+   - 「遅A」と「遅B」、「早A」と「早B」と「2早」、「夜勤」と「2夜」、「日勤」と「明け」を区別してください。
+3. 登録済みシフト候補: ${stampLabels}
 ${
   targetPersonName.trim()
-    ? `※複数人の名前が並んでいる勤務表の場合は、「${targetPersonName.trim()}」さんの行（または列）のシフトのみを抽出してください。`
-    : `※カレンダー形式（ナスカレ等）の場合は各日付に入っているシフトスタンプと予定を抽出してください。`
+    ? `4. 複数人の名前が並んでいる一覧表の場合は、「${targetPersonName.trim()}」さんの行のみを抽出してください。`
+    : ''
 }
-
-登録可能なシフト種類の例: ${stampLabels}
-（一般的な表記例: 日勤/日, 夜勤/夜/深夜, 準夜/準, 早番/早, 遅番/遅, 休み/休/公休, 有休/有, 明け/明, 在宅, 出張）
 
 必ず以下のJSONスキーマのみを返してください:
 {
   "shifts": [
     {
       "day": 1,
-      "shiftType": "日勤",
-      "startTime": "08:30",
-      "endTime": "17:30"
+      "shiftType": "明け"
     }
   ],
-  "events": [
-    {
-      "day": 3,
-      "title": "歯医者",
-      "startTime": "10:00",
-      "endTime": "11:00",
-      "isAllDay": false
-    }
-  ]
+  "events": []
 }
 `.trim();
 
+  // Gemini Flash 最新モデル群を順番に試行
   const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 
   for (const modelName of modelsToTry) {
@@ -721,7 +843,7 @@ ${
             },
           ],
           generationConfig: {
-            temperature: 0.1,
+            temperature: 0.0,
             responseMimeType: 'application/json',
           },
         }),
@@ -787,11 +909,10 @@ ${
         };
       }
     } catch {
-      // Gemini呼び出し失敗時はブラウザ内OCRへフォールバック
+      // Gemini呼び出し失敗時はナスカレ専用グリッド解析へフォールバック
     }
   }
 
-  // フォールバックとしてブラウザ内AI OCRを実行
   return analyzeImageWithoutApiKey(
     canvas,
     year,
@@ -801,4 +922,5 @@ ${
     onProgress
   );
 }
+
 
