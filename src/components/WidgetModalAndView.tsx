@@ -22,7 +22,14 @@ import {
   PartnerId,
   StampPreset,
 } from '../types/calendar';
-import { getJapaneseHoliday, resolveCategoryInfo } from '../utils/presets';
+import {
+  formatMinutesShort,
+  formatMinutesToJa,
+  getJapaneseHoliday,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
+  resolveCategoryInfo,
+} from '../utils/presets';
 import { MonthlyOvertimeSummary, formatLastSeen } from './TopHeader';
 import { buildGoogleCalendarUrl, shouldNotifyPartner } from '../utils/googleCalendar';
 
@@ -194,8 +201,8 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
                 <Timer className="w-3 h-3 text-amber-600" />
                 <span>
                   残業 {partnerA.avatar}
-                  {overtimeSummary.partnerA.totalExtraHours}h / {partnerB.avatar}
-                  {overtimeSummary.partnerB.totalExtraHours}h
+                  {overtimeSummary.partnerA.totalExtraFormatted} / {partnerB.avatar}
+                  {overtimeSummary.partnerB.totalExtraFormatted}
                 </span>
               </button>
 
@@ -340,10 +347,9 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 {/* 夫シフト */}
                 {(() => {
-                  const hasExtraA =
-                    Boolean(subLabelA) ||
-                    (shiftA?.overtimeHours || 0) > 0 ||
-                    (shiftA?.holidayWorkHours || 0) > 0;
+                  const otMinA = getShiftOvertimeMinutes(shiftA);
+                  const holMinA = getShiftHolidayWorkMinutes(shiftA);
+                  const hasExtraA = Boolean(subLabelA) || otMinA > 0 || holMinA > 0;
                   return (
                     <div
                       style={
@@ -384,12 +390,11 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
                             {shiftA?.subStartTime ? `(${shiftA.subStartTime})` : ''}
                           </span>
                         )}
-                        {((shiftA?.overtimeHours || 0) > 0 ||
-                          (shiftA?.holidayWorkHours || 0) > 0) && (
+                        {(otMinA > 0 || holMinA > 0) && (
                           <span className="px-1.5 py-0.5 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold">
-                            {(shiftA?.holidayWorkHours || 0) > 0
-                              ? `⏱️休出${shiftA?.holidayWorkHours}h`
-                              : `⏱️残業+${shiftA?.overtimeHours}h`}
+                            {holMinA > 0
+                              ? `⏱️休出${formatMinutesShort(holMinA)}`
+                              : `⏱️残業+${formatMinutesShort(otMinA)}`}
                           </span>
                         )}
                       </div>
@@ -399,10 +404,9 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
 
                 {/* 妻シフト */}
                 {(() => {
-                  const hasExtraB =
-                    Boolean(subLabelB) ||
-                    (shiftB?.overtimeHours || 0) > 0 ||
-                    (shiftB?.holidayWorkHours || 0) > 0;
+                  const otMinB = getShiftOvertimeMinutes(shiftB);
+                  const holMinB = getShiftHolidayWorkMinutes(shiftB);
+                  const hasExtraB = Boolean(subLabelB) || otMinB > 0 || holMinB > 0;
                   return (
                     <div
                       style={
@@ -443,12 +447,11 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
                             {shiftB?.subStartTime ? `(${shiftB.subStartTime})` : ''}
                           </span>
                         )}
-                        {((shiftB?.overtimeHours || 0) > 0 ||
-                          (shiftB?.holidayWorkHours || 0) > 0) && (
+                        {(otMinB > 0 || holMinB > 0) && (
                           <span className="px-1.5 py-0.5 rounded-lg bg-rose-500 text-white text-[11px] font-extrabold">
-                            {(shiftB?.holidayWorkHours || 0) > 0
-                              ? `⏱️休出${shiftB?.holidayWorkHours}h`
-                              : `⏱️残業+${shiftB?.overtimeHours}h`}
+                            {holMinB > 0
+                              ? `⏱️休出${formatMinutesShort(holMinB)}`
+                              : `⏱️残業+${formatMinutesShort(otMinB)}`}
                           </span>
                         )}
                       </div>
