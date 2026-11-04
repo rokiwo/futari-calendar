@@ -140,7 +140,7 @@ export function buildGoogleCalendarUrl(
     ev.memo ? `メモ: ${ev.memo}` : '',
     `通知対象: ${notifyInfo.label}`,
     `推奨通知タイミング: ${remLabel}`,
-    '--- ふたりカレ (FutariCal) より登録 ---',
+    '--- ペアカレ (PairCal) より登録 ---',
   ].filter(Boolean);
 
   const params = new URLSearchParams({
@@ -171,7 +171,7 @@ export function generatePartnerNotificationIcs(
     'PRODID:-//FutariCal//GoogleCalendarPartnerSync//JP',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    `X-WR-CALNAME:ふたりカレ (${partner.avatar}${partner.name}専用通知)`,
+    `X-WR-CALNAME:ペアカレ (${partner.avatar}${partner.name}専用通知)`,
     'X-WR-TIMEZONE:Asia/Tokyo',
   ];
 
@@ -298,11 +298,11 @@ export function generatePartnerNotificationIcs(
     lines.push(`DTSTAMP:${nowStamp}`);
     lines.push(`DTSTART:${dateCompact}T090000`);
     lines.push(`DTEND:${dateCompact}T093000`);
-    lines.push(`SUMMARY:🔔 ふたりカレ通知連携テスト（${partner.avatar}${partner.name}専用）`);
-    lines.push('DESCRIPTION:ふたりカレで予定やシフトを登録してから再度読み込むと、まとめてカレンダーに取り込まれます。');
+    lines.push(`SUMMARY:🔔 ペアカレ通知連携テスト（${partner.avatar}${partner.name}専用）`);
+    lines.push('DESCRIPTION:ペアカレで予定やシフトを登録してから再度読み込むと、まとめてカレンダーに取り込まれます。');
     lines.push('BEGIN:VALARM');
     lines.push('ACTION:DISPLAY');
-    lines.push('DESCRIPTION:ふたりカレ通知テスト');
+    lines.push('DESCRIPTION:ペアカレ通知テスト');
     lines.push('TRIGGER:-PT10M');
     lines.push('END:VALARM');
     lines.push('END:VEVENT');
@@ -339,7 +339,7 @@ export async function openOrShareIcsOnDevice(
     const file = new File([icsText], filename, { type: 'text/calendar;charset=utf-8' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({
-        title: 'ふたりカレ カレンダー連携',
+        title: 'ペアカレ カレンダー連携',
         files: [file],
       });
       return 'shared';
