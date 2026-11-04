@@ -196,30 +196,24 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   // 設定保存＆今すぐ同期
   const handleSaveAndSync = async () => {
     setStatusMsg(null);
-    if (!passwordInput.trim() || passwordInput.trim().length < 4) {
-      setStatusMsg({
-        type: 'err',
-        text: '暗号化用の「ふたりの合言葉（4文字以上）」を入力してください🔑',
-      });
-      return;
-    }
-
     setBusy(true);
     try {
-      await onUpdatePassword(passwordInput.trim());
+      if (passwordInput.trim()) {
+        await onUpdatePassword(passwordInput.trim());
+      }
       const nextCfg = buildCurrentConfig();
       onUpdateSyncConfig(nextCfg);
 
       if (nextCfg.enabled) {
-        await onTriggerCloudSync(nextCfg, passwordInput.trim());
+        await onTriggerCloudSync(nextCfg, passwordInput.trim() || undefined);
         setStatusMsg({
           type: 'ok',
-          text: '設定を保存し、GitHubクラウドとAES-GCM暗号化マージ同期を完了しました✨',
+          text: '設定を保存し、クラウド同期を完了しました✨',
         });
       } else {
         setStatusMsg({
           type: 'ok',
-          text: '合言葉とローカル暗号化設定を保存しました✨',
+          text: '設定を保存しました✨',
         });
       }
     } catch (err) {
@@ -242,24 +236,18 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
       });
       return;
     }
-    if (!passwordInput.trim() || passwordInput.trim().length < 4) {
-      setStatusMsg({
-        type: 'err',
-        text: '暗号化用の「ふたりの合言葉（4文字以上）」を入力してください🔑',
-      });
-      return;
-    }
-
     setBusy(true);
     try {
-      await onUpdatePassword(passwordInput.trim());
+      if (passwordInput.trim()) {
+        await onUpdatePassword(passwordInput.trim());
+      }
       const newId = await createNewSecretGist(githubToken.trim(), store, passwordInput.trim());
       setGistId(newId);
       const nextCfg = buildCurrentConfig(newId);
       onUpdateSyncConfig(nextCfg);
       setStatusMsg({
         type: 'ok',
-        text: `専用シークレットGist (${newId}) を自動作成し、暗号化データを保存しました✨`,
+        text: `専用シークレットGist (${newId}) を自動作成し、データを保存しました✨`,
       });
     } catch (err) {
       setStatusMsg({
@@ -276,7 +264,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
     const shareText = [
       '【ペアカレ (PairCal) 共有設定💕】',
       `🌐 アプリURL: ${window.location.origin}${window.location.pathname}`,
-      `🔑 合言葉(パスワード): ${passwordInput || '(設定した合言葉)'}`,
+      `💡 パスワードロック不要（URLを開くだけですぐ使えます）`,
       mode === 'gist' ? `☁️ Gist ID: ${gistId}` : `☁️ Repo: ${repoOwner}/${repoName}`,
       `🔐 GitHub Token: ${githubToken}`,
     ].join('\n');
@@ -592,13 +580,10 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
           {/* タブ1：超かんたん夫婦共有 ＆ データ削除 */}
           {activeTab === 'sync' && (() => {
-            const activePass = passwordInput.trim() || currentPassword.trim();
-            const inviteUrl = activePass
-              ? `https://rokiwo.github.io/futari-calendar/#key=${encodeURIComponent(activePass)}`
-              : 'https://rokiwo.github.io/futari-calendar/';
+            const inviteUrl = 'https://rokiwo.github.io/futari-calendar/';
             return (
             <div className="space-y-4">
-              {/* 💑 設定不要！URLを送るだけの超かんたん夫婦共有 ＆ 第三者ブロック設定カード */}
+              {/* 💑 設定不要！URLを送るだけの超かんたん夫婦共有 */}
               <div className="bg-white rounded-3xl p-4 border-2 border-[#FF8FAB] space-y-3 shadow-xs">
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-extrabold text-stone-800 text-sm flex items-center gap-1.5">
@@ -606,48 +591,15 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     <span>パートナーとの共有方法（1タップ招待）</span>
                   </div>
                   <span className="px-2.5 py-0.5 rounded-full bg-[#E6F7EF] text-[#1E6645] font-extrabold text-[10px]">
-                    ✅ クラウドAES-GCM暗号化同期 ON
+                    ✅ 自動クラウド同期 ON
                   </span>
                 </div>
 
-                {/* 🔐 第三者からの情報漏洩を100%防ぐ「ふたりの合言葉ロック」ワンタップ設定枠 */}
-                <div className="p-3 rounded-2xl bg-[#FFFBF7] border border-[#FFE28A] space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-extrabold text-[#8A5A00] text-xs flex items-center gap-1">
-                      <KeyRound className="w-3.5 h-3.5 text-[#FFB703]" />
-                      <span>🛡️ 情報漏洩ガード：ふたりの合言葉（4文字以上）</span>
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                        activePass
-                          ? 'bg-[#E6F7EF] text-[#1E6645]'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {activePass ? '🔐 合言葉ロック保護中' : '🔓 合言葉未設定'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-stone-600 leading-relaxed">
-                    合言葉を設定すると、万が一第三者が公開URL（<code className="text-[10px] bg-stone-100 px-1 rounded">rokiwo.github.io/futari-calendar</code>）を知っても<strong>ロック画面で100%遮断＆データも暗号化されて一切読めなくなります</strong>。
-                    <br />
-                    下の招待ボタン（LINE / QR）には<strong>サーバーに送信されない秘密鍵（#key）</strong>が自動で付くため、<strong>パートナーはURLを1タップするだけで自動ロック解除</strong>されます✨
-                  </p>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      value={passwordInput}
-                      onChange={(e) => setPasswordInput(e.target.value)}
-                      placeholder="例: 1122 / futari2026 など（4文字以上）"
-                      className="flex-1 px-3 py-2 rounded-xl border border-stone-200 bg-white font-extrabold text-stone-800 text-xs"
-                    />
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={handleSaveAndSync}
-                      className="px-3.5 py-2 rounded-xl bg-[#FF8FAB] hover:bg-[#e57393] text-white font-extrabold text-xs shrink-0 shadow-2xs"
-                    >
-                      🔐 合言葉で保護する
-                    </button>
+                {/* 🔓 パスワードロック不要のご案内 */}
+                <div className="p-3 rounded-2xl bg-[#EAF7FA] border border-[#BCEBF5] flex items-center gap-2.5 text-stone-700">
+                  <span className="text-xl shrink-0">🔓</span>
+                  <div className="text-[11px] font-bold leading-relaxed">
+                    <strong>パスワードロック不要！</strong> パートナーもURLを開くだけで、ログインやパスコード入力の手間なくすぐに同じカレンダーを閲覧・更新できます✨
                   </div>
                 </div>
 
@@ -795,23 +747,9 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
               <details className="bg-white rounded-2xl p-3.5 border border-stone-200/80">
                 <summary className="font-bold text-stone-500 cursor-pointer flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-[#56CFE1]" />
-                  <span>🔧 上級者向け詳細設定：パスワードロックや独自GitHub保存先（通常は変更不要）</span>
+                  <span>🔧 上級者向け詳細設定：独自GitHub保存先（通常は変更不要）</span>
                 </summary>
                 <div className="mt-3 pt-3 border-t border-stone-100 space-y-3">
-                  <div>
-                    <label className="block font-bold text-stone-600 mb-1">
-                      <KeyRound className="w-3.5 h-3.5 inline text-[#FF8FAB] mr-1" />
-                      アプリ起動時の合言葉ロック（任意・4文字以上）
-                    </label>
-                    <input
-                      type="password"
-                      value={passwordInput}
-                      onChange={(e) => setPasswordInput(e.target.value)}
-                      placeholder="未設定でもデフォルト暗号化で安全に同期されます"
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-bold text-stone-800 text-xs"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-2 gap-2 bg-[#FFFBF7] p-1 rounded-xl border border-stone-200">
                     <button
                       type="button"
