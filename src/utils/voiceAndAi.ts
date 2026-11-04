@@ -32,17 +32,124 @@ export interface ParsedVoiceSchedule {
   shiftLabel?: string;    // 「12日は夜勤」のようにシフトを話した場合
   overtimeMinutes?: number; // 「35分残業」「1時間20分残業」など分単位
   overtimeHours?: number; // 「残業2時間」など残業時間（h）
+  overtimeStartTime?: string; // 残業開始時刻（例 "11:00"）
+  overtimeEndTime?: string;   // 残業終了時刻（例 "11:35"）
   holidayWorkMinutes?: number; // 休日出勤（分単位）
   holidayWorkHours?: number; // 「休日出勤4時間」など休出時間（h）
+  holidayWorkStartTime?: string;
+  holidayWorkEndTime?: string;
   targetPartner?: PartnerId; // 「夫が」「妻が」など対象パートナー
 }
 
-// 全角数字・漢数字を半角数字に正規化
-function normalizeNumbers(str: string): string {
-  return str
+/**
+ * 日本語の漢数字（一〜九、十、十一〜九十九）を算用数字に正規化
+ * 音声認識が「十一時三十五分」「一時半」などと返した場合でも確実に数値化します。
+ */
+export function convertKanjiNumbers(text: string): string {
+  const kanjiDigits: Record<string, number> = {
+    '〇': 0, '零': 0,
+    '一': 1, '壱': 1,
+    '二': 2, '弐': 2,
+    '三': 3, '参': 3,
+    '四': 4,
+    '五': 5,
+    '六': 6,
+    '七': 7,
+    '八': 8,
+    '九': 9,
+  };
+
+  let s = text;
+
+  // 「二十五」「三十五」「四十五」「十一」などの十を含む複合表現
+  s = s.replace(/([一二三四五六七八九])?十([一二三四五六七八九])?/g, (_, tens, ones) => {
+    const t = tens ? kanjiDigits[tens] ?? 1 : 1;
+    const o = ones ? kanjiDigits[ones] ?? 0 : 0;
+    return String(t * 10 + o);
+  });
+
+  // 単独の漢数字
+  s = s.replace(/[〇零一壱二弐三参四五六七八九]/g, (ch) => String(kanjiDigits[ch] ?? ch));
+
+  return s;
+}
+
+// 全角数字・漢数字・記号を半角数字に正規化
+export function normalizeNumbers(str: string): string {
+  let s = str
     .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
     .replace(/時半/g, '時30分')
     .replace(/：/g, ':');
+  s = convertKanjiNumbers(s);
+  return s;
+}
+
+export interface ExtractedTimeRange {
+  startTime: string; // "HH:mm"
+  endTime: string;   // "HH:mm"
+  diffMinutes: number; // 経過分数（1分単位）
+  matchedText: string;
+}
+
+/**
+ * 音声テキストから「何時何分から何時何分まで」という時間帯を抽出し、
+ * 1分単位の経過分数を精密計算します（例: 11:00〜11:35 -> 35分、17:00〜18:42 -> 102分）。
+ */
+export function extractTimeRangeAndMinutes(text: string): ExtractedTimeRange | null {
+  const norm = normalizeNumbers(text);
+
+  // パターン: (午前|午後|朝|昼|夕方|夜)? HH時(MM分)? から (午前|午後|朝|昼|夕方|夜)? HH時(MM分)? (まで|迄)?
+  // または HH:MM から HH:MM
+  const regex = /(午前|午後|朝|昼|夕方|夜)?\s*(\d{1,2})(?:時|:)(\d{1,2})?分?\s*(?:から|より|〜|~|-)\s*(午前|午後|朝|昼|夕方|夜)?\s*(\d{1,2})(?:時|:)(\d{1,2})?分?\s*(?:まで|迄)?/;
+
+  const m = norm.match(regex);
+  if (!m) return null;
+
+  const p1 = m[1];
+  let h1 = parseInt(m[2], 10);
+  const min1 = m[3] ? parseInt(m[3], 10) : 0;
+
+  const p2 = m[4];
+  let h2 = parseInt(m[5], 10);
+  const min2 = m[6] ? parseInt(m[6], 10) : 0;
+
+  if (p1 === '午後' || p1 === '夕方' || p1 === '夜') {
+    if (h1 < 12) h1 += 12;
+  }
+  if (p2 === '午後' || p2 === '夕方' || p2 === '夜') {
+    if (h2 < 12) h2 += 12;
+  }
+
+  // 残業の文脈で「5時から6時35分まで残業」のような場合、午後（17:00〜18:35）とみなす
+  if (!p1 && !p2 && h1 >= 1 && h1 <= 7 && h2 >= 1 && h2 <= 9 && h1 <= h2) {
+    if (/残業|仕事|バイト|勤務|夜/.test(norm)) {
+      h1 += 12;
+      h2 += 12;
+    }
+  }
+
+  let startTotal = h1 * 60 + min1;
+  let endTotal = h2 * 60 + min2;
+
+  if (endTotal < startTotal) {
+    if (h2 < 12 && (endTotal + 12 * 60) >= startTotal) {
+      h2 += 12;
+      endTotal = h2 * 60 + min2;
+    } else {
+      endTotal += 24 * 60; // 深夜日跨ぎ
+    }
+  }
+
+  const diff = Math.max(0, endTotal - startTotal);
+  const startStr = `${String(h1 % 24).padStart(2, '0')}:${String(min1).padStart(2, '0')}`;
+  const endStr = `${String(h2 % 24).padStart(2, '0')}:${String(min2).padStart(2, '0')}`;
+
+  return {
+    startTime: startStr,
+    endTime: endStr,
+    diffMinutes: diff,
+    matchedText: m[0],
+  };
 }
 
 /**
@@ -100,46 +207,66 @@ export function parseSpokenScheduleText(
     targetDay
   ).padStart(2, '0')}`;
 
-  // 2. 時刻表現の抽出（例：「19時から21時まで」「午後2時30分から」「10:30から」）
+  // 2. 時刻表現＆残業時間の抽出
   let isAllDay = true;
   let startTime: string | undefined;
   let endTime: string | undefined;
 
-  const formatHHMM = (h: number, m: number, isPm: boolean) => {
-    let hh = h;
-    if (isPm && hh < 12) hh += 12;
-    hh = Math.min(23, Math.max(0, hh));
-    const mm = Math.min(59, Math.max(0, m));
-    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-  };
+  let overtimeMinutes: number | undefined;
+  let overtimeHours: number | undefined;
+  let overtimeStartTime: string | undefined;
+  let overtimeEndTime: string | undefined;
 
-  // パターンA: 「(午前|午後)?10時30分から(午前|午後)?12時00分まで」
-  const rangeMatch = text.match(
-    /(午前|午後)?\s*(\d{1,2})(?:時|:)(\d{1,2})?分?\s*(?:から|〜|~|-)\s*(午前|午後)?\s*(\d{1,2})(?:時|:)(\d{1,2})?分?\s*(?:まで|に)?/
-  );
-  if (rangeMatch) {
-    const isPm1 = rangeMatch[1] === '午後';
-    const h1 = Number(rangeMatch[2]);
-    const m1 = rangeMatch[3] ? Number(rangeMatch[3]) : 0;
-    const isPm2 = rangeMatch[4] === '午後' || (isPm1 && Number(rangeMatch[5]) < 12);
-    const h2 = Number(rangeMatch[5]);
-    const m2 = rangeMatch[6] ? Number(rangeMatch[6]) : 0;
+  let holidayWorkMinutes: number | undefined;
+  let holidayWorkHours: number | undefined;
+  let holidayWorkStartTime: string | undefined;
+  let holidayWorkEndTime: string | undefined;
 
-    startTime = formatHHMM(h1, m1, isPm1);
-    endTime = formatHHMM(h2, m2, isPm2);
+  const isOvertimeIntent = /残業|申請|退勤|仕事|バイト/.test(text);
+  const isHolidayWorkIntent = /休日出勤|休出/.test(text);
+
+  // まず「何時何分から何時何分まで」という時間帯範囲の抽出（例: 11:00〜11:35 -> 35分）
+  const timeRange = extractTimeRangeAndMinutes(text);
+
+  if (timeRange) {
+    startTime = timeRange.startTime;
+    endTime = timeRange.endTime;
     isAllDay = false;
-    text = text.replace(rangeMatch[0], ' ');
+
+    // もし残業や休出の文脈、あるいは「何時何分から何時何分まで」と言われた場合
+    if (isHolidayWorkIntent) {
+      holidayWorkMinutes = timeRange.diffMinutes;
+      holidayWorkHours = Math.round((holidayWorkMinutes / 60) * 10) / 10;
+      holidayWorkStartTime = timeRange.startTime;
+      holidayWorkEndTime = timeRange.endTime;
+    } else {
+      // ユーザーが「11時から11時35分まで残業」「11時から11時35分なら35分で残業申請」などと言った場合、
+      // 1分単位で計算された経過分数をそのまま残業時間として自動セット！
+      overtimeMinutes = timeRange.diffMinutes;
+      overtimeHours = Math.round((overtimeMinutes / 60) * 10) / 10;
+      overtimeStartTime = timeRange.startTime;
+      overtimeEndTime = timeRange.endTime;
+    }
+
+    text = text.replace(timeRange.matchedText, ' ');
   } else {
-    // パターンB: 単一開始時刻「(午前|午後)?19時30分から」「14時に」
+    // 単一開始時刻「(午前|午後)?19時30分から」「14時に」
+    const formatHHMM = (h: number, m: number, isPm: boolean) => {
+      let hh = h;
+      if (isPm && hh < 12) hh += 12;
+      hh = Math.min(23, Math.max(0, hh));
+      const mm = Math.min(59, Math.max(0, m));
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    };
+
     const singleTimeMatch = text.match(
-      /(午前|午後)?\s*(\d{1,2})(?:時|:)(\d{1,2})?分?\s*(?:から|に|より)?/
+      /(午前|午後)?\s*(\d{1,2})(?:時(?!間)|:)(\d{1,2})?分?\s*(?:から|に|より)?/
     );
     if (singleTimeMatch) {
       const isPm = singleTimeMatch[1] === '午後';
       const h1 = Number(singleTimeMatch[2]);
       const m1 = singleTimeMatch[3] ? Number(singleTimeMatch[3]) : 0;
       startTime = formatHHMM(h1, m1, isPm);
-      // 終了時間は1時間後を初期セット
       const endH = Math.min(23, (isPm && h1 < 12 ? h1 + 12 : h1) + 1);
       endTime = `${String(endH).padStart(2, '0')}:${String(m1).padStart(2, '0')}`;
       isAllDay = false;
@@ -162,56 +289,58 @@ export function parseSpokenScheduleText(
     text = text.replace(/(お迎えお願い|迎えに来て)/g, ' ');
   }
 
-  // 4. 残業時間・休日出勤時間の解析（分単位対応：35分、45分、1時間20分など）
-  let overtimeMinutes: number | undefined;
-  let overtimeHours: number | undefined;
-  let holidayWorkMinutes: number | undefined;
-  let holidayWorkHours: number | undefined;
+  // 4. 「時間指定（◯時間◯分、◯◯分）」による残業・休出の追加解析（timeRangeで未抽出の場合）
+  if (overtimeMinutes === undefined) {
+    const otMatch1 = text.match(/残業(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
+    const otMatch2 = text.match(/(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)\s*(?:の)?残業/);
+    const otHoursAndMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(\d+)\s*時間(?:半|(\d+)\s*分)?(?:の残業)?/);
+    const otMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(\d+)\s*分(?:の残業)?/);
 
-  const otMatch1 = text.match(/残業(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
-  const otMatch2 = text.match(/(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)\s*(?:の)?残業/);
-  const otHoursAndMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(\d+)\s*時間(?:半|(\d+)\s*分)?(?:の残業)?/);
-  const otMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(\d+)\s*分(?:の残業)?/);
+    if (text.includes('1時間半残業') || text.includes('残業1時間半') || text.includes('残業一時間半')) {
+      overtimeMinutes = 90;
+    } else if (text.includes('2時間半残業') || text.includes('残業2時間半')) {
+      overtimeMinutes = 150;
+    } else if (/残業/.test(text) && otHoursAndMinutesMatch) {
+      const h = parseInt(otHoursAndMinutesMatch[1], 10);
+      const m = otHoursAndMinutesMatch[0].includes('半')
+        ? 30
+        : otHoursAndMinutesMatch[2]
+        ? parseInt(otHoursAndMinutesMatch[2], 10)
+        : 0;
+      overtimeMinutes = h * 60 + m;
+    } else if (/残業/.test(text) && otMinutesMatch) {
+      overtimeMinutes = parseInt(otMinutesMatch[1], 10);
+    } else if (otMatch1) {
+      const h = parseFloat(otMatch1[1]);
+      const extra = otMatch1[0].includes('時間半') ? 0.5 : 0;
+      overtimeMinutes = Math.round((h + extra) * 60);
+    } else if (otMatch2) {
+      const h = parseFloat(otMatch2[1]);
+      const extra = otMatch2[0].includes('時間半') ? 0.5 : 0;
+      overtimeMinutes = Math.round((h + extra) * 60);
+    } else if (/残業/.test(text)) {
+      const simpleDigit = text.match(/残業\s*(\d+)/);
+      if (simpleDigit) {
+        const val = parseInt(simpleDigit[1], 10);
+        overtimeMinutes = val < 10 ? val * 60 : val;
+      }
+    }
 
-  if (text.includes('1時間半残業') || text.includes('残業1時間半') || text.includes('残業一時間半')) {
-    overtimeMinutes = 90;
-  } else if (text.includes('2時間半残業') || text.includes('残業2時間半')) {
-    overtimeMinutes = 150;
-  } else if (/残業/.test(text) && otHoursAndMinutesMatch) {
-    const h = parseInt(otHoursAndMinutesMatch[1], 10);
-    const m = otHoursAndMinutesMatch[0].includes('半')
-      ? 30
-      : otHoursAndMinutesMatch[2]
-      ? parseInt(otHoursAndMinutesMatch[2], 10)
-      : 0;
-    overtimeMinutes = h * 60 + m;
-  } else if (/残業/.test(text) && otMinutesMatch) {
-    overtimeMinutes = parseInt(otMinutesMatch[1], 10);
-  } else if (otMatch1) {
-    const h = parseFloat(otMatch1[1]);
-    const extra = otMatch1[0].includes('時間半') ? 0.5 : 0;
-    overtimeMinutes = Math.round((h + extra) * 60);
-  } else if (otMatch2) {
-    const h = parseFloat(otMatch2[1]);
-    const extra = otMatch2[0].includes('時間半') ? 0.5 : 0;
-    overtimeMinutes = Math.round((h + extra) * 60);
-  } else if (/残業/.test(text) && !overtimeMinutes) {
-    // 時間指定のない「残業」の場合はデフォルト1時間をセット
-    const simpleDigit = text.match(/(\d+(?:\.\d+)?)/);
-    overtimeMinutes = simpleDigit ? Math.round(parseFloat(simpleDigit[1]) * 60) : 60;
+    if (overtimeMinutes !== undefined) {
+      overtimeHours = Math.round((overtimeMinutes / 60) * 10) / 10;
+    }
   }
 
-  if (overtimeMinutes !== undefined) {
-    overtimeHours = Math.round((overtimeMinutes / 60) * 10) / 10;
-  }
-
-  const holMatch = text.match(/(?:休日出勤|休出)(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
-  if (holMatch) {
-    holidayWorkHours = parseFloat(holMatch[1]);
-    holidayWorkMinutes = Math.round(holidayWorkHours * 60);
-  } else if (/休日出勤|休出/.test(text)) {
-    holidayWorkHours = 8;
-    holidayWorkMinutes = 480;
+  // 休日出勤の追加解析
+  if (holidayWorkMinutes === undefined) {
+    const holMatch = text.match(/(?:休日出勤|休出)(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
+    if (holMatch) {
+      holidayWorkHours = parseFloat(holMatch[1]);
+      holidayWorkMinutes = Math.round(holidayWorkHours * 60);
+    } else if (/休日出勤|休出/.test(text)) {
+      holidayWorkHours = 8;
+      holidayWorkMinutes = 480;
+    }
   }
 
   // 5. 対象パートナーの自動推測（「夫が」「妻が」「パパが」「ママが」）
@@ -236,22 +365,24 @@ export function parseSpokenScheduleText(
 
   // 7. 残りのテキストを整形してタイトルにする
   let cleanedTitle = text
+    .replace(/(?:残業申請|残業|なら\d+分で残業申請|で残業申請|申請となる|申請)/g, ' ')
+    .replace(/(?:\d+(?:\.\d+)?\s*(?:時間半|時間|h|分|分間))/g, ' ')
     .replace(/^[、。・\s]+|[、。・\s]+$/g, '')
     .replace(/\s+(です|を入れる|を追加|の予定|予定)$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (overtimeMinutes && (!cleanedTitle || cleanedTitle === '残業')) {
-    const h = Math.floor(overtimeMinutes / 60);
-    const m = overtimeMinutes % 60;
-    cleanedTitle = h === 0 ? `残業 +${m}分` : m === 0 ? `残業 +${h}h` : `残業 +${h}h${m}m`;
-  } else if (holidayWorkHours && (!cleanedTitle || cleanedTitle === '休日出勤' || cleanedTitle === '休出')) {
-    cleanedTitle = `休日出勤 ${holidayWorkHours}h`;
+  if (overtimeMinutes) {
+    if (!cleanedTitle || /^(残業|仕事|バイト|\d+時間|\d+分)$/.test(cleanedTitle)) {
+      cleanedTitle = `残業 +${overtimeMinutes}分`;
+    }
+  } else if (holidayWorkMinutes && (!cleanedTitle || /^(休日出勤|休出)$/.test(cleanedTitle))) {
+    cleanedTitle = `休日出勤 ${holidayWorkMinutes}分`;
   }
 
   return {
     date: dateStr,
-    title: cleanedTitle || rawText.trim(),
+    title: cleanedTitle || (overtimeMinutes ? `残業 +${overtimeMinutes}分` : rawText.trim()),
     isAllDay,
     startTime,
     endTime,
@@ -259,8 +390,12 @@ export function parseSpokenScheduleText(
     supportBadges,
     overtimeMinutes,
     overtimeHours,
+    overtimeStartTime,
+    overtimeEndTime,
     holidayWorkMinutes,
     holidayWorkHours,
+    holidayWorkStartTime,
+    holidayWorkEndTime,
     targetPartner,
   };
 }
