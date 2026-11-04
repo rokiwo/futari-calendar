@@ -582,13 +582,31 @@ export const App: React.FC = () => {
 
       const [, m, d] = dateStr.split('-').map(Number);
       const pName = store.metadata.partners[partnerId].name;
-      if (patch.overtimeHours !== undefined || patch.holidayWorkHours !== undefined) {
-        const hrs = patch.holidayWorkHours || patch.overtimeHours || 0;
-        const kind = patch.isHolidayWork || (patch.holidayWorkHours || 0) > 0 ? '休日出勤' : '残業';
+      if (
+        patch.overtimeMinutes !== undefined ||
+        patch.holidayWorkMinutes !== undefined ||
+        patch.overtimeHours !== undefined ||
+        patch.holidayWorkHours !== undefined
+      ) {
+        const isHw = Boolean(patch.isHolidayWork || (patch.holidayWorkMinutes || 0) > 0 || (patch.holidayWorkHours || 0) > 0);
+        const otMin =
+          patch.overtimeMinutes !== undefined
+            ? patch.overtimeMinutes
+            : patch.overtimeHours !== undefined
+            ? Math.round(patch.overtimeHours * 60)
+            : 0;
+        const hwMin =
+          patch.holidayWorkMinutes !== undefined
+            ? patch.holidayWorkMinutes
+            : patch.holidayWorkHours !== undefined
+            ? Math.round(patch.holidayWorkHours * 60)
+            : 0;
+        const minVal = isHw ? hwMin : otMin;
+        const kind = isHw ? '休日出勤' : '残業';
         showToast(
-          hrs > 0
-            ? `⏱️ ${m}/${d}（${pName}）に${kind} +${hrs}h を反映しました！`
-            : `⏱️ ${m}/${d}（${pName}）の残業・休出時間を0hにリセットしました`
+          minVal > 0
+            ? `⏱️ ${m}/${d}（${pName}）に${kind} +${minVal}分${minVal >= 60 ? ` (${formatMinutesToJa(minVal)})` : ''} を反映しました！`
+            : `⏱️ ${m}/${d}（${pName}）の残業・休出時間を0分にリセットしました`
         );
       } else {
         showToast(`✨ ${m}/${d}（${pName}）のシフト詳細を反映しました！`);
