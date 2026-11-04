@@ -640,11 +640,9 @@ export function createUploaded2026NovShifts(
       customLabel: stamp.shortLabel,
       startTime: stamp.startTime,
       endTime: stamp.endTime,
-      color: stamp.color,
-      textColor: stamp.textColor,
-      isHoliday: stamp.isHoliday,
+      createdBy: partnerId,
+      createdAt: nowIso,
       updatedAt: nowIso,
-      updatedBy: partnerId,
     };
   }
   return result;
