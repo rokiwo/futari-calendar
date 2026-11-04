@@ -283,8 +283,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 <Timer className="w-3.5 h-3.5 text-[#D49600] shrink-0" />
                 <span>
                   残業 {partnerA.avatar}
-                  {overtimeSummary.partnerA.totalExtraFormatted} / {partnerB.avatar}
-                  {overtimeSummary.partnerB.totalExtraFormatted}
+                  {overtimeSummary.partnerA.totalExtraMinutes}分 / {partnerB.avatar}
+                  {overtimeSummary.partnerB.totalExtraMinutes}分
                 </span>
               </button>
 
@@ -318,13 +318,19 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                             {p.avatar} {p.name}
                           </span>
                           <span className="px-2 py-0.5 rounded-full bg-[#FFF6D6] text-[#8A5A00] font-black text-xs">
-                            合計 {sum.totalExtraFormatted}
-                            {sum.totalExtraMinutes > 0 && ` (${sum.totalExtraMinutes}分)`}
+                            合計 {sum.totalExtraMinutes}分
+                            {sum.totalExtraMinutes >= 60 && ` (${sum.totalExtraFormatted})`}
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-2 text-[11px] text-stone-600 font-bold">
-                          <span>⏱️ 通常残業: {sum.overtimeFormatted}</span>
-                          <span>💼 休日出勤: {sum.holidayWorkFormatted}</span>
+                          <span>
+                            ⏱️ 通常残業: {sum.overtimeMinutes}分
+                            {sum.overtimeMinutes >= 60 && ` (${sum.overtimeFormatted})`}
+                          </span>
+                          <span>
+                            💼 休日出勤: {sum.holidayWorkMinutes}分
+                            {sum.holidayWorkMinutes >= 60 && ` (${sum.holidayWorkFormatted})`}
+                          </span>
                           <span>🏪 バイト: {sum.partTimeCount}回</span>
                         </div>
 
@@ -346,9 +352,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                                 >
                                   {dayN}日(
                                   {hwMin > 0
-                                    ? `休出${formatMinutesToJa(hwMin)}`
+                                    ? `休出${hwMin}分`
                                     : otMin > 0
-                                    ? `+${formatMinutesToJa(otMin)}`
+                                    ? `+${otMin}分`
                                     : 'バイト'}
                                   )
                                 </button>
