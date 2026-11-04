@@ -55,10 +55,10 @@ export function exportToIcs(
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//FutariCal//Couple Shift & Schedule Calendar//JA',
+    'PRODID:-//PairCal//Couple Shift & Schedule Calendar//JA',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:ふたりカレ (FutariCal)',
+    'X-WR-CALNAME:ペアカレ (PairCal)',
     'X-WR-TIMEZONE:Asia/Tokyo',
     'BEGIN:VTIMEZONE',
     'TZID:Asia/Tokyo',
@@ -174,9 +174,9 @@ export function exportToIcs(
     lines.push(`DTSTAMP:${dtstamp}`);
     lines.push(`DTSTART;VALUE=DATE:${formatIcsDateOnly(todayStr)}`);
     lines.push(`DTEND;VALUE=DATE:${getNextDayIcs(todayStr)}`);
-    lines.push('SUMMARY:🐻💕🐰 ふたりカレ カレンダー連携テスト');
+    lines.push('SUMMARY:🐻💕🐰 ペアカレ カレンダー連携テスト');
     lines.push(
-      'DESCRIPTION:ふたりカレにシフトや予定を登録してから書き出すと、ここにまとめて表示されます。'
+      'DESCRIPTION:ペアカレにシフトや予定を登録してから書き出すと、ここにまとめて表示されます。'
     );
     lines.push('END:VEVENT');
   }
