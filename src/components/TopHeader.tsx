@@ -13,6 +13,7 @@ import {
   Heart,
   Plus,
   Timer,
+  Camera,
 } from 'lucide-react';
 import {
   CalendarCategoryItem,
@@ -68,6 +69,7 @@ interface TopHeaderProps {
   onOpenSettings: () => void;
   onLockScreen: () => void;
   onOpenWidgetHome?: () => void;
+  onOpenShiftExport?: () => void;
 }
 
 export function formatLastSeen(isoStr?: string): string {
@@ -125,6 +127,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenSettings,
   onLockScreen,
   onOpenWidgetHome,
+  onOpenShiftExport,
 }) => {
   const [showHolidayPopup, setShowHolidayPopup] = useState(false);
   const [showOvertimePopup, setShowOvertimePopup] = useState(false);
@@ -403,6 +406,20 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 <span>{partnerB.name}</span>
               </button>
             </div>
+
+            {/* 📸 ナスカレ風シフト写真保存モーダル */}
+            {onOpenShiftExport && (
+              <button
+                type="button"
+                onClick={onOpenShiftExport}
+                className="px-2 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-[10px] sm:text-[11px] font-black flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
+                title="夫のみ・妻のみ・両方のシフト表を枠いっぱいの文字で写真(PNG)保存します"
+              >
+                <Camera className="w-3.5 h-3.5 text-[#0284C7]" />
+                <span className="hidden sm:inline">写真保存</span>
+                <span className="sm:hidden">写真</span>
+              </button>
+            )}
 
             {syncEnabled && (
               <button
