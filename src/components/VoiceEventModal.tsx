@@ -23,6 +23,7 @@ import {
 } from '../types/calendar';
 import {
   DEFAULT_CATEGORIES,
+  formatMinutesToJa,
   resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
@@ -135,8 +136,10 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   const [endTime, setEndTime] = useState('11:00');
   const [supportBadges, setSupportBadges] = useState<string[]>([]);
 
-  // 残業・休日出勤の音声解析フィールド
+  // 残業・休日出勤の音声解析フィールド（分単位）
   const [targetPartner, setTargetPartner] = useState<PartnerId>(activePartner);
+  const [overtimeMinutes, setOvertimeMinutes] = useState<number | null>(null);
+  const [holidayWorkMinutes, setHolidayWorkMinutes] = useState<number | null>(null);
   const [overtimeHours, setOvertimeHours] = useState<number | null>(null);
   const [holidayWorkHours, setHolidayWorkHours] = useState<number | null>(null);
   const [applyToShift, setApplyToShift] = useState<boolean>(true);
@@ -159,10 +162,18 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     if (parsed.supportBadges.length > 0) {
       setSupportBadges(parsed.supportBadges);
     }
-    if (parsed.overtimeHours !== undefined) {
+    if (parsed.overtimeMinutes !== undefined) {
+      setOvertimeMinutes(parsed.overtimeMinutes);
+      setOvertimeHours(parsed.overtimeHours ?? Math.round((parsed.overtimeMinutes / 60) * 10) / 10);
+    } else if (parsed.overtimeHours !== undefined) {
+      setOvertimeMinutes(Math.round(parsed.overtimeHours * 60));
       setOvertimeHours(parsed.overtimeHours);
     }
-    if (parsed.holidayWorkHours !== undefined) {
+    if (parsed.holidayWorkMinutes !== undefined) {
+      setHolidayWorkMinutes(parsed.holidayWorkMinutes);
+      setHolidayWorkHours(parsed.holidayWorkHours ?? Math.round((parsed.holidayWorkMinutes / 60) * 10) / 10);
+    } else if (parsed.holidayWorkHours !== undefined) {
+      setHolidayWorkMinutes(Math.round(parsed.holidayWorkHours * 60));
       setHolidayWorkHours(parsed.holidayWorkHours);
     }
     if (parsed.targetPartner) {
@@ -267,18 +278,23 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     e.preventDefault();
     stopListening();
 
-    const finalTitle = title.trim() || spokenText.trim() || (overtimeHours ? `残業 +${overtimeHours}h` : '');
-    if (!finalTitle && !overtimeHours && !holidayWorkHours) return;
+    const finalTitle =
+      title.trim() ||
+      spokenText.trim() ||
+      (overtimeMinutes ? `残業 +${formatMinutesToJa(overtimeMinutes)}` : overtimeHours ? `残業 +${overtimeHours}h` : '');
+    if (!finalTitle && !overtimeMinutes && !overtimeHours && !holidayWorkMinutes && !holidayWorkHours) return;
 
     const nowIso = new Date().toISOString();
     const cat = resolveCategoryInfo(categoryId, categoryList);
 
     // 1. もし残業・休日出勤が指定されていて、シフト反映がONならシフトデータを更新！
-    if (applyToShift && onUpdateShiftDetails && (overtimeHours !== null || holidayWorkHours !== null)) {
+    if (applyToShift && onUpdateShiftDetails && (overtimeMinutes !== null || holidayWorkMinutes !== null || overtimeHours !== null || holidayWorkHours !== null)) {
       onUpdateShiftDetails(dateStr, targetPartner, {
-        overtimeHours: overtimeHours !== null ? overtimeHours : undefined,
-        holidayWorkHours: holidayWorkHours !== null ? holidayWorkHours : undefined,
-        isHolidayWork: holidayWorkHours !== null && holidayWorkHours > 0,
+        overtimeMinutes: overtimeMinutes !== null ? overtimeMinutes : overtimeHours ? Math.round(overtimeHours * 60) : undefined,
+        overtimeHours: overtimeHours !== null ? overtimeHours : overtimeMinutes ? Math.round((overtimeMinutes / 60) * 10) / 10 : undefined,
+        holidayWorkMinutes: holidayWorkMinutes !== null ? holidayWorkMinutes : holidayWorkHours ? Math.round(holidayWorkHours * 60) : undefined,
+        holidayWorkHours: holidayWorkHours !== null ? holidayWorkHours : holidayWorkMinutes ? Math.round((holidayWorkMinutes / 60) * 10) / 10 : undefined,
+        isHolidayWork: (holidayWorkMinutes !== null && holidayWorkMinutes > 0) || (holidayWorkHours !== null && holidayWorkHours > 0),
       });
     }
 
@@ -452,29 +468,39 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                 </div>
               </div>
 
-              {/* 残業時間の微調整カウンター */}
-              {overtimeHours !== null && (
+              {/* 残業時間の微調整カウンター（分単位） */}
+              {(overtimeMinutes !== null || overtimeHours !== null) && (
                 <div className="flex items-center justify-between gap-2 bg-white rounded-xl p-2 border border-rose-200">
                   <span className="font-black text-stone-700">残業時間:</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setOvertimeHours((prev) => Math.max(0, (prev || 0) - 0.5))}
-                      className="p-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700"
-                      title="30分減らす"
+                      onClick={() => {
+                        const cur = overtimeMinutes ?? Math.round((overtimeHours || 0) * 60);
+                        const next = Math.max(0, cur - 15);
+                        setOvertimeMinutes(next);
+                        setOvertimeHours(Math.round((next / 60) * 10) / 10);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-black"
+                      title="15分減らす"
                     >
-                      <Minus className="w-4 h-4" />
+                      -15分
                     </button>
-                    <span className="text-sm font-black text-rose-600 min-w-[50px] text-center">
-                      +{overtimeHours} h
+                    <span className="text-sm font-black text-rose-600 min-w-[70px] text-center">
+                      +{formatMinutesToJa(overtimeMinutes ?? Math.round((overtimeHours || 0) * 60))}
                     </span>
                     <button
                       type="button"
-                      onClick={() => setOvertimeHours((prev) => (prev || 0) + 0.5)}
-                      className="p-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700"
-                      title="30分増やす"
+                      onClick={() => {
+                        const cur = overtimeMinutes ?? Math.round((overtimeHours || 0) * 60);
+                        const next = cur + 15;
+                        setOvertimeMinutes(next);
+                        setOvertimeHours(Math.round((next / 60) * 10) / 10);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-black"
+                      title="15分増やす"
                     >
-                      <Plus className="w-4 h-4" />
+                      +15分
                     </button>
                   </div>
                 </div>
@@ -633,13 +659,13 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
           <button
             type="submit"
-            disabled={!title.trim() && !spokenText.trim() && overtimeHours === null && holidayWorkHours === null}
+            disabled={!title.trim() && !spokenText.trim() && overtimeMinutes === null && overtimeHours === null && holidayWorkMinutes === null && holidayWorkHours === null}
             className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] disabled:opacity-40 text-white font-extrabold text-sm shadow-md flex items-center justify-center gap-2 active:scale-98 transition-all"
           >
             <Check className="w-4 h-4" />
             <span>
-              {overtimeHours !== null
-                ? `⏱️ ${currentPartner.name}の残業(+${overtimeHours}h)を登録する`
+              {(overtimeMinutes !== null || overtimeHours !== null)
+                ? `⏱️ ${currentPartner.name}の残業(+${formatMinutesToJa(overtimeMinutes ?? Math.round((overtimeHours || 0) * 60))})を登録する`
                 : 'この内容でカレンダーに登録する'}
             </span>
           </button>
