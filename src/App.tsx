@@ -127,6 +127,7 @@ export const App: React.FC = () => {
   const stampDrawerOpenRef = useRef(stampDrawerOpen);
   const isWidgetModeRef = useRef(isWidgetMode);
   const lastBackPressTimeRef = useRef<number>(0);
+  const isInternalBackRef = useRef<boolean>(false);
 
   useEffect(() => { dayDetailOpenRef.current = dayDetailOpen; }, [dayDetailOpen]);
   useEffect(() => { settingsOpenRef.current = settingsOpen; }, [settingsOpen]);
@@ -152,6 +153,7 @@ export const App: React.FC = () => {
     closeAction();
     try {
       if (window.history.state && window.history.state.futarical_layer) {
+        isInternalBackRef.current = true;
         window.history.back();
       }
     } catch {
@@ -231,6 +233,12 @@ export const App: React.FC = () => {
     }
 
     const handlePopState = () => {
+      // 内部の✕ボタン等でhistory.back()が呼ばれた場合はhandlePopStateの処理をスキップ
+      if (isInternalBackRef.current) {
+        isInternalBackRef.current = false;
+        return;
+      }
+
       // 1. もしモーダルが開いていればモーダルを閉じる
       if (
         dayDetailOpenRef.current ||
