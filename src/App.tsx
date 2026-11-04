@@ -60,10 +60,10 @@ export const App: React.FC = () => {
   const [store, setStore] = useState<CalendarDataStore>(() => createInitialDataStore());
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // デフォルトで「🏠ウィジェット（ふたりホーム）」画面で起動し、そこから月間カレンダーへ飛べる構成
+  // デフォルトで「📅月間カレンダー」画面で起動（ウィジェットはヘッダーの「🏠ウィジェット」ボタンから閲覧可能）
   const [isWidgetMode, setIsWidgetMode] = useState<boolean>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('view') !== 'calendar';
+    return params.get('view') === 'widget';
   });
 
   // 表示中の年月・選択日
@@ -258,9 +258,9 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 3. もしカレンダー画面（!isWidgetMode）ならウィジェットホームに戻る
-      if (!isWidgetModeRef.current) {
-        setIsWidgetMode(true);
+      // 3. もしウィジェット画面（isWidgetMode）ならカレンダー画面に戻る
+      if (isWidgetModeRef.current) {
+        setIsWidgetMode(false);
         return;
       }
 
@@ -392,6 +392,12 @@ export const App: React.FC = () => {
         } finally {
           if (mounted) setIsSyncing(false);
         }
+      }
+    }).catch((err) => {
+      console.error('Failed to load local store:', err);
+      if (mounted) {
+        setStore(createInitialDataStore());
+        setIsLoaded(true);
       }
     });
     return () => {
