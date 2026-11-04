@@ -1,6 +1,6 @@
 {
-  "name": "ふたりカレ (FutariCal) - 夫婦共有シフト＆スケジュール",
-  "short_name": "ふたりカレ",
+  "name": "ペアカレ (PairCal) - 夫婦共有シフト＆スケジュール",
+  "short_name": "ペアカレ",
   "description": "ナスカレの2人並列シフト入力とTimeTreeの既読・予定管理を合体した夫婦専用カレンダー",
   "start_url": "./",
   "scope": "./",
