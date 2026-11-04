@@ -215,8 +215,11 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   ) => {
     const stamp = shift ? stampMap.get(shift.stampId) : undefined;
     const subStamp = shift?.subStampId ? stampMap.get(shift.subStampId) : undefined;
-    const hasSubWork = Boolean(shift?.subCustomLabel || subStamp);
     const subLabel = shift?.subCustomLabel || subStamp?.shortLabel || '';
+    const hasSubWork = Boolean(shift?.subCustomLabel || subStamp);
+    const overtime = shift?.overtimeHours || 0;
+    const holWork = shift?.holidayWorkHours || 0;
+    const hasExtra = hasSubWork || overtime > 0 || holWork > 0;
 
     const timeInfo =
       shift?.startTime || stamp?.startTime
