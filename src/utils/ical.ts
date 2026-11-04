@@ -7,7 +7,12 @@ import {
   ShiftEntry,
   StampPreset,
 } from '../types/calendar';
-import { CATEGORY_MAP } from './presets';
+import {
+  CATEGORY_MAP,
+  formatMinutesShort,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
+} from './presets';
 import { matchShiftStampByText } from './voiceAndAi';
 
 // YYYY-MM-DD を YYYYMMDD 形式に変換
@@ -87,8 +92,10 @@ export function exportToIcs(
         shift.customLabel || stamp?.label || (shift.isHolidayWork ? '休日出勤' : 'シフト');
       const icon = stamp?.icon || '';
       const extraParts: string[] = [];
-      if ((shift.overtimeHours || 0) > 0) extraParts.push(`残業+${shift.overtimeHours}h`);
-      if ((shift.holidayWorkHours || 0) > 0) extraParts.push(`休出${shift.holidayWorkHours}h`);
+      const otMin = getShiftOvertimeMinutes(shift);
+      const holMin = getShiftHolidayWorkMinutes(shift);
+      if (otMin > 0) extraParts.push(`残業+${formatMinutesShort(otMin)}`);
+      if (holMin > 0) extraParts.push(`休出${formatMinutesShort(holMin)}`);
       if (shift.subCustomLabel) extraParts.push(`+${shift.subCustomLabel}`);
       const extraSuffix = extraParts.length > 0 ? ` (${extraParts.join('/')})` : '';
 
