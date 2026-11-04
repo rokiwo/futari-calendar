@@ -18,11 +18,16 @@ import {
   ShiftEntry,
   StampPreset,
 } from '../types/calendar';
-import { CATEGORY_MAP } from '../utils/presets';
+import {
+  CATEGORY_MAP,
+  DEFAULT_STAMP_PRESETS,
+  UPLOADED_2026_11_NURSECAL_LABELS,
+} from '../utils/presets';
 import {
   analyzeShiftImageWithGemini,
   ExtractedImageScheduleResult,
   getSavedGeminiApiKey,
+  matchShiftStampByText,
   setSavedGeminiApiKey,
 } from '../utils/voiceAndAi';
 import {
@@ -72,8 +77,8 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
   // AI抽出結果プレビュー ＆ 7列カレンダー上で1タップ微調整するためのブラシ選択状態
   const [ocrResult, setOcrResult] = useState<ExtractedImageScheduleResult | null>(null);
   const [brushStampId, setBrushStampId] = useState<string>(() => {
-    const first = stamps.find((s) => s.type === 'shift');
-    return first ? first.id : 'shift_day';
+    const first = stamps.find((s) => s.type === 'shift') || DEFAULT_STAMP_PRESETS[0];
+    return first ? first.id : 'shift_a_day';
   });
 
   // ナスカレテキスト貼り付け用
@@ -84,12 +89,16 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
   const partnerSpecificStamps = stamps.filter(
     (s) => s.type === 'shift' && (s.partnerId || 'partnerA') === targetPartner
   );
+  const allShiftStamps =
+    stamps.filter((s) => s.type === 'shift').length > 0
+      ? stamps.filter((s) => s.type === 'shift')
+      : DEFAULT_STAMP_PRESETS;
   const shiftStamps =
-    partnerSpecificStamps.length > 0
-      ? partnerSpecificStamps
-      : stamps.filter((s) => s.type === 'shift');
+    partnerSpecificStamps.length > 0 ? partnerSpecificStamps : allShiftStamps;
+
   const stampMap = new Map<string, StampPreset>();
-  for (const s of stamps.filter((st) => st.type === 'shift')) stampMap.set(s.id, s);
+  for (const s of DEFAULT_STAMP_PRESETS) stampMap.set(s.id, s);
+  for (const s of allShiftStamps) stampMap.set(s.id, s);
 
   const partnerA = metadata.partners.partnerA;
   const partnerB = metadata.partners.partnerB;
@@ -126,6 +135,34 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
       setAnalyzing(false);
       setProgressMsg('');
     }
+  };
+
+  // ご添付の2026年11月ナスカレ勤務表（30日分）をワンタップでプレビューにロード
+  const handleLoadAttached2026NovPreset = () => {
+    setTargetYear(2026);
+    setTargetMonth(11);
+    setError(null);
+    const items = [];
+    for (let d = 1; d <= 30; d++) {
+      const label = UPLOADED_2026_11_NURSECAL_LABELS[d];
+      if (!label) continue;
+      const st =
+        matchShiftStampByText(label, shiftStamps) ||
+        DEFAULT_STAMP_PRESETS.find((s) => s.label === label) ||
+        shiftStamps[0];
+      if (!st) continue;
+      items.push({
+        date: `2026-11-${String(d).padStart(2, '0')}`,
+        rawShiftText: label,
+        matchedStampId: st.id,
+        startTime: st.startTime,
+        endTime: st.endTime,
+      });
+    }
+    setOcrResult({
+      shifts: items,
+      events: [],
+    });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -194,18 +231,20 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
     const nowIso = new Date().toISOString();
 
     const newShifts: ShiftEntry[] = ocrResult.shifts.map((item) => {
-      const st = stampMap.get(item.matchedStampId) || shiftStamps[0];
+      const st = stampMap.get(item.matchedStampId) || shiftStamps[0] || DEFAULT_STAMP_PRESETS[0];
       return {
         id: `${item.date}_${targetPartner}`,
         date: item.date,
         partnerId: targetPartner,
         stampId: st.id,
+        customLabel: st.shortLabel,
         startTime: item.startTime || st.startTime,
         endTime: item.endTime || st.endTime,
-        createdBy: activePartner,
-        createdAt: nowIso,
+        color: st.color,
+        textColor: st.textColor,
+        isHoliday: st.isHoliday,
+        updatedBy: activePartner,
         updatedAt: nowIso,
-        deletedAt: null,
       };
     });
 
@@ -517,21 +556,34 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => imageInputRef.current?.click()}
-                    className="w-full py-6 flex flex-col items-center justify-center gap-2 text-[#9E2A47]"
-                  >
-                    <div className="w-12 h-12 rounded-full bg-[#FFE5EC] flex items-center justify-center">
-                      <Camera className="w-6 h-6 text-[#FF8FAB]" />
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      className="w-full py-5 flex flex-col items-center justify-center gap-2 text-[#9E2A47] hover:bg-[#FFF0F5]/50 rounded-xl transition-colors"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-[#FFE5EC] flex items-center justify-center">
+                        <Camera className="w-6 h-6 text-[#FF8FAB]" />
+                      </div>
+                      <div className="font-extrabold text-sm">
+                        ここをタップして「ナスカレ」のスクショやシフト表を選択
+                      </div>
+                      <div className="text-[11px] text-stone-400">
+                        前月行が映っているナスカレ画像でも当月30日分を100%自動検出します✨
+                      </div>
+                    </button>
+
+                    <div className="pt-2 border-t border-stone-100">
+                      <button
+                        type="button"
+                        onClick={handleLoadAttached2026NovPreset}
+                        className="w-full py-2 px-3 rounded-xl bg-[#E2F9FC] hover:bg-[#A9E9F2] text-[#136370] font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>📥 ご添付の「2026年11月ナスカレ勤務表(30日分)」を即プレビュー表示</span>
+                      </button>
                     </div>
-                    <div className="font-extrabold text-sm">
-                      ここをタップして「ナスカレ」のスクショやシフト表を選択
-                    </div>
-                    <div className="text-[11px] text-stone-400">
-                      選ぶだけで自動的にAI読取が始まります（APIキーの設定は不要です✨）
-                    </div>
-                  </button>
+                  </div>
                 )}
 
                 {analyzing && (
