@@ -22,22 +22,29 @@ import {
   PartnerId,
   ShiftEntry,
 } from '../types/calendar';
+import {
+  formatMinutesToJa,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
+} from '../utils/presets';
+
+export interface PartnerOvertimeSummary {
+  overtimeMinutes: number;        // 通常残業（分単位：例 35）
+  holidayWorkMinutes: number;     // 休日出勤（分単位：例 240）
+  totalExtraMinutes: number;      // 合計時間（分単位：例 275）
+  overtimeHours: number;          // 従来の時間小数（後方互換用）
+  holidayWorkHours: number;       // 従来の時間小数
+  totalExtraHours: number;        // 従来の時間小数
+  overtimeFormatted: string;      // 「35分」「1時間30分」
+  holidayWorkFormatted: string;   // 「4時間」
+  totalExtraFormatted: string;    // 「4時間35分」
+  partTimeCount: number;
+  entries: ShiftEntry[];
+}
 
 export interface MonthlyOvertimeSummary {
-  partnerA: {
-    overtimeHours: number;
-    holidayWorkHours: number;
-    totalExtraHours: number;
-    partTimeCount: number;
-    entries: ShiftEntry[];
-  };
-  partnerB: {
-    overtimeHours: number;
-    holidayWorkHours: number;
-    totalExtraHours: number;
-    partTimeCount: number;
-    entries: ShiftEntry[];
-  };
+  partnerA: PartnerOvertimeSummary;
+  partnerB: PartnerOvertimeSummary;
 }
 
 interface TopHeaderProps {
@@ -276,13 +283,13 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 <Timer className="w-3.5 h-3.5 text-[#D49600] shrink-0" />
                 <span>
                   残業 {partnerA.avatar}
-                  {overtimeSummary.partnerA.totalExtraHours}h / {partnerB.avatar}
-                  {overtimeSummary.partnerB.totalExtraHours}h
+                  {overtimeSummary.partnerA.totalExtraFormatted} / {partnerB.avatar}
+                  {overtimeSummary.partnerB.totalExtraFormatted}
                 </span>
               </button>
 
               {showOvertimePopup && (
-                <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-72 sm:w-80 bg-white rounded-3xl shadow-xl border-2 border-[#FFE28A] p-3.5 z-50 animate-pop text-xs space-y-2.5">
+                <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-72 sm:w-84 bg-white rounded-3xl shadow-xl border-2 border-[#FFE28A] p-3.5 z-50 animate-pop text-xs space-y-2.5">
                   <div className="flex items-center justify-between pb-1.5 border-b border-stone-100">
                     <span className="font-extrabold text-[#8A5A00] flex items-center gap-1">
                       <Timer className="w-4 h-4 text-[#FFB703]" />
@@ -311,12 +318,13 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                             {p.avatar} {p.name}
                           </span>
                           <span className="px-2 py-0.5 rounded-full bg-[#FFF6D6] text-[#8A5A00] font-black text-xs">
-                            合計 {sum.totalExtraHours} 時間
+                            合計 {sum.totalExtraFormatted}
+                            {sum.totalExtraMinutes > 0 && ` (${sum.totalExtraMinutes}分)`}
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-2 text-[11px] text-stone-600 font-bold">
-                          <span>⏱️ 通常残業: {sum.overtimeHours}h</span>
-                          <span>💼 休日出勤: {sum.holidayWorkHours}h</span>
+                          <span>⏱️ 通常残業: {sum.overtimeFormatted}</span>
+                          <span>💼 休日出勤: {sum.holidayWorkFormatted}</span>
                           <span>🏪 バイト: {sum.partTimeCount}回</span>
                         </div>
 
@@ -324,6 +332,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                           <div className="flex flex-wrap gap-1 pt-1">
                             {sum.entries.map((en) => {
                               const dayN = Number(en.date.split('-')[2]);
+                              const otMin = getShiftOvertimeMinutes(en);
+                              const hwMin = getShiftHolidayWorkMinutes(en);
                               return (
                                 <button
                                   key={en.id}
@@ -335,10 +345,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                                   className="px-1.5 py-0.5 rounded-lg bg-white border border-stone-200 text-[10px] font-bold text-stone-700 hover:border-[#FF8FAB]"
                                 >
                                   {dayN}日(
-                                  {en.holidayWorkHours
-                                    ? `休出${en.holidayWorkHours}h`
-                                    : en.overtimeHours
-                                    ? `+${en.overtimeHours}h`
+                                  {hwMin > 0
+                                    ? `休出${formatMinutesToJa(hwMin)}`
+                                    : otMin > 0
+                                    ? `+${formatMinutesToJa(otMin)}`
                                     : 'バイト'}
                                   )
                                 </button>
