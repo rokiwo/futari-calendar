@@ -10,6 +10,7 @@ import {
 } from './types/calendar';
 import {
   createInitialDataStore,
+  createUploaded2026NovShifts,
   DEFAULT_CATEGORIES,
   DEFAULT_STAMP_PRESETS,
   LEGACY_DEFAULT_STAMP_IDS,
@@ -78,8 +79,9 @@ export const App: React.FC = () => {
   const [isExpandedView, setIsExpandedView] = useState<boolean>(false);
   const [showShiftTimeInCell, setShowShiftTimeInCell] = useState<boolean>(false);
 
-  // シフト連続入力ドロワー状態
+  // シフト連続入力ドロワー状態 ＆ 連続翌日移動ON/OFF
   const [stampDrawerOpen, setStampDrawerOpen] = useState<boolean>(false);
+  const [autoAdvance, setAutoAdvance] = useState<boolean>(true);
   const [stampDrawerTab, setStampDrawerTab] = useState<StampDrawerTab>('partnerA_shift');
   const [selectedStampId, setSelectedStampId] = useState<string | null>('shift_a_day');
 
@@ -151,9 +153,14 @@ export const App: React.FC = () => {
       const shouldClearAll = localStorage.getItem(CLEAR_SHIFTS_AND_EVENTS_FLAG) !== '1';
 
       // ご要望：「夫の方の12種の勤務リストを登録し、妻の方は空にしておく」を自動適用
-      const HUSBAND_12_SHIFTS_FLAG = 'futarical_husband_shifts_preset_20261104_v3';
+      const HUSBAND_12_SHIFTS_FLAG = 'futarical_husband_shifts_preset_20261104_v4';
       const shouldApplyHusband12Presets =
         localStorage.getItem(HUSBAND_12_SHIFTS_FLAG) !== '1';
+
+      // 添付の2026年11月ナスカレ勤務表（30日分）を自動適用
+      const NURSECAL_2026_11_FLAG = 'futarical_nursecal_202611_preset_v1';
+      const shouldApplyNursecal202611 =
+        localStorage.getItem(NURSECAL_2026_11_FLAG) !== '1';
 
       const cleanedLoadedStamps = (loaded.stamps || [])
         .filter((s) => s.type === 'shift' && !LEGACY_DEFAULT_STAMP_IDS.has(s.id))
@@ -164,10 +171,15 @@ export const App: React.FC = () => {
           ? [...DEFAULT_STAMP_PRESETS]
           : cleanedLoadedStamps;
 
+      const baseShifts = shouldClearAll ? {} : loaded.shifts || {};
+      const nextShifts = shouldApplyNursecal202611
+        ? { ...baseShifts, ...createUploaded2026NovShifts('partnerA', nextStamps) }
+        : baseShifts;
+
       const nowIso = new Date().toISOString();
       const nextStore: CalendarDataStore = {
         ...loaded,
-        shifts: shouldClearAll ? {} : loaded.shifts || {},
+        shifts: nextShifts,
         events: shouldClearAll ? {} : loaded.events || {},
         daySupports: shouldClearAll ? {} : loaded.daySupports || {},
         categories:
@@ -175,7 +187,7 @@ export const App: React.FC = () => {
             ? loaded.categories
             : DEFAULT_CATEGORIES,
         stamps: nextStamps,
-        updatedAt: shouldApplyHusband12Presets ? nowIso : loaded.updatedAt || nowIso,
+        updatedAt: shouldApplyHusband12Presets || shouldApplyNursecal202611 ? nowIso : loaded.updatedAt || nowIso,
       };
 
       if (shouldClearAll) {
@@ -184,7 +196,10 @@ export const App: React.FC = () => {
       if (shouldApplyHusband12Presets) {
         localStorage.setItem(HUSBAND_12_SHIFTS_FLAG, '1');
       }
-      if (shouldClearAll || shouldApplyHusband12Presets) {
+      if (shouldApplyNursecal202611) {
+        localStorage.setItem(NURSECAL_2026_11_FLAG, '1');
+      }
+      if (shouldClearAll || shouldApplyHusband12Presets || shouldApplyNursecal202611) {
         await saveLocalStore(nextStore, activeSessionPass || undefined);
       }
 
@@ -430,7 +445,7 @@ export const App: React.FC = () => {
     [activePartner, commitStore, store]
   );
 
-  // 月間カレンダーの日付セルを「シングルタップ」した時の処理（その日に移動。スタンプドロワー展開中のみシフト押印）
+  // 月間カレンダーの日付セルを「シングルタップ」した時の処理（その日に選択移動。勝手にスタンプされるバグを防止）
   const handleCellSingleTap = useCallback(
     (dateStr: string) => {
       setSelectedDate(dateStr);
@@ -439,34 +454,8 @@ export const App: React.FC = () => {
         setYear(ny);
         setMonth(nm);
       }
-
-      if (stampDrawerOpen) {
-        if (stampDrawerTab === 'support_badge') {
-          return;
-        }
-        const targetPartner: PartnerId =
-          stampDrawerTab === 'partnerB_shift' ? 'partnerB' : 'partnerA';
-
-        if (selectedStampId === '__ERASER__') {
-          handleSetShiftAndAdvance(dateStr, targetPartner, null);
-          return;
-        }
-
-        const stamp = store.stamps.find((s) => s.id === selectedStampId);
-        if (stamp) {
-          handleSetShiftAndAdvance(dateStr, targetPartner, stamp);
-        }
-      }
     },
-    [
-      handleSetShiftAndAdvance,
-      month,
-      selectedStampId,
-      stampDrawerOpen,
-      stampDrawerTab,
-      store.stamps,
-      year,
-    ]
+    [month, year]
   );
 
   // 月間カレンダーの日付セルを「ダブルタップ」した時の処理（TimeTree風：その日のすべての予定を表示）
@@ -803,22 +792,32 @@ export const App: React.FC = () => {
   }, [isLoaded, sessionPassword, store, syncConfig]);
 
   const handlePrevMonth = useCallback(() => {
-    if (month === 1) {
-      setYear((y) => y - 1);
-      setMonth(12);
-    } else {
-      setMonth((m) => m - 1);
-    }
-  }, [month]);
+    setMonth((m) => {
+      let ny = year;
+      let nm = m - 1;
+      if (m === 1) {
+        ny = year - 1;
+        nm = 12;
+        setYear(ny);
+      }
+      setSelectedDate(`${ny}-${String(nm).padStart(2, '0')}-01`);
+      return nm;
+    });
+  }, [year]);
 
   const handleNextMonth = useCallback(() => {
-    if (month === 12) {
-      setYear((y) => y + 1);
-      setMonth(1);
-    } else {
-      setMonth((m) => m + 1);
-    }
-  }, [month]);
+    setMonth((m) => {
+      let ny = year;
+      let nm = m + 1;
+      if (m === 12) {
+        ny = year + 1;
+        nm = 1;
+        setYear(ny);
+      }
+      setSelectedDate(`${ny}-${String(nm).padStart(2, '0')}-01`);
+      return nm;
+    });
+  }, [year]);
 
   if (!isLoaded) {
     return (
@@ -935,6 +934,7 @@ export const App: React.FC = () => {
             onSelectYearMonth={(y, m) => {
               setYear(y);
               setMonth(m);
+              setSelectedDate(`${y}-${String(m).padStart(2, '0')}-01`);
             }}
             activePartner={activePartner}
             onToggleActivePartner={handleToggleActivePartner}
@@ -995,11 +995,13 @@ export const App: React.FC = () => {
             onSelectStamp={setSelectedStampId}
             selectedDate={selectedDate}
             onMoveDate={moveSelectedDate}
+            autoAdvance={autoAdvance}
+            onToggleAutoAdvance={setAutoAdvance}
             onApplyShiftAndAdvance={(stamp, targetPartner) =>
-              handleSetShiftAndAdvance(selectedDate, targetPartner, stamp)
+              handleSetShiftAndAdvance(selectedDate, targetPartner, stamp, autoAdvance)
             }
             onClearShiftAndAdvance={(targetPartner) =>
-              handleSetShiftAndAdvance(selectedDate, targetPartner, null)
+              handleSetShiftAndAdvance(selectedDate, targetPartner, null, autoAdvance)
             }
             onUpdateShiftDetailsOnSelectedDate={(targetPartner, patch) => {
               handleUpdateShiftDetails(selectedDate, targetPartner, patch);
