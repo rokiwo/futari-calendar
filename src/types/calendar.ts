@@ -51,10 +51,17 @@ export interface ShiftEntry {
   subStartTime?: string;   // 例: "18:30"
   subEndTime?: string;     // 例: "22:00"
 
-  // 残業・休日出勤の記録（月間集計対応）
-  overtimeHours?: number;    // 残業時間（例: 1.5, 2.0）
-  holidayWorkHours?: number; // 休日出勤時間（例: 4.0, 8.0）
-  isHolidayWork?: boolean;   // 休日出勤フラグ
+  // 残業・休日出勤の記録（分単位計算・月間集計対応）
+  overtimeMinutes?: number;    // 残業時間（分単位：例 35, 90）
+  overtimeStartTime?: string;  // 残業開始時刻（例: "11:00"）
+  overtimeEndTime?: string;    // 残業終了時刻（例: "11:35"）
+  overtimeHours?: number;      // 従来の時間小数（後方互換用：例 1.5）
+
+  holidayWorkMinutes?: number;   // 休日出勤時間（分単位：例 240, 480）
+  holidayWorkStartTime?: string; // 休日出勤開始時刻
+  holidayWorkEndTime?: string;   // 休日出勤終了時刻
+  holidayWorkHours?: number;     // 従来の時間小数（後方互換用：例 4.0）
+  isHolidayWork?: boolean;       // 休日出勤フラグ
 
   memo?: string;
   createdBy: PartnerId;
