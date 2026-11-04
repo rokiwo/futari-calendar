@@ -7,12 +7,14 @@ import {
   ScheduleEvent,
   ShiftEntry,
   StampPreset,
+  WelcomeImageConfig,
 } from './types/calendar';
 import {
   createInitialDataStore,
   createUploaded2026NovShifts,
   DEFAULT_CATEGORIES,
   DEFAULT_STAMP_PRESETS,
+  SAYA_DEFAULT_STAMPS,
   formatMinutesToJa,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
@@ -44,6 +46,7 @@ import { WidgetCompactView, WidgetGuideModal } from './components/WidgetModalAnd
 import { CategoryManagerModal } from './components/CategoryManagerModal';
 import { ExportPartnerMode, ShiftExportModal } from './components/ShiftExportModal';
 import { TaskManagerModal } from './components/TaskManagerModal';
+import { WelcomeImageModal } from './components/WelcomeImageModal';
 
 // 日付文字列 "YYYY-MM-DD" に deltaDays 日を加算した "YYYY-MM-DD" を返す
 function addDaysToDateStr(dateStr: string, deltaDays: number): string {
@@ -103,6 +106,8 @@ export const App: React.FC = () => {
   const [shiftExportOpen, setShiftExportOpen] = useState<boolean>(false);
   const [shiftExportMode, setShiftExportMode] = useState<ExportPartnerMode>('partnerA');
   const [taskManagerOpen, setTaskManagerOpen] = useState<boolean>(false);
+  const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(false);
+  const [welcomePreviewConfig, setWelcomePreviewConfig] = useState<WelcomeImageConfig | null>(null);
 
   // パスワードロック＆クラウド同期状態
   const [savedPassHash, setSavedPassHashState] = useState<string | null>(() => getSavedPassHash());
@@ -134,6 +139,7 @@ export const App: React.FC = () => {
   const widgetGuideOpenRef = useRef(widgetGuideOpen);
   const shiftExportOpenRef = useRef(shiftExportOpen);
   const taskManagerOpenRef = useRef(taskManagerOpen);
+  const welcomeModalOpenRef = useRef(welcomeModalOpen);
   const stampDrawerOpenRef = useRef(stampDrawerOpen);
   const isWidgetModeRef = useRef(isWidgetMode);
   const lastBackPressTimeRef = useRef<number>(0);
@@ -148,6 +154,7 @@ export const App: React.FC = () => {
   useEffect(() => { widgetGuideOpenRef.current = widgetGuideOpen; }, [widgetGuideOpen]);
   useEffect(() => { shiftExportOpenRef.current = shiftExportOpen; }, [shiftExportOpen]);
   useEffect(() => { taskManagerOpenRef.current = taskManagerOpen; }, [taskManagerOpen]);
+  useEffect(() => { welcomeModalOpenRef.current = welcomeModalOpen; }, [welcomeModalOpen]);
   useEffect(() => { stampDrawerOpenRef.current = stampDrawerOpen; }, [stampDrawerOpen]);
   useEffect(() => { isWidgetModeRef.current = isWidgetMode; }, [isWidgetMode]);
 
@@ -244,6 +251,12 @@ export const App: React.FC = () => {
     pushNavLayer('taskManager');
   }, [pushNavLayer]);
 
+  const openWelcomeModal = useCallback(() => {
+    setWelcomePreviewConfig(null);
+    setWelcomeModalOpen(true);
+    pushNavLayer('welcomeModal');
+  }, [pushNavLayer]);
+
   const enterCalendarMode = useCallback(() => {
     setIsWidgetMode(false);
     pushNavLayer('calendar');
@@ -275,7 +288,8 @@ export const App: React.FC = () => {
         voiceModalOpenRef.current ||
         widgetGuideOpenRef.current ||
         shiftExportOpenRef.current ||
-        taskManagerOpenRef.current
+        taskManagerOpenRef.current ||
+        welcomeModalOpenRef.current
       ) {
         setDayDetailOpen(false);
         setOpenEventFormDirectly(false);
@@ -287,6 +301,8 @@ export const App: React.FC = () => {
         setWidgetGuideOpen(false);
         setShiftExportOpen(false);
         setTaskManagerOpen(false);
+        setWelcomeModalOpen(false);
+        setWelcomePreviewConfig(null);
         return;
       }
 
@@ -368,14 +384,38 @@ export const App: React.FC = () => {
       const shouldApplyNursecal202611 =
         localStorage.getItem(NURSECAL_2026_11_FLAG) !== '1';
 
+      // ご要望：「さやの方のシフト入力テンプレ（10種＋休み・有休）」を自動適用
+      const SAYA_10_SHIFTS_FLAG = 'paircal_saya_shifts_preset_20261104_v2';
+      const shouldApplySayaPresets =
+        localStorage.getItem(SAYA_10_SHIFTS_FLAG) !== '1';
+
       const cleanedLoadedStamps = (loaded.stamps || [])
         .filter((s) => s.type === 'shift' && !LEGACY_DEFAULT_STAMP_IDS.has(s.id))
         .map((s) => ({ ...s, partnerId: s.partnerId || 'partnerA' }));
 
-      const nextStamps =
+      let nextStamps =
         shouldApplyHusband12Presets || cleanedLoadedStamps.length === 0
           ? [...DEFAULT_STAMP_PRESETS]
           : cleanedLoadedStamps;
+
+      let nextMetadata = loaded.metadata;
+      if (shouldApplySayaPresets) {
+        // さや（partnerB）のスタンプを最新の10種類＋休み・有休でセット
+        const nonPartnerBStamps = nextStamps.filter((s) => s.partnerId !== 'partnerB');
+        nextStamps = [...nonPartnerBStamps, ...SAYA_DEFAULT_STAMPS];
+        if (nextMetadata?.partners?.partnerB?.name === '妻') {
+          nextMetadata = {
+            ...nextMetadata,
+            partners: {
+              ...nextMetadata.partners,
+              partnerB: {
+                ...nextMetadata.partners.partnerB,
+                name: 'さや',
+              },
+            },
+          };
+        }
+      }
 
       const baseShifts = shouldClearAll ? {} : loaded.shifts || {};
       const nextShifts = shouldApplyNursecal202611
@@ -383,8 +423,12 @@ export const App: React.FC = () => {
         : baseShifts;
 
       const nowIso = new Date().toISOString();
+      const hasAnyPresetChange =
+        shouldApplyHusband12Presets || shouldApplyNursecal202611 || shouldApplySayaPresets;
+
       const nextStore: CalendarDataStore = {
         ...loaded,
+        metadata: nextMetadata || loaded.metadata,
         shifts: nextShifts,
         events: shouldClearAll ? {} : loaded.events || {},
         daySupports: shouldClearAll ? {} : loaded.daySupports || {},
@@ -393,7 +437,7 @@ export const App: React.FC = () => {
             ? loaded.categories
             : DEFAULT_CATEGORIES,
         stamps: nextStamps,
-        updatedAt: shouldApplyHusband12Presets || shouldApplyNursecal202611 ? nowIso : loaded.updatedAt || nowIso,
+        updatedAt: hasAnyPresetChange ? nowIso : loaded.updatedAt || nowIso,
       };
 
       if (shouldClearAll) {
@@ -405,7 +449,10 @@ export const App: React.FC = () => {
       if (shouldApplyNursecal202611) {
         localStorage.setItem(NURSECAL_2026_11_FLAG, '1');
       }
-      if (shouldClearAll || shouldApplyHusband12Presets || shouldApplyNursecal202611) {
+      if (shouldApplySayaPresets) {
+        localStorage.setItem(SAYA_10_SHIFTS_FLAG, '1');
+      }
+      if (shouldClearAll || hasAnyPresetChange) {
         await saveLocalStore(nextStore, activeSessionPass || undefined);
       }
 
@@ -442,6 +489,28 @@ export const App: React.FC = () => {
       mounted = false;
     };
   }, []);
+
+  // 📸 起動時のお気に入り写真・ウェルカム画面自動表示
+  const hasCheckedWelcomeLaunchRef = useRef(false);
+  useEffect(() => {
+    if (!isLoaded || isLocked || hasCheckedWelcomeLaunchRef.current) return;
+    hasCheckedWelcomeLaunchRef.current = true;
+
+    const welcomeCfg = store.metadata?.welcomeImageConfig;
+    if (welcomeCfg && welcomeCfg.enabled && welcomeCfg.dataUrl) {
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+        today.getDate()
+      ).padStart(2, '0')}`;
+      if (welcomeCfg.mode === 'daily') {
+        if (welcomeCfg.lastShownDate !== todayStr) {
+          openWelcomeModal();
+        }
+      } else {
+        openWelcomeModal();
+      }
+    }
+  }, [isLoaded, isLocked, store.metadata?.welcomeImageConfig, openWelcomeModal]);
 
   // ストア変更時のローカル保存＆自動クラウド同期（合言葉未設定でもデフォルト夫婦暗号鍵で自動同期）
   const commitStore = useCallback(
@@ -1198,6 +1267,7 @@ export const App: React.FC = () => {
               closeNavLayer(() => setIsWidgetMode(true));
             }}
             onOpenShiftExport={() => openShiftExportModal(activePartner)}
+            onOpenWelcomeImage={openWelcomeModal}
           />
 
           {/* 月間カレンダーグリッド（シングルタップ移動・ダブルタップ予定一覧・右下＋予定追加） */}
@@ -1438,6 +1508,25 @@ export const App: React.FC = () => {
               },
             });
           }}
+          onUpdateWelcomeImageConfig={async (newCfg) => {
+            const nextStore: CalendarDataStore = {
+              ...store,
+              metadata: {
+                ...store.metadata,
+                welcomeImageConfig: newCfg,
+                updatedAt: new Date().toISOString(),
+              },
+              updatedAt: new Date().toISOString(),
+            };
+            setStore(nextStore);
+            await saveLocalStore(nextStore, sessionPassword || undefined);
+            showToast('📸 お気に入り写真設定を保存しました✨');
+          }}
+          onPreviewWelcomeImage={(cfg) => {
+            setWelcomePreviewConfig(cfg);
+            setWelcomeModalOpen(true);
+            pushNavLayer('welcomeModal');
+          }}
         />
       )}
 
@@ -1463,6 +1552,48 @@ export const App: React.FC = () => {
           onSaveEvent={handleSaveEvent}
           onDeleteEvent={handleDeleteEvent}
           onToggleTaskComplete={handleToggleTaskComplete}
+        />
+      )}
+
+      {/* 📸 起動時お気に入り写真モーダル（ウェルカムフォト・2人の今日シフト・フルスクリーン写真） */}
+      {welcomeModalOpen && (
+        <WelcomeImageModal
+          store={store}
+          config={
+            welcomePreviewConfig ||
+            store.metadata?.welcomeImageConfig || {
+              enabled: true,
+              dataUrl: '',
+              message: '今日も一日お疲れ様💕',
+              mode: 'always',
+            }
+          }
+          onClose={() =>
+            closeNavLayer(() => {
+              setWelcomeModalOpen(false);
+              setWelcomePreviewConfig(null);
+            })
+          }
+          onOpenSettings={() =>
+            closeNavLayer(() => {
+              setWelcomeModalOpen(false);
+              setWelcomePreviewConfig(null);
+              openSettingsModal();
+            })
+          }
+          onUpdateConfig={async (newCfg) => {
+            const nextStore: CalendarDataStore = {
+              ...store,
+              metadata: {
+                ...store.metadata,
+                welcomeImageConfig: newCfg,
+                updatedAt: new Date().toISOString(),
+              },
+              updatedAt: new Date().toISOString(),
+            };
+            setStore(nextStore);
+            await saveLocalStore(nextStore, sessionPassword || undefined);
+          }}
         />
       )}
     </div>
