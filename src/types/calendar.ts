@@ -1,4 +1,4 @@
-// ふたりカレ (FutariCal) データモデル定義
+// ペアカレ (PairCal) データモデル定義
 
 export type PartnerId = 'partnerA' | 'partnerB';
 // デフォルトの3項目（二人予定・夫予定・妻予定）に加え、ユーザーが自由に追加・削除可能
