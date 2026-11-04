@@ -38,7 +38,6 @@ import { MonthlyCalendarGrid } from './components/MonthlyCalendarGrid';
 import { StampDrawer, StampDrawerTab } from './components/StampDrawer';
 import { DayDetailModal } from './components/DayDetailModal';
 import { SettingsAndSyncModal } from './components/SettingsAndSyncModal';
-import { PasscodeModal } from './components/PasscodeModal';
 import { ShiftStampManagerModal } from './components/ShiftStampManagerModal';
 import { ShiftImageOcrModal } from './components/ShiftImageOcrModal';
 import { VoiceEventModal } from './components/VoiceEventModal';
@@ -109,9 +108,8 @@ export const App: React.FC = () => {
   const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(false);
   const [welcomePreviewConfig, setWelcomePreviewConfig] = useState<WelcomeImageConfig | null>(null);
 
-  // パスワードロック＆クラウド同期状態
-  const [savedPassHash, setSavedPassHashState] = useState<string | null>(() => getSavedPassHash());
-  const [isLocked, setIsLocked] = useState<boolean>(() => Boolean(getSavedPassHash()));
+  // クラウド同期状態（パスワードロックは不要なため撤廃し、いつでもワンタップで使えます）
+  const [savedPassHash, setSavedPassHashState] = useState<string | null>(null);
   const [sessionPassword, setSessionPassword] = useState<string>('');
   const [syncConfig, setSyncConfig] = useState<CloudSyncConfig>(() => loadSyncConfig());
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -360,13 +358,18 @@ export const App: React.FC = () => {
     loadLocalStore().then(async (loaded) => {
       if (!mounted) return;
 
+      // ご要望：「パスワードロック機能いらないや」を自動適用（既存のロックハッシュをクリア）
+      const DISABLE_PASSCODE_FLAG = 'paircal_disable_passcode_lock_20261104_v1';
+      if (localStorage.getItem(DISABLE_PASSCODE_FLAG) !== '1') {
+        localStorage.removeItem('futarical_pass_hash_v1');
+        setSavedPassHash(null);
+        setSavedPassHashState(null);
+        localStorage.setItem(DISABLE_PASSCODE_FLAG, '1');
+      }
+
       let activeSessionPass = '';
       if (inviteKeyFromHash && inviteKeyFromHash.length >= 4) {
-        const h = await hashPasscode(inviteKeyFromHash);
-        setSavedPassHash(h);
-        setSavedPassHashState(h);
         setSessionPassword(inviteKeyFromHash);
-        setIsLocked(false);
         activeSessionPass = inviteKeyFromHash;
       }
 
@@ -493,7 +496,7 @@ export const App: React.FC = () => {
   // 📸 起動時のお気に入り写真・ウェルカム画面自動表示
   const hasCheckedWelcomeLaunchRef = useRef(false);
   useEffect(() => {
-    if (!isLoaded || isLocked || hasCheckedWelcomeLaunchRef.current) return;
+    if (!isLoaded || hasCheckedWelcomeLaunchRef.current) return;
     hasCheckedWelcomeLaunchRef.current = true;
 
     const welcomeCfg = store.metadata?.welcomeImageConfig;
@@ -510,7 +513,7 @@ export const App: React.FC = () => {
         openWelcomeModal();
       }
     }
-  }, [isLoaded, isLocked, store.metadata?.welcomeImageConfig, openWelcomeModal]);
+  }, [isLoaded, store.metadata?.welcomeImageConfig, openWelcomeModal]);
 
   // ストア変更時のローカル保存＆自動クラウド同期（合言葉未設定でもデフォルト夫婦暗号鍵で自動同期）
   const commitStore = useCallback(
@@ -1147,35 +1150,6 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#FFFBF7] text-stone-700 flex flex-col">
-      {/* パスワードロック画面 */}
-      {isLocked && (
-        <PasscodeModal
-          hasSavedPasscode={Boolean(savedPassHash)}
-          onUnlock={async (pass) => {
-            const h = await hashPasscode(pass);
-            if (savedPassHash && h !== savedPassHash) {
-              return false;
-            }
-            setSessionPassword(pass);
-            setIsLocked(false);
-            showToast('🔓 ロックを解除しました✨');
-            return true;
-          }}
-          onSetupPasscode={async (pass) => {
-            const h = await hashPasscode(pass);
-            setSavedPassHash(h);
-            setSavedPassHashState(h);
-            setSessionPassword(pass);
-            await saveLocalStore(store, pass);
-            setIsLocked(false);
-            showToast('🔐 夫婦の合言葉を設定し、AES-GCM暗号化を有効にしました✨');
-          }}
-          onSkipForNow={() => {
-            setIsLocked(false);
-          }}
-        />
-      )}
-
       {/* トースト通知 */}
       {toastText && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-stone-800/95 text-white text-xs font-extrabold shadow-lg animate-pop whitespace-nowrap">
@@ -1262,7 +1236,6 @@ export const App: React.FC = () => {
             syncEnabled={syncConfig.enabled}
             onTriggerSync={() => handleTriggerCloudSync()}
             onOpenSettings={openSettingsModal}
-            onLockScreen={() => setIsLocked(true)}
             onOpenWidgetHome={() => {
               closeNavLayer(() => setIsWidgetMode(true));
             }}
@@ -1461,9 +1434,6 @@ export const App: React.FC = () => {
             saveSyncConfig(nextCfg);
           }}
           onUpdatePassword={async (newPass) => {
-            const h = await hashPasscode(newPass);
-            setSavedPassHash(h);
-            setSavedPassHashState(h);
             setSessionPassword(newPass);
             await saveLocalStore(store, newPass);
           }}
