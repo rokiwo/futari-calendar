@@ -1063,7 +1063,7 @@ export const App: React.FC = () => {
   if (!isLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FFFBF7] text-stone-600 font-bold">
-        🐻💕🐰 ふたりカレを読み込み中...
+        🐻💕🐰 ペアカレを読み込み中...
       </div>
     );
   }
