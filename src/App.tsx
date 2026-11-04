@@ -39,6 +39,7 @@ import { ShiftImageOcrModal } from './components/ShiftImageOcrModal';
 import { VoiceEventModal } from './components/VoiceEventModal';
 import { WidgetCompactView, WidgetGuideModal } from './components/WidgetModalAndView';
 import { CategoryManagerModal } from './components/CategoryManagerModal';
+import { ExportPartnerMode, ShiftExportModal } from './components/ShiftExportModal';
 
 // 日付文字列 "YYYY-MM-DD" に deltaDays 日を加算した "YYYY-MM-DD" を返す
 function addDaysToDateStr(dateStr: string, deltaDays: number): string {
@@ -95,6 +96,8 @@ export const App: React.FC = () => {
   const [imageOcrOpen, setImageOcrOpen] = useState<boolean>(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState<boolean>(false);
   const [widgetGuideOpen, setWidgetGuideOpen] = useState<boolean>(false);
+  const [shiftExportOpen, setShiftExportOpen] = useState<boolean>(false);
+  const [shiftExportMode, setShiftExportMode] = useState<ExportPartnerMode>('partnerA');
 
   // パスワードロック＆クラウド同期状態
   const [savedPassHash, setSavedPassHashState] = useState<string | null>(() => getSavedPassHash());
@@ -124,6 +127,7 @@ export const App: React.FC = () => {
   const imageOcrOpenRef = useRef(imageOcrOpen);
   const voiceModalOpenRef = useRef(voiceModalOpen);
   const widgetGuideOpenRef = useRef(widgetGuideOpen);
+  const shiftExportOpenRef = useRef(shiftExportOpen);
   const stampDrawerOpenRef = useRef(stampDrawerOpen);
   const isWidgetModeRef = useRef(isWidgetMode);
   const lastBackPressTimeRef = useRef<number>(0);
@@ -136,6 +140,7 @@ export const App: React.FC = () => {
   useEffect(() => { imageOcrOpenRef.current = imageOcrOpen; }, [imageOcrOpen]);
   useEffect(() => { voiceModalOpenRef.current = voiceModalOpen; }, [voiceModalOpen]);
   useEffect(() => { widgetGuideOpenRef.current = widgetGuideOpen; }, [widgetGuideOpen]);
+  useEffect(() => { shiftExportOpenRef.current = shiftExportOpen; }, [shiftExportOpen]);
   useEffect(() => { stampDrawerOpenRef.current = stampDrawerOpen; }, [stampDrawerOpen]);
   useEffect(() => { isWidgetModeRef.current = isWidgetMode; }, [isWidgetMode]);
 
@@ -213,6 +218,15 @@ export const App: React.FC = () => {
     pushNavLayer('widgetGuide');
   }, [pushNavLayer]);
 
+  const openShiftExportModal = useCallback(
+    (defaultMode?: ExportPartnerMode) => {
+      if (defaultMode) setShiftExportMode(defaultMode);
+      setShiftExportOpen(true);
+      pushNavLayer('shiftExport');
+    },
+    [pushNavLayer]
+  );
+
   const openStampDrawer = useCallback(() => {
     setStampDrawerOpen(true);
     pushNavLayer('stampDrawer');
@@ -247,7 +261,8 @@ export const App: React.FC = () => {
         categoryManagerOpenRef.current ||
         imageOcrOpenRef.current ||
         voiceModalOpenRef.current ||
-        widgetGuideOpenRef.current
+        widgetGuideOpenRef.current ||
+        shiftExportOpenRef.current
       ) {
         setDayDetailOpen(false);
         setOpenEventFormDirectly(false);
@@ -257,6 +272,7 @@ export const App: React.FC = () => {
         setImageOcrOpen(false);
         setVoiceModalOpen(false);
         setWidgetGuideOpen(false);
+        setShiftExportOpen(false);
         return;
       }
 
@@ -1141,6 +1157,7 @@ export const App: React.FC = () => {
             onOpenWidgetHome={() => {
               closeNavLayer(() => setIsWidgetMode(true));
             }}
+            onOpenShiftExport={() => openShiftExportModal(activePartner)}
           />
 
           {/* 月間カレンダーグリッド（シングルタップ移動・ダブルタップ予定一覧・右下＋予定追加） */}
@@ -1209,6 +1226,7 @@ export const App: React.FC = () => {
             onOpenWidgetModal={() => {
               closeNavLayer(() => setIsWidgetMode(true));
             }}
+            onOpenShiftExport={() => openShiftExportModal(currentDrawerPartner)}
             metadata={store.metadata}
           />
         </>
@@ -1379,6 +1397,17 @@ export const App: React.FC = () => {
               },
             });
           }}
+        />
+      )}
+
+      {/* 📸 シフト写真(PNG)画像保存モーダル（ナスカレ風特大表示・予定なし純粋シフトカレンダー） */}
+      {shiftExportOpen && (
+        <ShiftExportModal
+          year={year}
+          month={month}
+          store={store}
+          defaultMode={shiftExportMode}
+          onClose={() => closeNavLayer(() => setShiftExportOpen(false))}
         />
       )}
     </div>
