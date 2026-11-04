@@ -1,6 +1,7 @@
 // 音声入力（Web Speech API）自然言語解析 ＆ Gemini Vision API によるシフト表画像・ナスカレスクショ自動読み取りモジュール
 import {
   CalendarCategoryId,
+  PartnerId,
   ScheduleEvent,
   StampPreset,
 } from '../types/calendar';
@@ -29,6 +30,9 @@ export interface ParsedVoiceSchedule {
   categoryId: CalendarCategoryId;
   supportBadges: string[];
   shiftLabel?: string;    // 「12日は夜勤」のようにシフトを話した場合
+  overtimeHours?: number; // 「残業2時間」など残業時間（h）
+  holidayWorkHours?: number; // 「休日出勤4時間」など休出時間（h）
+  targetPartner?: PartnerId; // 「夫が」「妻が」など対象パートナー
 }
 
 // 全角数字・漢数字を半角数字に正規化
@@ -156,9 +160,54 @@ export function parseSpokenScheduleText(
     text = text.replace(/(お迎えお願い|迎えに来て)/g, ' ');
   }
 
-  // 4. カテゴリの自動推測
+  // 4. 残業時間・休日出勤時間の解析
+  let overtimeHours: number | undefined;
+  let holidayWorkHours: number | undefined;
+
+  const otMatch1 = text.match(/残業(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
+  const otMatch2 = text.match(/(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)\s*(?:の)?残業/);
+  const otMatchMinutes = text.match(/(?:残業\s*)?30\s*分(?:の残業)?/);
+
+  if (text.includes('1時間半残業') || text.includes('残業1時間半') || text.includes('残業一時間半')) {
+    overtimeHours = 1.5;
+  } else if (text.includes('2時間半残業') || text.includes('残業2時間半')) {
+    overtimeHours = 2.5;
+  } else if (text.includes('30分残業') || text.includes('残業30分')) {
+    overtimeHours = 0.5;
+  } else if (otMatch1) {
+    overtimeHours = parseFloat(otMatch1[1]);
+    if (otMatch1[0].includes('時間半')) overtimeHours += 0.5;
+  } else if (otMatch2) {
+    overtimeHours = parseFloat(otMatch2[1]);
+    if (otMatch2[0].includes('時間半')) overtimeHours += 0.5;
+  } else if (otMatchMinutes) {
+    overtimeHours = 0.5;
+  } else if (/残業/.test(text) && !overtimeHours) {
+    // 時間指定のない「残業」の場合はデフォルト1時間をセット
+    const simpleDigit = text.match(/(\d+(?:\.\d+)?)/);
+    overtimeHours = simpleDigit ? parseFloat(simpleDigit[1]) : 1;
+  }
+
+  const holMatch = text.match(/(?:休日出勤|休出)(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
+  if (holMatch) {
+    holidayWorkHours = parseFloat(holMatch[1]);
+  } else if (/休日出勤|休出/.test(text)) {
+    holidayWorkHours = 8;
+  }
+
+  // 5. 対象パートナーの自動推測（「夫が」「妻が」「パパが」「ママが」）
+  let targetPartner: PartnerId | undefined;
+  if (/夫|パパ|旦那|だんな|彼/.test(text)) {
+    targetPartner = 'partnerA';
+  } else if (/妻|ママ|奥さん|嫁|彼女/.test(text)) {
+    targetPartner = 'partnerB';
+  }
+
+  // 6. カテゴリの自動推測
   let categoryId: CalendarCategoryId = defaultCategoryId;
-  if (/記念日|誕生日|お祝い|アニバーサリー/.test(text)) {
+  if (targetPartner) {
+    categoryId = targetPartner;
+  } else if (/記念日|誕生日|お祝い|アニバーサリー/.test(text)) {
     categoryId = 'anniversary';
   } else if (/ごみ|ゴミ|掃除|洗濯|買い出し|買い物|家事|引き落とし/.test(text)) {
     categoryId = 'chore';
@@ -166,12 +215,18 @@ export function parseSpokenScheduleText(
     categoryId = 'shared';
   }
 
-  // 5. 残りのテキストを整形してタイトルにする
-  const cleanedTitle = text
+  // 7. 残りのテキストを整形してタイトルにする
+  let cleanedTitle = text
     .replace(/^[、。・\s]+|[、。・\s]+$/g, '')
     .replace(/\s+(です|を入れる|を追加|の予定|予定)$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  if (overtimeHours && (!cleanedTitle || cleanedTitle === '残業')) {
+    cleanedTitle = `残業 +${overtimeHours}h`;
+  } else if (holidayWorkHours && (!cleanedTitle || cleanedTitle === '休日出勤' || cleanedTitle === '休出')) {
+    cleanedTitle = `休日出勤 ${holidayWorkHours}h`;
+  }
 
   return {
     date: dateStr,
@@ -181,6 +236,9 @@ export function parseSpokenScheduleText(
     endTime,
     categoryId,
     supportBadges,
+    overtimeHours,
+    holidayWorkHours,
+    targetPartner,
   };
 }
 
