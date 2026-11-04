@@ -48,6 +48,7 @@ interface StampDrawerProps {
   onOpenVoiceModal: () => void;
   onOpenImageOcrModal: () => void;
   onOpenWidgetModal: () => void;
+  onOpenShiftExport?: () => void;
   metadata: CoupleMetadata;
 }
 
@@ -74,6 +75,7 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   onOpenVoiceModal,
   onOpenImageOcrModal,
   onOpenWidgetModal,
+  onOpenShiftExport,
   metadata,
 }) => {
   const partnerA = metadata.partners.partnerA;
@@ -207,6 +209,18 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
               <Settings2 className="w-3.5 h-3.5" />
               <span>勤務リスト編集</span>
             </button>
+
+            {onOpenShiftExport && (
+              <button
+                type="button"
+                onClick={onOpenShiftExport}
+                className="px-2 py-1.5 rounded-2xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white text-[11px] font-extrabold transition-colors flex items-center gap-1 shadow-2xs border border-[#A9E9F2]"
+                title="シフト表を写真(PNG)として保存します"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>写真保存</span>
+              </button>
+            )}
 
             <button
               type="button"
