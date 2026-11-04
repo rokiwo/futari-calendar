@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import {
   CalendarDataStore,
   FilterCategoryId,
@@ -213,6 +213,26 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   // スマホ用のカレンダー表示スタイル切替（'grid' = 7列マス目 / 'list' = 縦1列くっきりリスト）
   const [mobileLayout, setMobileLayout] = useState<'grid' | 'list'>('grid');
 
+  // 詳細プレビューバーの表示位置（'bottom' = 下 / 'top' = 上 / 'hidden' = 非表示）
+  const [previewPosition, setPreviewPosition] = useState<'bottom' | 'top' | 'hidden'>(() => {
+    try {
+      const saved = localStorage.getItem('futarical_preview_position');
+      if (saved === 'top' || saved === 'bottom' || saved === 'hidden') return saved;
+    } catch {
+      // ignore
+    }
+    return 'bottom';
+  });
+
+  const handleSetPreviewPosition = (pos: 'bottom' | 'top' | 'hidden') => {
+    setPreviewPosition(pos);
+    try {
+      localStorage.setItem('futarical_preview_position', pos);
+    } catch {
+      // ignore
+    }
+  };
+
   // 各パートナーのシフト枠（メインシフト＋仕事終わり/休日のバイト＋残業時間バッジ）を描画
   const renderPartnerShiftBox = (
     shift: ShiftEntry | undefined,
@@ -232,6 +252,10 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         ? `${shift?.startTime || stamp?.startTime}${shift?.endTime || stamp?.endTime ? `-${shift?.endTime || stamp?.endTime}` : ''}`
         : '';
 
+    // スマホの小さなマス目（幅約24px）でも確実に2文字が綺麗に見えるよう抽出
+    const rawLabel = shift?.customLabel || stamp?.shortLabel || stamp?.label || '';
+    const twoCharLabel = rawLabel.slice(0, 2);
+
     return (
       <div
         title={timeInfo ? `${stamp?.label || 'シフト'}: ${timeInfo}` : undefined}
@@ -240,7 +264,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             ? { backgroundColor: stamp.color, color: stamp.textColor }
             : undefined
         }
-        className={`relative rounded sm:rounded-lg px-0.5 py-0.5 sm:py-0.5 text-[10px] sm:text-[10px] font-black flex flex-col items-center justify-center leading-none sm:leading-tight border pointer-events-none ${
+        className={`relative rounded sm:rounded-lg px-[1px] sm:px-0.5 py-[1px] sm:py-0.5 font-black flex flex-col items-center justify-center leading-none sm:leading-tight border pointer-events-none overflow-hidden ${
           stamp
             ? 'border-black/5'
             : hasExtra
@@ -248,20 +272,20 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
         }`}
       >
-        {/* メインシフト行（スマホでも大きく太字でくっきり表示） */}
-        <div className="flex items-center justify-center truncate max-w-full py-[1px]">
+        {/* メインシフト行（スマホでも2文字が一切欠けずにくっきり表示） */}
+        <div className="flex items-center justify-center w-full py-[0.5px]">
           {stamp ? (
-            <span className="truncate tracking-tighter sm:tracking-normal">
-              {shift?.customLabel || stamp.shortLabel}
+            <span className="text-[8px] min-[380px]:text-[9px] sm:text-[10px] font-black tracking-[-0.06em] sm:tracking-normal whitespace-nowrap text-center leading-none select-none">
+              {twoCharLabel}
             </span>
           ) : (
-            <span className="text-[8.5px] font-normal opacity-75">{partnerAvatar}</span>
+            <span className="text-[8px] font-normal opacity-75">{partnerAvatar}</span>
           )}
         </div>
 
         {/* 仕事終わりや休日のバイト（サブシフト）がある場合の2段目表示 */}
         {hasSubWork && (
-          <div className="w-full mt-[1px] px-0.5 rounded-xs bg-amber-100 text-amber-950 text-[8.5px] sm:text-[9px] font-black text-center truncate leading-tight">
+          <div className="w-full mt-[1px] px-[1px] rounded-xs bg-amber-100 text-amber-950 text-[7.5px] sm:text-[9px] font-black text-center truncate leading-tight">
             +{subLabel.slice(0, 2)}
           </div>
         )}
@@ -312,6 +336,184 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   const selStampA = activeSelShiftA ? stampMap.get(activeSelShiftA.stampId) : undefined;
   const selStampB = activeSelShiftB ? stampMap.get(activeSelShiftB.stampId) : undefined;
   const selEvents = eventsByDate.get(selectedDate) || [];
+
+  // 選択日の大文字プレビューカード（カレンダーの上または下に自由に配置可能）
+  const renderSelectedDatePreviewCard = (pos: 'top' | 'bottom') => {
+    if (!selectedCell || previewPosition === 'hidden') return null;
+
+    return (
+      <div
+        onClick={() => onCellDoubleTap(selectedDate)}
+        className={`${
+          pos === 'top' ? 'mb-2' : 'mt-2.5'
+        } mx-1 sm:mx-0 p-3 rounded-2xl bg-white border-2 border-[#FF8FAB] shadow-sm cursor-pointer hover:bg-[#FFF9FB] transition-all animate-pop`}
+      >
+        <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+          <div className="font-extrabold text-sm text-stone-800 flex items-center gap-1.5">
+            <span className="px-2 py-0.5 rounded-lg bg-[#FFE5EC] text-[#9E2A47] text-xs font-black">
+              選択中
+            </span>
+            <span>
+              {month}月{selectedCell.dayNumber}日(
+              {['日', '月', '火', '水', '木', '金', '土'][selectedCell.dayOfWeek]})
+            </span>
+            {selectedCell.holidayName && (
+              <span className="text-xs text-rose-500 font-bold">{selectedCell.holidayName}</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1">
+            {/* 上/下 切替ボタン */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSetPreviewPosition(previewPosition === 'top' ? 'bottom' : 'top');
+              }}
+              className="px-2 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-black transition-colors"
+              title={previewPosition === 'top' ? 'カレンダーの下に表示' : 'カレンダーの上に表示'}
+            >
+              {previewPosition === 'top' ? '⬇️ 下に移動' : '⬆️ 上に移動'}
+            </button>
+
+            <span className="px-2 py-1 rounded-xl bg-stone-100 text-stone-700 text-xs font-extrabold">
+              📋 全{selEvents.length}件
+            </span>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickAddForSelectedDate();
+              }}
+              className="px-2.5 py-1 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-2xs hover:bg-[#FF758F]"
+            >
+              ＋ 予定追加
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSetPreviewPosition('hidden');
+              }}
+              className="p-1 rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100"
+              title="詳細プレビューを非表示にする"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+          <div
+            style={
+              selStampA
+                ? { backgroundColor: selStampA.color, color: selStampA.textColor }
+                : undefined
+            }
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
+              selStampA
+                ? ''
+                : getShiftOvertimeMinutes(activeSelShiftA) > 0 ||
+                  getShiftHolidayWorkMinutes(activeSelShiftA) > 0 ||
+                  activeSelShiftA?.subCustomLabel
+                ? 'bg-rose-50 text-rose-900 border border-rose-200'
+                : 'bg-stone-100 text-stone-400'
+            }`}
+          >
+            <span>{partnerA.avatar}{partnerA.name}:</span>
+            <span>
+              {selStampA
+                ? `${selStampA.icon || ''}${activeSelShiftA?.customLabel || selStampA.label}`
+                : 'シフト未定'}
+            </span>
+            {activeSelShiftA?.subCustomLabel && (
+              <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
+                +🏪{activeSelShiftA.subCustomLabel}
+              </span>
+            )}
+            {(() => {
+              const otA = getShiftOvertimeMinutes(activeSelShiftA);
+              const hwA = getShiftHolidayWorkMinutes(activeSelShiftA);
+              if (otA === 0 && hwA === 0) return null;
+              return (
+                <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
+                  {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `残業+${formatMinutesShort(otA)}`}
+                </span>
+              );
+            })()}
+          </div>
+
+          <div
+            style={
+              selStampB
+                ? { backgroundColor: selStampB.color, color: selStampB.textColor }
+                : undefined
+            }
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
+              selStampB
+                ? ''
+                : getShiftOvertimeMinutes(activeSelShiftB) > 0 ||
+                  getShiftHolidayWorkMinutes(activeSelShiftB) > 0 ||
+                  activeSelShiftB?.subCustomLabel
+                ? 'bg-rose-50 text-rose-900 border border-rose-200'
+                : 'bg-stone-100 text-stone-400'
+            }`}
+          >
+            <span>{partnerB.avatar}{partnerB.name}:</span>
+            <span>
+              {selStampB
+                ? `${selStampB.icon || ''}${activeSelShiftB?.customLabel || selStampB.label}`
+                : 'シフト未定'}
+            </span>
+            {activeSelShiftB?.subCustomLabel && (
+              <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
+                +🏪{activeSelShiftB.subCustomLabel}
+              </span>
+            )}
+            {(() => {
+              const otB = getShiftOvertimeMinutes(activeSelShiftB);
+              const hwB = getShiftHolidayWorkMinutes(activeSelShiftB);
+              if (otB === 0 && hwB === 0) return null;
+              return (
+                <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
+                  {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `残業+${formatMinutesShort(otB)}`}
+                </span>
+              );
+            })()}
+          </div>
+        </div>
+
+        {selEvents.length > 0 ? (
+          <div className="space-y-1">
+            {selEvents.map((ev) => {
+              const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
+              return (
+                <div
+                  key={ev.id}
+                  style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5 ${
+                    ev.isTask && ev.isCompleted ? 'opacity-65 line-through' : ''
+                  }`}
+                >
+                  <span className="shrink-0">
+                    {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
+                  </span>
+                  {!ev.isAllDay && ev.startTime && <span className="shrink-0">{ev.startTime}</span>}
+                  <span className="truncate whitespace-nowrap overflow-hidden flex-1">{ev.title}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-xs text-stone-400 font-bold">
+            この日の予定はまだありません（ダブルタップで詳細、右下の「＋」で予定追加）
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -374,10 +576,38 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         </div>
       </div>
 
-      {/* 操作ガイドバー（シングルタップ移動・ダブルタップ一覧・右下＋追加） */}
+      {/* 操作ガイドバー（シングルタップ移動・ダブルタップ一覧・詳細位置切替） */}
       <div className="mx-1 sm:mx-0 mb-1.5 px-2.5 py-1 rounded-xl bg-[#FFF9FB] border border-pink-200/80 flex items-center justify-between text-[10px] sm:text-xs font-extrabold text-[#9E2A47]">
-        <span>👆 1タップ: 日付移動 ／ 2タップ: その日の全予定表示</span>
-        <span className="hidden sm:inline text-stone-500">右下の「＋」ボタンから選択日に予定・タスク追加</span>
+        <span>👆 1タップ: 日付選択 ／ 2タップ: その日の全予定</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-stone-400 font-bold hidden min-[440px]:inline">詳細表示:</span>
+          <div className="flex items-center bg-stone-200/70 p-0.5 rounded-lg text-[10px] font-black">
+            <button
+              type="button"
+              onClick={() => handleSetPreviewPosition('top')}
+              className={`px-1.5 py-0.5 rounded transition-all ${
+                previewPosition === 'top'
+                  ? 'bg-white text-[#9E2A47] shadow-2xs font-black'
+                  : 'text-stone-600'
+              }`}
+              title="選択日の詳細カードをカレンダーの上に表示"
+            >
+              ⬆️上
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetPreviewPosition('bottom')}
+              className={`px-1.5 py-0.5 rounded transition-all ${
+                previewPosition === 'bottom'
+                  ? 'bg-white text-[#9E2A47] shadow-2xs font-black'
+                  : 'text-stone-600'
+              }`}
+              title="選択日の詳細カードをカレンダーの下に表示"
+            >
+              ⬇️下
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* 📋 スマホ縦1列リストモード（スマホの縦長画面で1日1行・大文字で全部読めるモード） */}
@@ -576,6 +806,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
 
       {/* 📅 7列月間カレンダーグリッド（PCでは常時表示、スマホでは 'grid' 選択時に表示） */}
       <div className={mobileLayout === 'list' ? 'hidden sm:block' : 'block'}>
+        {/* 上部配置の場合の選択日プレビューカード */}
+        {previewPosition === 'top' && renderSelectedDatePreviewCard('top')}
+
         {/* 曜日ヘッダー */}
         <div className="grid grid-cols-7 gap-[1.5px] sm:gap-1.5 mb-1">
           {weekDays.map((w) => (
@@ -677,7 +910,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 </div>
 
                 {/* 2. シフト2人並列バー（夫・妻横並び＋バイト＋残業表示） */}
-                <div className="grid grid-cols-2 gap-[1.5px] sm:gap-0.5 mb-0.5 shrink-0">
+                <div className="grid grid-cols-2 gap-[1px] sm:gap-0.5 mb-0.5 shrink-0">
                   {renderPartnerShiftBox(activeShiftA, partnerA.avatar, 'bg-[#FF8FAB]')}
                   {renderPartnerShiftBox(activeShiftB, partnerB.avatar, 'bg-[#B388EB]')}
                 </div>
@@ -754,150 +987,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           })}
         </div>
 
-        {/* 7列カレンダーの下に「選択中の日の大文字プレビューカード」を常時表示（タップでその日の全予定を表示） */}
-        {selectedCell && (
-          <div
-            onClick={() => onCellDoubleTap(selectedDate)}
-            className="mt-2.5 mx-1 sm:mx-0 p-3 rounded-2xl bg-white border-2 border-[#FF8FAB] shadow-sm cursor-pointer hover:bg-[#FFF9FB] transition-all"
-          >
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="font-extrabold text-sm text-stone-800 flex items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded-lg bg-[#FFE5EC] text-[#9E2A47] text-xs">
-                  選択中
-                </span>
-                <span>
-                  {month}月{selectedCell.dayNumber}日(
-                  {['日', '月', '火', '水', '木', '金', '土'][selectedCell.dayOfWeek]})
-                </span>
-                {selectedCell.holidayName && (
-                  <span className="text-xs text-rose-500">{selectedCell.holidayName}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="px-2.5 py-1 rounded-xl bg-stone-100 text-stone-700 text-xs font-extrabold">
-                  📋 全予定を見る ({selEvents.length}件)
-                </span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onQuickAddForSelectedDate();
-                  }}
-                  className="px-2.5 py-1 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-2xs"
-                >
-                  ＋ 予定・タスク追加
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-1.5 mb-1.5">
-              <div
-                style={
-                  selStampA
-                    ? { backgroundColor: selStampA.color, color: selStampA.textColor }
-                    : undefined
-                }
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
-                  selStampA
-                    ? ''
-                    : getShiftOvertimeMinutes(activeSelShiftA) > 0 ||
-                      getShiftHolidayWorkMinutes(activeSelShiftA) > 0 ||
-                      activeSelShiftA?.subCustomLabel
-                    ? 'bg-rose-50 text-rose-900 border border-rose-200'
-                    : 'bg-stone-100 text-stone-400'
-                }`}
-              >
-                <span>{partnerA.avatar}{partnerA.name}:</span>
-                <span>
-                  {selStampA
-                    ? `${selStampA.icon || ''}${activeSelShiftA?.customLabel || selStampA.label}`
-                    : 'シフト未定'}
-                </span>
-                {activeSelShiftA?.subCustomLabel && (
-                  <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
-                    +🏪{activeSelShiftA.subCustomLabel}
-                  </span>
-                )}
-                {(() => {
-                  const otA = getShiftOvertimeMinutes(activeSelShiftA);
-                  const hwA = getShiftHolidayWorkMinutes(activeSelShiftA);
-                  if (otA === 0 && hwA === 0) return null;
-                  return (
-                    <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
-                      {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `残業+${formatMinutesShort(otA)}`}
-                    </span>
-                  );
-                })()}
-              </div>
-
-              <div
-                style={
-                  selStampB
-                    ? { backgroundColor: selStampB.color, color: selStampB.textColor }
-                    : undefined
-                }
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
-                  selStampB
-                    ? ''
-                    : getShiftOvertimeMinutes(activeSelShiftB) > 0 ||
-                      getShiftHolidayWorkMinutes(activeSelShiftB) > 0 ||
-                      activeSelShiftB?.subCustomLabel
-                    ? 'bg-rose-50 text-rose-900 border border-rose-200'
-                    : 'bg-stone-100 text-stone-400'
-                }`}
-              >
-                <span>{partnerB.avatar}{partnerB.name}:</span>
-                <span>
-                  {selStampB
-                    ? `${selStampB.icon || ''}${activeSelShiftB?.customLabel || selStampB.label}`
-                    : 'シフト未定'}
-                </span>
-                {activeSelShiftB?.subCustomLabel && (
-                  <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
-                    +🏪{activeSelShiftB.subCustomLabel}
-                  </span>
-                )}
-                {(() => {
-                  const otB = getShiftOvertimeMinutes(activeSelShiftB);
-                  const hwB = getShiftHolidayWorkMinutes(activeSelShiftB);
-                  if (otB === 0 && hwB === 0) return null;
-                  return (
-                    <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
-                      {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `残業+${formatMinutesShort(otB)}`}
-                    </span>
-                  );
-                })()}
-              </div>
-            </div>
-
-            {selEvents.length > 0 ? (
-              <div className="space-y-1">
-                {selEvents.map((ev) => {
-                  const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
-                  return (
-                    <div
-                      key={ev.id}
-                      style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5 ${
-                        ev.isTask && ev.isCompleted ? 'opacity-65 line-through' : ''
-                      }`}
-                    >
-                      <span className="shrink-0">
-                        {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
-                      </span>
-                      {!ev.isAllDay && ev.startTime && <span className="shrink-0">{ev.startTime}</span>}
-                      <span className="truncate whitespace-nowrap overflow-hidden flex-1">{ev.title}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-xs text-stone-400 font-bold">
-                この日の予定はまだありません（ダブルタップで詳細、右下の「＋」で予定追加）
-              </div>
-            )}
-          </div>
-        )}
+        {/* 下部配置の場合の選択日プレビューカード */}
+        {previewPosition === 'bottom' && renderSelectedDatePreviewCard('bottom')}
       </div>
 
       {/* ➕ 右下フローティング「＋」ボタン（シフト入力ドロワーが開いている時は重ならないよう非表示） */}
