@@ -18,7 +18,13 @@ import {
   ShiftEntry,
   StampPreset,
 } from '../types/calendar';
-import { getPartnerShiftStamps, SUPPORT_BADGE_PRESETS } from '../utils/presets';
+import {
+  formatMinutesShort,
+  getPartnerShiftStamps,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
+  SUPPORT_BADGE_PRESETS,
+} from '../utils/presets';
 
 export type StampDrawerTab = 'partnerA_shift' | 'partnerB_shift' | 'support_badge';
 
@@ -377,42 +383,66 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                 ＋🏪バイト重ね書き
               </button>
 
-              {[1, 2, 3].map((h) => (
-                <button
-                  key={h}
-                  type="button"
-                  onClick={() =>
-                    onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
-                      overtimeHours:
-                        currentShiftOnSelectedDate?.overtimeHours === h ? 0 : h,
-                    })
-                  }
-                  className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 ${
-                    currentShiftOnSelectedDate?.overtimeHours === h
-                      ? 'bg-rose-500 border-rose-500 text-white'
-                      : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
-                  }`}
-                >
-                  ⏱️残業+{h}h
-                </button>
-              ))}
+              {(() => {
+                const curOtMin = getShiftOvertimeMinutes(currentShiftOnSelectedDate);
+                const curHwMin = getShiftHolidayWorkMinutes(currentShiftOnSelectedDate);
+                return (
+                  <>
+                    {[
+                      { label: '+15分', min: 15 },
+                      { label: '+30分', min: 30 },
+                      { label: '+35分', min: 35 },
+                      { label: '+45分', min: 45 },
+                      { label: '+1h', min: 60 },
+                      { label: '+1.5h', min: 90 },
+                      { label: '+2h', min: 120 },
+                    ].map((b) => (
+                      <button
+                        key={b.min}
+                        type="button"
+                        onClick={() => {
+                          const nextMin = curOtMin === b.min ? 0 : b.min;
+                          onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                            overtimeMinutes: nextMin,
+                            overtimeHours: Math.round((nextMin / 60) * 10) / 10,
+                            isHolidayWork: false,
+                            holidayWorkMinutes: 0,
+                            holidayWorkHours: 0,
+                          });
+                        }}
+                        className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 text-[10px] ${
+                          curOtMin === b.min && curHwMin === 0
+                            ? 'bg-rose-500 border-rose-500 text-white shadow-2xs'
+                            : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
+                        }`}
+                      >
+                        ⏱️残業{b.label}
+                      </button>
+                    ))}
 
-              <button
-                type="button"
-                onClick={() =>
-                  onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
-                    isHolidayWork: !currentShiftOnSelectedDate?.isHolidayWork,
-                    holidayWorkHours: currentShiftOnSelectedDate?.holidayWorkHours ? 0 : 4,
-                  })
-                }
-                className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 ${
-                  currentShiftOnSelectedDate?.holidayWorkHours
-                    ? 'bg-amber-600 border-amber-600 text-white'
-                    : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
-                }`}
-              >
-                💼休出4h
-              </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextHwMin = curHwMin === 240 ? 0 : 240;
+                        onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                          isHolidayWork: nextHwMin > 0,
+                          holidayWorkMinutes: nextHwMin,
+                          holidayWorkHours: nextHwMin > 0 ? 4 : 0,
+                          overtimeMinutes: 0,
+                          overtimeHours: 0,
+                        });
+                      }}
+                      className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 text-[10px] ${
+                        curHwMin === 240
+                          ? 'bg-amber-600 border-amber-600 text-white'
+                          : 'bg-[#FFECE5] border-[#FFD0BF] text-[#9C3D1C]'
+                      }`}
+                    >
+                      💼休出4h
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}
