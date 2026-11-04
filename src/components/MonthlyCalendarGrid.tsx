@@ -218,24 +218,20 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     const hasSubWork = Boolean(shift?.subCustomLabel || subStamp);
     const subLabel = shift?.subCustomLabel || subStamp?.shortLabel || '';
 
-    const overtime = Number(shift?.overtimeHours || 0);
-    const holWork = Number(shift?.holidayWorkHours || 0);
-    const hasExtra = hasSubWork || overtime > 0 || holWork > 0;
+    const timeInfo =
+      shift?.startTime || stamp?.startTime
+        ? `${shift?.startTime || stamp?.startTime}${shift?.endTime || stamp?.endTime ? `-${shift?.endTime || stamp?.endTime}` : ''}`
+        : '';
 
     return (
       <div
-        onClick={(e) => {
-          if (shift && (shift.startTime || stamp?.startTime || shift.subStartTime)) {
-            e.stopPropagation();
-            setPoppedShiftId(poppedShiftId === shift.id ? null : shift.id);
-          }
-        }}
+        title={timeInfo ? `${stamp?.label || 'シフト'}: ${timeInfo}` : undefined}
         style={
           stamp
             ? { backgroundColor: stamp.color, color: stamp.textColor }
             : undefined
         }
-        className={`relative rounded sm:rounded-lg px-0.5 py-0.5 sm:py-0.5 text-[10px] sm:text-[10px] font-black flex flex-col items-center justify-center leading-none sm:leading-tight border ${
+        className={`relative rounded sm:rounded-lg px-0.5 py-0.5 sm:py-0.5 text-[10px] sm:text-[10px] font-black flex flex-col items-center justify-center leading-none sm:leading-tight border pointer-events-none ${
           stamp
             ? 'border-black/5'
             : hasExtra
@@ -328,7 +324,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         touchStartX.current = null;
         touchStartY.current = null;
       }}
-      className="max-w-5xl mx-auto px-0.5 sm:px-4 pt-1 pb-28"
+      className={`max-w-5xl mx-auto px-0.5 sm:px-4 pt-1 transition-all ${
+        stampModeActive ? 'pb-72' : 'pb-28'
+      }`}
     >
       {/* スマホ専用：7列カレンダー ⇔ 縦1列くっきりリスト 1タップ切替バー ＆ 凡例 */}
       <div className="flex items-center justify-between gap-1 px-1.5 mb-1.5 sm:hidden">
@@ -883,18 +881,20 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         )}
       </div>
 
-      {/* ➕ 右下フローティング「＋」ボタン（選択中の日にすぐ予定・タスクを追加！） */}
-      <button
-        type="button"
-        onClick={onQuickAddForSelectedDate}
-        title="選択中の日に予定・タスクを追加"
-        className="fixed right-4 bottom-20 z-40 flex items-center gap-1.5 px-4 py-3.5 rounded-full bg-gradient-to-tr from-[#FF8FAB] to-[#B388EB] text-white font-black shadow-xl hover:scale-105 active:scale-95 transition-all border-2 border-white"
-      >
-        <span className="text-xl leading-none">＋</span>
-        <span className="text-xs">
-          {selectedCell ? `${month}/${selectedCell.dayNumber}に予定追加` : '予定追加'}
-        </span>
-      </button>
+      {/* ➕ 右下フローティング「＋」ボタン（シフト入力ドロワーが開いている時は重ならないよう非表示） */}
+      {!stampModeActive && (
+        <button
+          type="button"
+          onClick={onQuickAddForSelectedDate}
+          title="選択中の日に予定・タスクを追加"
+          className="fixed right-4 bottom-20 z-30 flex items-center gap-1.5 px-4 py-3.5 rounded-full bg-gradient-to-tr from-[#FF8FAB] to-[#B388EB] text-white font-black shadow-xl hover:scale-105 active:scale-95 transition-all border-2 border-white"
+        >
+          <span className="text-xl leading-none">＋</span>
+          <span className="text-xs">
+            {selectedCell ? `${month}/${selectedCell.dayNumber}に予定追加` : '予定追加'}
+          </span>
+        </button>
+      )}
     </div>
   );
 };
