@@ -13,6 +13,7 @@ import {
 import { CoupleMetadata, PartnerId, StampPreset } from '../types/calendar';
 import {
   DEFAULT_STAMP_PRESETS,
+  SAYA_DEFAULT_STAMPS,
   getPartnerShiftStamps,
   PASTEL_COLOR_PALETTE,
   SHIFT_ICON_PATTERNS,
@@ -243,6 +244,37 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
               <span>{partnerBAvatar}</span>
               <span>{partnerBName}の勤務リスト ({getPartnerShiftStamps(stamps, 'partnerB').length}種)</span>
             </button>
+          </div>
+
+          {/* プリセット一括反映ボタン */}
+          <div className="flex items-center justify-between gap-2 px-1">
+            <span className="text-[11px] text-stone-500 font-bold">
+              {targetPartner === 'partnerB' ? '🐰 さやの勤務表:' : '🐻 夫の勤務表:'}
+            </span>
+            {targetPartner === 'partnerB' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  commitPartnerStamps(SAYA_DEFAULT_STAMPS);
+                }}
+                className="px-2.5 py-1 rounded-xl bg-[#F3EAFF] hover:bg-[#B388EB] text-[#59318F] hover:text-white font-extrabold text-[11px] transition-colors border border-purple-200 shadow-2xs"
+                title="夜勤・夜L・明け・早出・準遅・日勤・遅出・研外・研内・合説・休み・有休をセット"
+              >
+                ✨ さやの10種勤務テンプレを一括反映
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  const pAStamps = DEFAULT_STAMP_PRESETS.filter((s) => s.partnerId === 'partnerA');
+                  commitPartnerStamps(pAStamps);
+                }}
+                className="px-2.5 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#136370] hover:text-white font-extrabold text-[11px] transition-colors border border-cyan-200 shadow-2xs"
+                title="日勤・遅A・遅B・早A・早B・２早・夜勤・２夜・明け・準早・準遅・休み・年休をセット"
+              >
+                ✨ 夫の12種勤務テンプレを一括反映
+              </button>
+            )}
           </div>
         </div>
 
