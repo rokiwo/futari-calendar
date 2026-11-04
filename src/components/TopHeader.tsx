@@ -9,7 +9,6 @@ import {
   Maximize2,
   Minimize2,
   Clock,
-  Lock,
   Heart,
   Plus,
   Timer,
@@ -74,7 +73,7 @@ interface TopHeaderProps {
   syncEnabled: boolean;
   onTriggerSync: () => void;
   onOpenSettings: () => void;
-  onLockScreen: () => void;
+  onLockScreen?: () => void;
   onOpenWidgetHome?: () => void;
   onOpenShiftExport?: () => void;
   onOpenWelcomeImage?: () => void;
@@ -486,15 +485,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             >
               <RefreshCw className="w-3 h-3 text-[#FF8FAB]" />
               <span>v2.2更新</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onLockScreen}
-              className="p-1.5 rounded-xl bg-white border border-stone-200 text-stone-500"
-              title="画面ロック"
-            >
-              <Lock className="w-3.5 h-3.5" />
             </button>
 
             <button
