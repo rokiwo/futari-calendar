@@ -43,6 +43,7 @@ import { VoiceEventModal } from './components/VoiceEventModal';
 import { WidgetCompactView, WidgetGuideModal } from './components/WidgetModalAndView';
 import { CategoryManagerModal } from './components/CategoryManagerModal';
 import { ExportPartnerMode, ShiftExportModal } from './components/ShiftExportModal';
+import { TaskManagerModal } from './components/TaskManagerModal';
 
 // 日付文字列 "YYYY-MM-DD" に deltaDays 日を加算した "YYYY-MM-DD" を返す
 function addDaysToDateStr(dateStr: string, deltaDays: number): string {
@@ -101,6 +102,7 @@ export const App: React.FC = () => {
   const [widgetGuideOpen, setWidgetGuideOpen] = useState<boolean>(false);
   const [shiftExportOpen, setShiftExportOpen] = useState<boolean>(false);
   const [shiftExportMode, setShiftExportMode] = useState<ExportPartnerMode>('partnerA');
+  const [taskManagerOpen, setTaskManagerOpen] = useState<boolean>(false);
 
   // パスワードロック＆クラウド同期状態
   const [savedPassHash, setSavedPassHashState] = useState<string | null>(() => getSavedPassHash());
@@ -131,6 +133,7 @@ export const App: React.FC = () => {
   const voiceModalOpenRef = useRef(voiceModalOpen);
   const widgetGuideOpenRef = useRef(widgetGuideOpen);
   const shiftExportOpenRef = useRef(shiftExportOpen);
+  const taskManagerOpenRef = useRef(taskManagerOpen);
   const stampDrawerOpenRef = useRef(stampDrawerOpen);
   const isWidgetModeRef = useRef(isWidgetMode);
   const lastBackPressTimeRef = useRef<number>(0);
@@ -144,6 +147,7 @@ export const App: React.FC = () => {
   useEffect(() => { voiceModalOpenRef.current = voiceModalOpen; }, [voiceModalOpen]);
   useEffect(() => { widgetGuideOpenRef.current = widgetGuideOpen; }, [widgetGuideOpen]);
   useEffect(() => { shiftExportOpenRef.current = shiftExportOpen; }, [shiftExportOpen]);
+  useEffect(() => { taskManagerOpenRef.current = taskManagerOpen; }, [taskManagerOpen]);
   useEffect(() => { stampDrawerOpenRef.current = stampDrawerOpen; }, [stampDrawerOpen]);
   useEffect(() => { isWidgetModeRef.current = isWidgetMode; }, [isWidgetMode]);
 
@@ -235,6 +239,11 @@ export const App: React.FC = () => {
     pushNavLayer('stampDrawer');
   }, [pushNavLayer]);
 
+  const openTaskManagerModal = useCallback(() => {
+    setTaskManagerOpen(true);
+    pushNavLayer('taskManager');
+  }, [pushNavLayer]);
+
   const enterCalendarMode = useCallback(() => {
     setIsWidgetMode(false);
     pushNavLayer('calendar');
@@ -265,7 +274,8 @@ export const App: React.FC = () => {
         imageOcrOpenRef.current ||
         voiceModalOpenRef.current ||
         widgetGuideOpenRef.current ||
-        shiftExportOpenRef.current
+        shiftExportOpenRef.current ||
+        taskManagerOpenRef.current
       ) {
         setDayDetailOpen(false);
         setOpenEventFormDirectly(false);
@@ -276,6 +286,7 @@ export const App: React.FC = () => {
         setVoiceModalOpen(false);
         setWidgetGuideOpen(false);
         setShiftExportOpen(false);
+        setTaskManagerOpen(false);
         return;
       }
 
@@ -1255,6 +1266,7 @@ export const App: React.FC = () => {
             onOpenWidgetModal={() => {
               closeNavLayer(() => setIsWidgetMode(true));
             }}
+            onOpenTaskManager={openTaskManagerModal}
             onOpenShiftExport={() => openShiftExportModal(currentDrawerPartner)}
             metadata={store.metadata}
           />
@@ -1437,6 +1449,20 @@ export const App: React.FC = () => {
           store={store}
           defaultMode={shiftExportMode}
           onClose={() => closeNavLayer(() => setShiftExportOpen(false))}
+        />
+      )}
+
+      {/* ✅ ふたりタスク管理モーダル（タスク専用カレンダー ＆ Googleタスク連携 ＆ 端末別通知） */}
+      {taskManagerOpen && (
+        <TaskManagerModal
+          events={store.events}
+          activePartner={activePartner}
+          metadata={store.metadata}
+          categories={activeCategories}
+          onClose={() => closeNavLayer(() => setTaskManagerOpen(false))}
+          onSaveEvent={handleSaveEvent}
+          onDeleteEvent={handleDeleteEvent}
+          onToggleTaskComplete={handleToggleTaskComplete}
         />
       )}
     </div>
