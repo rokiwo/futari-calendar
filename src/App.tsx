@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDataStore,
   CloudSyncConfig,
@@ -115,6 +115,174 @@ export const App: React.FC = () => {
     const timer = setTimeout(() => setToastText(null), 2400);
     return () => clearTimeout(timer);
   }, [toastText]);
+
+  // 📱 スマホの戻る操作（Androidの戻るボタン / iPhoneの画面端スワイプ戻る）でアプリが終了せずモーダルやドロワーが閉じるようにするHistory API連動ナビゲーション
+  const dayDetailOpenRef = useRef(dayDetailOpen);
+  const settingsOpenRef = useRef(settingsOpen);
+  const shiftManagerOpenRef = useRef(shiftManagerOpen);
+  const categoryManagerOpenRef = useRef(categoryManagerOpen);
+  const imageOcrOpenRef = useRef(imageOcrOpen);
+  const voiceModalOpenRef = useRef(voiceModalOpen);
+  const widgetGuideOpenRef = useRef(widgetGuideOpen);
+  const stampDrawerOpenRef = useRef(stampDrawerOpen);
+  const isWidgetModeRef = useRef(isWidgetMode);
+  const lastBackPressTimeRef = useRef<number>(0);
+
+  useEffect(() => { dayDetailOpenRef.current = dayDetailOpen; }, [dayDetailOpen]);
+  useEffect(() => { settingsOpenRef.current = settingsOpen; }, [settingsOpen]);
+  useEffect(() => { shiftManagerOpenRef.current = shiftManagerOpen; }, [shiftManagerOpen]);
+  useEffect(() => { categoryManagerOpenRef.current = categoryManagerOpen; }, [categoryManagerOpen]);
+  useEffect(() => { imageOcrOpenRef.current = imageOcrOpen; }, [imageOcrOpen]);
+  useEffect(() => { voiceModalOpenRef.current = voiceModalOpen; }, [voiceModalOpen]);
+  useEffect(() => { widgetGuideOpenRef.current = widgetGuideOpen; }, [widgetGuideOpen]);
+  useEffect(() => { stampDrawerOpenRef.current = stampDrawerOpen; }, [stampDrawerOpen]);
+  useEffect(() => { isWidgetModeRef.current = isWidgetMode; }, [isWidgetMode]);
+
+  // 新しいモーダルや画面レイヤーを開く際に履歴を1つ進める
+  const pushNavLayer = useCallback((layerName: string) => {
+    try {
+      window.history.pushState({ futarical_layer: layerName, time: Date.now() }, '');
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // UI上の「閉じる / ✕」ボタンを押した時のクローズ処理（履歴スタックも正常に巻き戻す）
+  const closeNavLayer = useCallback((closeAction: () => void) => {
+    closeAction();
+    try {
+      if (window.history.state && window.history.state.futarical_layer) {
+        window.history.back();
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // モーダル・ドロワー・画面の開閉ラッパー関数
+  const openDayDetailModal = useCallback(
+    (dateStr: string, directEventForm = false) => {
+      setSelectedDate(dateStr);
+      const [ny, nm] = dateStr.split('-').map(Number);
+      setYear(ny);
+      setMonth(nm);
+      setOpenEventFormDirectly(directEventForm);
+      setDayDetailOpen(true);
+      pushNavLayer('dayDetail');
+    },
+    [pushNavLayer]
+  );
+
+  const openSettingsModal = useCallback(() => {
+    setSettingsOpen(true);
+    pushNavLayer('settings');
+  }, [pushNavLayer]);
+
+  const openShiftManagerModal = useCallback(
+    (partnerId?: PartnerId) => {
+      setShiftManagerPartner(partnerId || activePartner);
+      setShiftManagerOpen(true);
+      pushNavLayer('shiftManager');
+    },
+    [activePartner, pushNavLayer]
+  );
+
+  const openCategoryManagerModal = useCallback(() => {
+    setCategoryManagerOpen(true);
+    pushNavLayer('categoryManager');
+  }, [pushNavLayer]);
+
+  const openImageOcrModal = useCallback(() => {
+    setImageOcrOpen(true);
+    pushNavLayer('imageOcr');
+  }, [pushNavLayer]);
+
+  const openVoiceModal = useCallback(
+    (dateStr?: string) => {
+      if (dateStr) setSelectedDate(dateStr);
+      setVoiceModalOpen(true);
+      pushNavLayer('voice');
+    },
+    [pushNavLayer]
+  );
+
+  const openWidgetGuideModal = useCallback(() => {
+    setWidgetGuideOpen(true);
+    pushNavLayer('widgetGuide');
+  }, [pushNavLayer]);
+
+  const openStampDrawer = useCallback(() => {
+    setStampDrawerOpen(true);
+    pushNavLayer('stampDrawer');
+  }, [pushNavLayer]);
+
+  const enterCalendarMode = useCallback(() => {
+    setIsWidgetMode(false);
+    pushNavLayer('calendar');
+  }, [pushNavLayer]);
+
+  // Android戻るボタン／iPhone戻るスワイプ（popstate）のインターセプト処理
+  useEffect(() => {
+    try {
+      window.history.replaceState({ futarical_root: true }, '');
+      window.history.pushState({ futarical_home: true }, '');
+    } catch {
+      // ignore
+    }
+
+    const handlePopState = () => {
+      // 1. もしモーダルが開いていればモーダルを閉じる
+      if (
+        dayDetailOpenRef.current ||
+        settingsOpenRef.current ||
+        shiftManagerOpenRef.current ||
+        categoryManagerOpenRef.current ||
+        imageOcrOpenRef.current ||
+        voiceModalOpenRef.current ||
+        widgetGuideOpenRef.current
+      ) {
+        setDayDetailOpen(false);
+        setOpenEventFormDirectly(false);
+        setSettingsOpen(false);
+        setShiftManagerOpen(false);
+        setCategoryManagerOpen(false);
+        setImageOcrOpen(false);
+        setVoiceModalOpen(false);
+        setWidgetGuideOpen(false);
+        return;
+      }
+
+      // 2. もしシフト入力ドロワーが開いていれば閉じる
+      if (stampDrawerOpenRef.current) {
+        setStampDrawerOpen(false);
+        return;
+      }
+
+      // 3. もしカレンダー画面（!isWidgetMode）ならウィジェットホームに戻る
+      if (!isWidgetModeRef.current) {
+        setIsWidgetMode(true);
+        return;
+      }
+
+      // 4. ホーム画面での誤終了防止（2度押し離脱ガード）
+      const now = Date.now();
+      if (now - lastBackPressTimeRef.current < 2000) {
+        // 2秒以内に再度戻るが押されたらブラウザ履歴に従って終了
+        window.history.back();
+      } else {
+        lastBackPressTimeRef.current = now;
+        showToast('💡 もう一度「戻る」を押すとアプリを終了します');
+        try {
+          window.history.pushState({ futarical_home: true }, '');
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [showToast]);
 
   // 初回ロード（IndexedDB / localStorage から復元＋夫の12種シフトプリセット＆妻の空リスト自動適用＋#key招待リンク自動解除）
   useEffect(() => {
@@ -882,36 +1050,30 @@ export const App: React.FC = () => {
           onMarkSeenNow={handleMarkSeenNow}
           matchedHolidays={matchedHolidays}
           overtimeSummary={overtimeSummary}
-          onExitWidgetMode={() => setIsWidgetMode(false)}
+          onExitWidgetMode={enterCalendarMode}
           onOpenCalendarWithStampDrawer={() => {
-            setIsWidgetMode(false);
-            setStampDrawerOpen(true);
+            enterCalendarMode();
+            openStampDrawer();
           }}
           onOpenDayDetail={(dateStr) => {
-            setSelectedDate(dateStr);
-            const [ny, nm] = dateStr.split('-').map(Number);
-            setYear(ny);
-            setMonth(nm);
-            setOpenEventFormDirectly(false);
-            setDayDetailOpen(true);
+            openDayDetailModal(dateStr, false);
           }}
           onQuickAddEventForDate={(dateStr) => {
             handleQuickAddForDate(dateStr);
           }}
           onToggleTaskComplete={handleToggleTaskComplete}
           onSelectDateInFullCalendar={(dateStr) => {
-            setIsWidgetMode(false);
             setSelectedDate(dateStr);
             const [ny, nm] = dateStr.split('-').map(Number);
             setYear(ny);
             setMonth(nm);
+            enterCalendarMode();
           }}
           onOpenVoiceModal={(dateStr) => {
-            setSelectedDate(dateStr);
-            setVoiceModalOpen(true);
+            openVoiceModal(dateStr);
           }}
-          onOpenImageOcrModal={() => setImageOcrOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenImageOcrModal={openImageOcrModal}
+          onOpenSettings={openSettingsModal}
         />
       ) : (
         <>
@@ -940,14 +1102,12 @@ export const App: React.FC = () => {
             onToggleActivePartner={handleToggleActivePartner}
             metadata={store.metadata}
             categories={activeCategories}
-            onOpenCategoryManager={() => setCategoryManagerOpen(true)}
+            onOpenCategoryManager={openCategoryManagerModal}
             onMarkSeenNow={handleMarkSeenNow}
             matchedHolidays={matchedHolidays}
             overtimeSummary={overtimeSummary}
             onSelectDate={(dateStr) => {
-              setSelectedDate(dateStr);
-              setOpenEventFormDirectly(false);
-              setDayDetailOpen(true);
+              openDayDetailModal(dateStr, false);
             }}
             filterCategory={filterCategory}
             onChangeFilter={setFilterCategory}
@@ -959,9 +1119,11 @@ export const App: React.FC = () => {
             isSyncing={isSyncing}
             syncEnabled={syncConfig.enabled}
             onTriggerSync={() => handleTriggerCloudSync()}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={openSettingsModal}
             onLockScreen={() => setIsLocked(true)}
-            onOpenWidgetHome={() => setIsWidgetMode(true)}
+            onOpenWidgetHome={() => {
+              closeNavLayer(() => setIsWidgetMode(true));
+            }}
           />
 
           {/* 月間カレンダーグリッド（シングルタップ移動・ダブルタップ予定一覧・右下＋予定追加） */}
@@ -977,7 +1139,7 @@ export const App: React.FC = () => {
               selectedDate={selectedDate}
               stampModeActive={stampDrawerOpen}
               onCellSingleTap={handleCellSingleTap}
-              onCellDoubleTap={handleCellDoubleTap}
+              onCellDoubleTap={(dateStr) => openDayDetailModal(dateStr, false)}
               onQuickAddForSelectedDate={() => handleQuickAddForDate(selectedDate)}
               onSwipePrevMonth={handlePrevMonth}
               onSwipeNextMonth={handleNextMonth}
@@ -987,7 +1149,13 @@ export const App: React.FC = () => {
           {/* ボトム「シフト連続入力ドロワー ＆ スマホ用下部5ボタンアクションドック」 */}
           <StampDrawer
             isOpen={stampDrawerOpen}
-            onToggleOpen={setStampDrawerOpen}
+            onToggleOpen={(open) => {
+              if (open) {
+                openStampDrawer();
+              } else {
+                closeNavLayer(() => setStampDrawerOpen(false));
+              }
+            }}
             activeTab={stampDrawerTab}
             onChangeTab={setStampDrawerTab}
             stamps={store.stamps}
@@ -1014,16 +1182,16 @@ export const App: React.FC = () => {
             }
             activeSupportBadgesOnSelectedDate={store.daySupports?.[selectedDate]?.badges || []}
             onOpenDayDetail={() => {
-              setOpenEventFormDirectly(true);
-              setDayDetailOpen(true);
+              openDayDetailModal(selectedDate, true);
             }}
             onOpenShiftStampManager={(pid) => {
-              setShiftManagerPartner(pid || currentDrawerPartner);
-              setShiftManagerOpen(true);
+              openShiftManagerModal(pid || currentDrawerPartner);
             }}
-            onOpenVoiceModal={() => setVoiceModalOpen(true)}
-            onOpenImageOcrModal={() => setImageOcrOpen(true)}
-            onOpenWidgetModal={() => setIsWidgetMode(true)}
+            onOpenVoiceModal={() => openVoiceModal(selectedDate)}
+            onOpenImageOcrModal={openImageOcrModal}
+            onOpenWidgetModal={() => {
+              closeNavLayer(() => setIsWidgetMode(true));
+            }}
             metadata={store.metadata}
           />
         </>
@@ -1036,10 +1204,12 @@ export const App: React.FC = () => {
           store={store}
           activePartner={activePartner}
           initialOpenEventForm={openEventFormDirectly}
-          onClose={() => {
-            setDayDetailOpen(false);
-            setOpenEventFormDirectly(false);
-          }}
+          onClose={() =>
+            closeNavLayer(() => {
+              setDayDetailOpen(false);
+              setOpenEventFormDirectly(false);
+            })
+          }
           onMoveDate={moveSelectedDate}
           onSetShiftAndAdvance={handleSetShiftAndAdvance}
           onUpdateShiftDetails={handleUpdateShiftDetails}
@@ -1047,12 +1217,11 @@ export const App: React.FC = () => {
           onSaveEvent={handleSaveEvent}
           onToggleTaskComplete={handleToggleTaskComplete}
           onDeleteEvent={handleDeleteEvent}
-          onOpenVoiceModal={() => setVoiceModalOpen(true)}
+          onOpenVoiceModal={() => openVoiceModal(selectedDate)}
           onOpenShiftStampManager={(pid) => {
-            setShiftManagerPartner(pid || activePartner);
-            setShiftManagerOpen(true);
+            openShiftManagerModal(pid || activePartner);
           }}
-          onOpenCategoryManager={() => setCategoryManagerOpen(true)}
+          onOpenCategoryManager={openCategoryManagerModal}
         />
       )}
 
@@ -1061,7 +1230,7 @@ export const App: React.FC = () => {
         <CategoryManagerModal
           categories={activeCategories}
           metadata={store.metadata}
-          onClose={() => setCategoryManagerOpen(false)}
+          onClose={() => closeNavLayer(() => setCategoryManagerOpen(false))}
           onUpdateCategories={(nextCats) => {
             commitStore({
               ...store,
@@ -1084,7 +1253,7 @@ export const App: React.FC = () => {
           stamps={store.stamps}
           initialPartnerId={shiftManagerPartner}
           metadata={store.metadata}
-          onClose={() => setShiftManagerOpen(false)}
+          onClose={() => closeNavLayer(() => setShiftManagerOpen(false))}
           onUpdateStamps={(nextStamps) => {
             commitStore({
               ...store,
@@ -1103,7 +1272,7 @@ export const App: React.FC = () => {
           activePartner={activePartner}
           metadata={store.metadata}
           stamps={store.stamps}
-          onClose={() => setImageOcrOpen(false)}
+          onClose={() => closeNavLayer(() => setImageOcrOpen(false))}
           onBulkApplyShiftsAndEvents={handleBulkApplyShiftsAndEvents}
         />
       )}
@@ -1115,7 +1284,7 @@ export const App: React.FC = () => {
           activePartner={activePartner}
           metadata={store.metadata}
           categories={activeCategories}
-          onClose={() => setVoiceModalOpen(false)}
+          onClose={() => closeNavLayer(() => setVoiceModalOpen(false))}
           onSaveEvent={handleSaveEvent}
         />
       )}
@@ -1124,9 +1293,9 @@ export const App: React.FC = () => {
       {widgetGuideOpen && (
         <WidgetGuideModal
           store={store}
-          onClose={() => setWidgetGuideOpen(false)}
+          onClose={() => closeNavLayer(() => setWidgetGuideOpen(false))}
           onOpenWidgetPreview={() => {
-            setWidgetGuideOpen(false);
+            closeNavLayer(() => setWidgetGuideOpen(false));
             setIsWidgetMode(true);
           }}
         />
@@ -1139,7 +1308,7 @@ export const App: React.FC = () => {
           activePartner={activePartner}
           syncConfig={syncConfig}
           currentPassword={sessionPassword}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => closeNavLayer(() => setSettingsOpen(false))}
           onUpdateSyncConfig={(nextCfg) => {
             setSyncConfig(nextCfg);
             saveSyncConfig(nextCfg);
