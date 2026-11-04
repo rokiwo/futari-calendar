@@ -196,7 +196,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   // パートナー共有用ワンタップ設定テキストをコピー
   const handleCopyPartnerShareText = async () => {
     const shareText = [
-      '【ふたりカレ (FutariCal) 共有設定💕】',
+      '【ペアカレ (PairCal) 共有設定💕】',
       `🌐 アプリURL: ${window.location.origin}${window.location.pathname}`,
       `🔑 合言葉(パスワード): ${passwordInput || '(設定した合言葉)'}`,
       mode === 'gist' ? `☁️ Gist ID: ${gistId}` : `☁️ Repo: ${repoOwner}/${repoName}`,
@@ -571,7 +571,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <a
                     href={`https://line.me/R/share?text=${encodeURIComponent(
-                      `🐻💕🐰 ふたりの共有シフト＆予定カレンダー「ふたりカレ」\nこの招待リンクを開いてホーム画面に追加してね👇\n${inviteUrl}`
+                      `🐻💕🐰 ふたりの共有シフト＆予定カレンダー「ペアカレ」\nこの招待リンクを開いてホーム画面に追加してね👇\n${inviteUrl}`
                     )}`}
                     target="_blank"
                     rel="noreferrer"
@@ -608,7 +608,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(
                       inviteUrl
                     )}`}
-                    alt="ふたりカレ共有QRコード"
+                    alt="ペアカレ共有QRコード"
                     className="w-24 h-24 rounded-xl border border-stone-200 bg-white p-1 shrink-0"
                   />
                   <div className="space-y-1.5 text-center sm:text-left flex-1">
@@ -874,7 +874,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
                 <div className="p-3 rounded-xl bg-[#FFFBF7] border border-stone-200/80 space-y-2">
                   <label className="block font-bold text-stone-700">
-                    📤 ふたりカレのシフト・予定をスマホのカレンダーで開く
+                    📤 ペアカレのシフト・予定をスマホのカレンダーで開く
                   </label>
                   <div className="flex flex-wrap gap-2">
                     <select
@@ -906,7 +906,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
                 <div className="p-3 rounded-xl bg-[#FFFBF7] border border-stone-200/80 space-y-2">
                   <label className="block font-bold text-stone-700">
-                    📥 外部の .ics ファイルをふたりカレに取り込む
+                    📥 外部の .ics ファイルをペアカレに取り込む
                   </label>
                   <div className="flex flex-wrap gap-2">
                     <select
