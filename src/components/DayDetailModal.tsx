@@ -157,14 +157,15 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     }
   }, [initialOpenEventForm]);
 
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  const weekDay = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
-  const holidayName = getJapaneseHoliday(dateStr);
+  const [y, m, d] = (dateStr || '').split('-').map(Number);
+  const dt = new Date(y || 2026, (m || 1) - 1, d || 1);
+  const weekDay = ['日', '月', '火', '水', '木', '金', '土'][Number.isNaN(dt.getDay()) ? 0 : dt.getDay()];
+  const holidayName = dateStr ? getJapaneseHoliday(dateStr) : null;
 
-  const partnerA = store.metadata.partners.partnerA;
-  const partnerB = store.metadata.partners.partnerB;
-  const currentPartnerInfo = store.metadata.partners[activePartner];
+  const partnerA = store.metadata?.partners?.partnerA || { name: '夫', avatar: '🐻' };
+  const partnerB = store.metadata?.partners?.partnerB || { name: 'さや', avatar: '🐰' };
+  const currentPartnerInfo =
+    activePartner === 'partnerB' ? partnerB : partnerA;
 
   const categories =
     store.categories && store.categories.length > 0
@@ -172,12 +173,12 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
       : DEFAULT_CATEGORIES;
 
   const stampMap = new Map<string, StampPreset>();
-  for (const s of store.stamps) {
+  for (const s of store.stamps || []) {
     stampMap.set(s.id, s);
   }
 
-  const rawShiftA = store.shifts[`${dateStr}_partnerA`];
-  const rawShiftB = store.shifts[`${dateStr}_partnerB`];
+  const rawShiftA = store.shifts?.[`${dateStr}_partnerA`];
+  const rawShiftB = store.shifts?.[`${dateStr}_partnerB`];
   const shiftA = rawShiftA && !rawShiftA.deletedAt ? rawShiftA : undefined;
   const shiftB = rawShiftB && !rawShiftB.deletedAt ? rawShiftB : undefined;
 
@@ -206,8 +207,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   };
   const isBothHoliday = isHolidayShift(shiftA) && isHolidayShift(shiftB);
 
-  const dayEvents = Object.values(store.events)
-    .filter((e) => !e.deletedAt && e.date === dateStr)
+  const dayEvents = Object.values(store.events || {})
+    .filter((e): e is ScheduleEvent => Boolean(e && !e.deletedAt && e.date === dateStr))
     .sort((a, b) => {
       if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1;
       return (a.startTime || '00:00').localeCompare(b.startTime || '00:00');
@@ -228,37 +229,46 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     }
   };
 
-  const renderAuditAndReadStatus = (createdBy: PartnerId, createdAt: string, updatedAt: string) => {
-    const creator = store.metadata.partners[createdBy];
-    const otherId: PartnerId = createdBy === 'partnerA' ? 'partnerB' : 'partnerA';
-    const other = store.metadata.partners[otherId];
+  const renderAuditAndReadStatus = (createdBy?: PartnerId, createdAt?: string, updatedAt?: string) => {
+    try {
+      const effectiveCreatorId = createdBy === 'partnerB' ? 'partnerB' : 'partnerA';
+      const creator =
+        store.metadata?.partners?.[effectiveCreatorId] ||
+        (effectiveCreatorId === 'partnerB' ? partnerB : partnerA);
+      const otherId: PartnerId = effectiveCreatorId === 'partnerA' ? 'partnerB' : 'partnerA';
+      const other =
+        store.metadata?.partners?.[otherId] ||
+        (otherId === 'partnerB' ? partnerB : partnerA);
 
-    const updatedMs = Date.parse(updatedAt || createdAt) || 0;
-    const otherLastSeenMs = Date.parse(other.lastSeenAt || '') || 0;
-    const isReadByOther = otherLastSeenMs >= updatedMs;
+      const updatedMs = Date.parse(updatedAt || createdAt || '') || 0;
+      const otherLastSeenMs = Date.parse(other.lastSeenAt || '') || 0;
+      const isReadByOther = otherLastSeenMs >= updatedMs;
 
-    const isEdited =
-      updatedAt && createdAt && Math.abs(Date.parse(updatedAt) - Date.parse(createdAt)) > 5000;
+      const isEdited =
+        updatedAt && createdAt && Math.abs(Date.parse(updatedAt) - Date.parse(createdAt)) > 5000;
 
-    return (
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-stone-500 mt-1.5 pt-1.5 border-t border-black/5">
-        <span>
-          {creator.avatar} {creator.name}が {formatShortDateTime(updatedAt || createdAt)} に
-          {isEdited ? '更新' : '追加'}
-        </span>
-        <span>•</span>
-        {isReadByOther ? (
-          <span className="inline-flex items-center gap-0.5 font-extrabold text-[#1E6645]">
-            <CheckCircle2 className="w-3 h-3 text-[#52B788]" />
-            {other.avatar} {formatShortDateTime(other.lastSeenAt)} 確認済
+      return (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-stone-500 mt-1.5 pt-1.5 border-t border-black/5">
+          <span>
+            {creator.avatar} {creator.name}が {formatShortDateTime(updatedAt || createdAt)} に
+            {isEdited ? '更新' : '追加'}
           </span>
-        ) : (
-          <span className="inline-flex items-center gap-0.5 font-extrabold text-[#D63864] bg-[#FFE5EC] px-1.5 py-0.2 rounded-full">
-            🆕 {other.avatar}{other.name}は未確認
-          </span>
-        )}
-      </div>
-    );
+          <span>•</span>
+          {isReadByOther ? (
+            <span className="inline-flex items-center gap-0.5 font-extrabold text-[#1E6645]">
+              <CheckCircle2 className="w-3 h-3 text-[#52B788]" />
+              {other.avatar} {formatShortDateTime(other.lastSeenAt)} 確認済
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-0.5 font-extrabold text-[#D63864] bg-[#FFE5EC] px-1.5 py-0.2 rounded-full">
+              🆕 {other.avatar}{other.name}は未確認
+            </span>
+          )}
+        </div>
+      );
+    } catch {
+      return null;
+    }
   };
 
   // 開始・終了時刻の変更（経過分数を自動計算）
@@ -1374,10 +1384,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {(['partnerA', 'partnerB'] as PartnerId[]).map((pid) => {
-                const pInfo = store.metadata.partners[pid];
+                const pInfo =
+                  store.metadata?.partners?.[pid] || (pid === 'partnerB' ? partnerB : partnerA);
                 const shift = pid === 'partnerA' ? shiftA : shiftB;
                 const stamp = pid === 'partnerA' ? stampA : stampB;
-                const partnerStamps = getPartnerShiftStamps(store.stamps, pid);
+                const partnerStamps = getPartnerShiftStamps(store.stamps || [], pid);
 
                 const hasSubWork = Boolean(shift?.subCustomLabel || shift?.subStampId);
                 const otMin = getShiftOvertimeMinutes(shift);
