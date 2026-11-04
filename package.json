@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node build-standalone.mjs",
+    "build": "tsc && vite build && node build-standalone.mjs",
     "preview": "vite preview",
     "deploy": "npm run build && node deploy-github.mjs"
   },
