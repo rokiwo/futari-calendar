@@ -213,21 +213,23 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   // スマホ用のカレンダー表示スタイル切替（'grid' = 7列マス目 / 'list' = 縦1列くっきりリスト）
   const [mobileLayout, setMobileLayout] = useState<'grid' | 'list'>('grid');
 
-  // 詳細プレビューバーの表示位置（'bottom' = 下 / 'top' = 上 / 'hidden' = 非表示）
+  // 詳細プレビューバーの表示位置（'top' = 上 / 'bottom' = 下 / 'hidden' = 非表示）
   const [previewPosition, setPreviewPosition] = useState<'bottom' | 'top' | 'hidden'>(() => {
     try {
-      const saved = localStorage.getItem('futarical_preview_position');
+      const saved =
+        localStorage.getItem('paircal_preview_position') ||
+        localStorage.getItem('futarical_preview_position');
       if (saved === 'top' || saved === 'bottom' || saved === 'hidden') return saved;
     } catch {
       // ignore
     }
-    return 'bottom';
+    return 'top'; // ユーザー要望に合わせてデフォルトを「上」に設定！
   });
 
   const handleSetPreviewPosition = (pos: 'bottom' | 'top' | 'hidden') => {
     setPreviewPosition(pos);
     try {
-      localStorage.setItem('futarical_preview_position', pos);
+      localStorage.setItem('paircal_preview_position', pos);
     } catch {
       // ignore
     }
@@ -576,35 +578,42 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         </div>
       </div>
 
-      {/* 操作ガイドバー（シングルタップ移動・ダブルタップ一覧・詳細位置切替） */}
-      <div className="mx-1 sm:mx-0 mb-1.5 px-2.5 py-1 rounded-xl bg-[#FFF9FB] border border-pink-200/80 flex items-center justify-between text-[10px] sm:text-xs font-extrabold text-[#9E2A47]">
-        <span>👆 1タップ: 日付選択 ／ 2タップ: その日の全予定</span>
-        <div className="flex items-center gap-1.5">
-          <span className="text-stone-400 font-bold hidden min-[440px]:inline">詳細表示:</span>
-          <div className="flex items-center bg-stone-200/70 p-0.5 rounded-lg text-[10px] font-black">
+      {/* 操作ガイドバー（日付タップ・詳細カード位置「⬆️ 上 / ⬇️ 下」切り替え） */}
+      <div className="mx-1 sm:mx-0 mb-2 px-3 py-1.5 rounded-2xl bg-gradient-to-r from-[#FFF5F8] to-[#FBF7FF] border border-pink-200/80 shadow-2xs flex items-center justify-between text-xs font-bold text-stone-700 gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 text-stone-700">
+          <span className="text-sm">👆</span>
+          <span className="text-[11px] sm:text-xs font-extrabold text-[#9E2A47]">
+            タップで日付選択（ダブルタップで全予定一覧）
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 bg-white/90 px-2.5 py-1 rounded-xl border border-pink-200 shadow-2xs">
+          <span className="text-[11px] font-black text-stone-600">詳細の位置:</span>
+          <div className="inline-flex rounded-lg bg-stone-100 p-0.5">
             <button
               type="button"
               onClick={() => handleSetPreviewPosition('top')}
-              className={`px-1.5 py-0.5 rounded transition-all ${
+              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all flex items-center gap-0.5 ${
                 previewPosition === 'top'
-                  ? 'bg-white text-[#9E2A47] shadow-2xs font-black'
-                  : 'text-stone-600'
+                  ? 'bg-gradient-to-r from-[#FF8FAB] to-[#FF758F] text-white shadow-xs'
+                  : 'text-stone-600 hover:text-stone-900'
               }`}
               title="選択日の詳細カードをカレンダーの上に表示"
             >
-              ⬆️上
+              <span>⬆️</span>
+              <span>上</span>
             </button>
             <button
               type="button"
               onClick={() => handleSetPreviewPosition('bottom')}
-              className={`px-1.5 py-0.5 rounded transition-all ${
+              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all flex items-center gap-0.5 ${
                 previewPosition === 'bottom'
-                  ? 'bg-white text-[#9E2A47] shadow-2xs font-black'
-                  : 'text-stone-600'
+                  ? 'bg-gradient-to-r from-[#FF8FAB] to-[#FF758F] text-white shadow-xs'
+                  : 'text-stone-600 hover:text-stone-900'
               }`}
               title="選択日の詳細カードをカレンダーの下に表示"
             >
-              ⬇️下
+              <span>⬇️</span>
+              <span>下</span>
             </button>
           </div>
         </div>
