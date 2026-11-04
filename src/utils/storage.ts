@@ -340,7 +340,7 @@ export async function createNewSecretGist(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      description: 'ふたりカレ (FutariCal) 暗号化スケジュールデータ（AES-GCM 256bit）',
+      description: 'ペアカレ (PairCal) 暗号化スケジュールデータ（AES-GCM 256bit）',
       public: false,
       files: {
         [GIST_FILENAME]: {
