@@ -77,6 +77,8 @@ interface TopHeaderProps {
   onOpenWidgetHome?: () => void;
   onOpenShiftExport?: () => void;
   onOpenWelcomeImage?: () => void;
+  isShared?: boolean;
+  onOpenSharedKeywordModal?: () => void;
 }
 
 export function formatLastSeen(isoStr?: string): string {
@@ -136,6 +138,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenWidgetHome,
   onOpenShiftExport,
   onOpenWelcomeImage,
+  isShared = false,
+  onOpenSharedKeywordModal,
 }) => {
   const [showHolidayPopup, setShowHolidayPopup] = useState(false);
   const [showOvertimePopup, setShowOvertimePopup] = useState(false);
@@ -433,6 +437,19 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 title="クラウド同期"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#FF8FAB]' : ''}`} />
+              </button>
+            )}
+
+            {/* 🔑 合言葉で共有ボタン（未共有の場合に目立つバッジボタンとして表示） */}
+            {!isShared && onOpenSharedKeywordModal && (
+              <button
+                type="button"
+                onClick={onOpenSharedKeywordModal}
+                className="px-2 py-1 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[10px] sm:text-xs font-black shadow-xs flex items-center gap-1 active:scale-95 animate-pulse"
+                title="合言葉を入力してカレンダーを共有"
+              >
+                <span>🔑</span>
+                <span>合言葉で共有</span>
               </button>
             )}
 
