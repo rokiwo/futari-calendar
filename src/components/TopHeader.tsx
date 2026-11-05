@@ -156,12 +156,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   return (
     <header className="sticky top-0 z-30 bg-[#FFFBF7]/95 backdrop-blur-md border-b border-[#FFE5EC] shadow-xs">
       <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-1.5 pb-1.5 space-y-1.5">
-        {/* 上段：スリムメインバー（年月セレクター ＋ 休一致 ＋ 残業 ＋ パートナー切替 ＋ 既読 ＋ 設定） */}
-        <div className="flex items-center justify-between gap-1 sm:gap-2">
-          {/* 左側：年月切替 ＆ 今日 ＆ 休一致 ＆ 残業 */}
-          <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+        {/* 1段目：年月ナビゲーション ＆ アプリツール（合言葉・写真・同期・設定） */}
+        <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+          {/* 左側：年月切替 ＆ 今日 */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* 年月ピル */}
-            <div className="flex items-center bg-white rounded-xl border border-stone-200/90 shadow-2xs px-0.5 py-0.5 shrink-0">
+            <div className="flex items-center bg-white rounded-xl border border-stone-200/90 shadow-2xs px-0.5 py-0.5">
               <button
                 type="button"
                 onClick={onPrevMonth}
@@ -193,79 +193,70 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <button
               type="button"
               onClick={onToday}
-              className="px-1.5 sm:px-2 py-1 rounded-xl bg-white border border-stone-200 text-stone-600 text-[10px] sm:text-xs font-extrabold shadow-2xs hover:bg-stone-50 active:scale-95 shrink-0"
+              className="px-2 py-1 rounded-xl bg-white border border-stone-200 text-stone-600 text-xs font-extrabold shadow-2xs hover:bg-stone-50 active:scale-95 shrink-0"
             >
               今日
             </button>
+          </div>
 
-            {/* ✨今月のお休み一致バッジ（コンパクト化） */}
-            <div className="relative shrink-0">
+          {/* 右側：アプリツール群（合言葉・写真・同期・設定） */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* 🔑 合言葉で共有ボタン（未共有の場合に目立つバッジボタンとして表示） */}
+            {!isShared && onOpenSharedKeywordModal && (
               <button
                 type="button"
-                onClick={() => {
-                  setShowHolidayPopup(!showHolidayPopup);
-                  setShowOvertimePopup(false);
-                }}
-                className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-1 rounded-xl bg-[#FFE5EC] border border-[#FFC2D1] text-[#9E2A47] text-[10px] sm:text-xs font-black shadow-2xs active:scale-95 transition-all"
-                title="ふたり共通のお休み日"
+                onClick={onOpenSharedKeywordModal}
+                className="px-2 py-1 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[10px] sm:text-xs font-black shadow-xs flex items-center gap-1 active:scale-95 animate-pulse"
+                title="合言葉を入力してカレンダーを共有"
               >
-                <Sparkles className="w-3 h-3 text-[#FF8FAB] shrink-0" />
-                <span className="hidden min-[380px]:inline">休一致</span>
-                <span className="px-1 rounded-full bg-white text-[#D63864] font-black text-[10px]">
-                  {matchedHolidays.length}
-                </span>
+                <span>🔑</span>
+                <span>合言葉で共有</span>
               </button>
+            )}
 
-              {showHolidayPopup && (
-                <div className="absolute left-0 mt-1.5 w-64 bg-white rounded-2xl shadow-xl border-2 border-[#FFE5EC] p-3 z-50 animate-pop">
-                  <div className="flex items-center justify-between mb-2 pb-1 border-b border-stone-100">
-                    <span className="text-xs font-extrabold text-[#9E2A47] flex items-center gap-1">
-                      <Heart className="w-3.5 h-3.5 fill-[#FF8FAB] text-[#FF8FAB]" />
-                      {month}月のふたり休日一致 ({matchedHolidays.length}日)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowHolidayPopup(false)}
-                      className="text-stone-400 hover:text-stone-600 text-xs font-bold px-1"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  {matchedHolidays.length === 0 ? (
-                    <p className="text-xs text-stone-500 py-2 text-center">
-                      まだ今月の2人共通のお休み日がありません🐾
-                    </p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
-                      {matchedHolidays.map((dateStr) => {
-                        const dayNum = Number(dateStr.split('-')[2]);
-                        const dt = new Date(
-                          Number(dateStr.split('-')[0]),
-                          Number(dateStr.split('-')[1]) - 1,
-                          dayNum
-                        );
-                        const w = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
-                        return (
-                          <button
-                            key={dateStr}
-                            type="button"
-                            onClick={() => {
-                              onSelectDate(dateStr);
-                              setShowHolidayPopup(false);
-                            }}
-                            className="px-2.5 py-1 rounded-xl bg-[#FFE5EC]/70 hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-xs font-extrabold"
-                          >
-                            💕 {month}/{dayNum}({w})
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            {/* 📸 写真保存 */}
+            {onOpenShiftExport && (
+              <button
+                type="button"
+                onClick={onOpenShiftExport}
+                className="px-2 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-xs font-black flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
+                title="シフト表を写真(PNG)として保存"
+              >
+                <Camera className="w-3.5 h-3.5 text-[#0284C7]" />
+                <span className="text-xs">写真</span>
+              </button>
+            )}
 
-            {/* ⏱️ 今月の残業時間バッジ（コンパクト化） */}
+            {/* 🔄 同期中アイコンまたは手動同期 */}
+            {syncEnabled && (
+              <button
+                type="button"
+                onClick={onTriggerSync}
+                disabled={isSyncing}
+                className="p-1 sm:p-1.5 rounded-xl bg-white border border-stone-200 text-stone-600 active:scale-90 shadow-2xs hover:bg-stone-50"
+                title="クラウド同期"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#FF8FAB]' : ''}`} />
+              </button>
+            )}
+
+            {/* ⚙️ 設定 */}
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="p-1 sm:p-1.5 rounded-xl bg-white border border-stone-200 text-stone-700 active:scale-90 shadow-2xs hover:bg-stone-50"
+              title="設定・クラウド同期・iCal連携"
+            >
+              <Settings className="w-3.5 h-3.5 text-[#FF8FAB]" />
+            </button>
+          </div>
+        </div>
+
+        {/* 2段目：ふたりのステータス ＆ 操作切り替え（残業時間・休一致 ＆ 操作パートナー・既読） */}
+        <div className="flex items-center justify-between gap-1 sm:gap-2">
+          {/* 左側：⏱️残業時間 ＆ ✨休一致（絶対に重ならず、タップしやすい独立スペース！） */}
+          <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+            {/* ⏱️ 今月の残業時間バッジ */}
             <div className="relative shrink-0">
               <button
                 type="button"
@@ -273,12 +264,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                   setShowOvertimePopup(!showOvertimePopup);
                   setShowHolidayPopup(false);
                 }}
-                className="flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2 py-1 rounded-xl bg-[#FFF6D6] border border-[#FFE28A] text-[#8A5A00] text-[10px] sm:text-xs font-black shadow-2xs active:scale-95 transition-all"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FFF6D6] hover:bg-[#FFE8A3] border border-[#FFE28A] text-[#8A5A00] text-xs font-black shadow-2xs active:scale-95 transition-all"
                 title="今月の残業時間・休日出勤時間・バイト回数を確認"
               >
-                <Timer className="w-3 h-3 text-[#D49600] shrink-0" />
-                <span className="hidden min-[400px]:inline">残業</span>
-                <span className="font-black text-[10px] sm:text-[11px]">
+                <Timer className="w-3.5 h-3.5 text-[#D49600] shrink-0" />
+                <span>残業</span>
+                <span className="font-black">
                   {overtimeSummary.partnerA.totalExtraMinutes + overtimeSummary.partnerB.totalExtraMinutes}分
                 </span>
               </button>
@@ -363,16 +354,83 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 </div>
               )}
             </div>
+
+            {/* ✨今月のお休み一致バッジ */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowHolidayPopup(!showHolidayPopup);
+                  setShowOvertimePopup(false);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FFE5EC] hover:bg-[#FFD1DC] border border-[#FFC2D1] text-[#9E2A47] text-xs font-black shadow-2xs active:scale-95 transition-all"
+                title="ふたり共通のお休み日"
+              >
+                <Sparkles className="w-3 h-3 text-[#FF8FAB] shrink-0" />
+                <span>休一致</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-white text-[#D63864] font-black text-xs">
+                  {matchedHolidays.length}
+                </span>
+              </button>
+
+              {showHolidayPopup && (
+                <div className="absolute left-0 mt-1.5 w-64 bg-white rounded-2xl shadow-xl border-2 border-[#FFE5EC] p-3 z-50 animate-pop">
+                  <div className="flex items-center justify-between mb-2 pb-1 border-b border-stone-100">
+                    <span className="text-xs font-extrabold text-[#9E2A47] flex items-center gap-1">
+                      <Heart className="w-3.5 h-3.5 fill-[#FF8FAB] text-[#FF8FAB]" />
+                      {month}月のふたり休日一致 ({matchedHolidays.length}日)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowHolidayPopup(false)}
+                      className="text-stone-400 hover:text-stone-600 text-xs font-bold px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {matchedHolidays.length === 0 ? (
+                    <p className="text-xs text-stone-500 py-2 text-center">
+                      まだ今月の2人共通のお休み日がありません🐾
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
+                      {matchedHolidays.map((dateStr) => {
+                        const dayNum = Number(dateStr.split('-')[2]);
+                        const dt = new Date(
+                          Number(dateStr.split('-')[0]),
+                          Number(dateStr.split('-')[1]) - 1,
+                          dayNum
+                        );
+                        const w = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
+                        return (
+                          <button
+                            key={dateStr}
+                            type="button"
+                            onClick={() => {
+                              onSelectDate(dateStr);
+                              setShowHolidayPopup(false);
+                            }}
+                            className="px-2.5 py-1 rounded-xl bg-[#FFE5EC]/70 hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-xs font-extrabold"
+                          >
+                            💕 {month}/{dayNum}({w})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* 右側：操作パートナー切替 ＆ 既読 ＆ 写真 ＆ 設定 */}
-          <div className="flex items-center gap-1 shrink-0">
-            {/* 操作中パートナー切替（🐻ゆうと ⇔ 🐰さや）スリムピル */}
+          {/* 右側：操作中パートナー切替 ＆ 既読確認 */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* 操作中パートナー切替（🐻ゆうと ⇔ 🐰さや） */}
             <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200 shadow-2xs">
               <button
                 type="button"
                 onClick={() => onToggleActivePartner('partnerA')}
-                className={`px-1.5 sm:px-2 py-0.5 rounded-lg text-[10px] sm:text-xs font-black transition-all flex items-center gap-0.5 ${
+                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-black transition-all flex items-center gap-0.5 ${
                   activePartner === 'partnerA'
                     ? 'bg-[#56CFE1] text-white shadow-xs'
                     : 'text-stone-500 hover:text-stone-700'
@@ -380,12 +438,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 title={`${partnerA.name}として操作`}
               >
                 <span>{partnerA.avatar}</span>
-                <span className="hidden min-[380px]:inline">{partnerA.name}</span>
+                <span>{partnerA.name}</span>
               </button>
               <button
                 type="button"
                 onClick={() => onToggleActivePartner('partnerB')}
-                className={`px-1.5 sm:px-2 py-0.5 rounded-lg text-[10px] sm:text-xs font-black transition-all flex items-center gap-0.5 ${
+                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-black transition-all flex items-center gap-0.5 ${
                   activePartner === 'partnerB'
                     ? 'bg-[#B388EB] text-white shadow-xs'
                     : 'text-stone-500 hover:text-stone-700'
@@ -393,74 +451,25 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 title={`${partnerB.name}として操作`}
               >
                 <span>{partnerB.avatar}</span>
-                <span className="hidden min-[380px]:inline">{partnerB.name}</span>
+                <span>{partnerB.name}</span>
               </button>
             </div>
 
-            {/* 既読確認ミニボタン */}
+            {/* 既読確認ボタン */}
             <button
               type="button"
               onClick={onMarkSeenNow}
-              className="flex items-center gap-0.5 px-1.5 py-1 rounded-xl bg-white border border-stone-200/90 text-stone-700 text-[10px] font-bold shadow-2xs active:scale-95 hover:bg-stone-50"
+              className="flex items-center gap-0.5 px-2 py-1 rounded-xl bg-white border border-stone-200/90 text-stone-700 text-xs font-bold shadow-2xs active:scale-95 hover:bg-stone-50"
               title={`相手の確認: ${formatLastSeen(otherPartner.lastSeenAt)}（タップで既読更新）`}
             >
               <span>{otherPartner.avatar}</span>
               {unreadCountForPartner > 0 ? (
-                <span className="px-1 py-0.2 rounded-full bg-[#FFE5EC] text-[#D63864] font-black text-[9px]">
+                <span className="px-1.5 py-0.2 rounded-full bg-[#FFE5EC] text-[#D63864] font-black text-[10px]">
                   未{unreadCountForPartner}
                 </span>
               ) : (
-                <CheckCircle2 className="w-3 h-3 text-[#52B788]" />
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#52B788]" />
               )}
-            </button>
-
-            {/* 📸 写真保存 */}
-            {onOpenShiftExport && (
-              <button
-                type="button"
-                onClick={onOpenShiftExport}
-                className="p-1 sm:px-1.5 sm:py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-[10px] sm:text-xs font-black flex items-center gap-0.5 active:scale-95 transition-all shadow-2xs"
-                title="シフト表を写真(PNG)として保存"
-              >
-                <Camera className="w-3.5 h-3.5 text-[#0284C7]" />
-                <span className="hidden sm:inline">写真</span>
-              </button>
-            )}
-
-            {/* 🔄 同期中アイコンまたは手動同期 */}
-            {syncEnabled && (
-              <button
-                type="button"
-                onClick={onTriggerSync}
-                disabled={isSyncing}
-                className="p-1 sm:p-1.5 rounded-xl bg-white border border-stone-200 text-stone-600 active:scale-90"
-                title="クラウド同期"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#FF8FAB]' : ''}`} />
-              </button>
-            )}
-
-            {/* 🔑 合言葉で共有ボタン（未共有の場合に目立つバッジボタンとして表示） */}
-            {!isShared && onOpenSharedKeywordModal && (
-              <button
-                type="button"
-                onClick={onOpenSharedKeywordModal}
-                className="px-2 py-1 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[10px] sm:text-xs font-black shadow-xs flex items-center gap-1 active:scale-95 animate-pulse"
-                title="合言葉を入力してカレンダーを共有"
-              >
-                <span>🔑</span>
-                <span>合言葉で共有</span>
-              </button>
-            )}
-
-            {/* ⚙️ 設定 */}
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="p-1 sm:p-1.5 rounded-xl bg-white border border-stone-200 text-stone-700 active:scale-90 shadow-2xs hover:bg-stone-50"
-              title="設定・クラウド同期・iCal連携"
-            >
-              <Settings className="w-3.5 h-3.5 text-[#FF8FAB]" />
             </button>
           </div>
         </div>
