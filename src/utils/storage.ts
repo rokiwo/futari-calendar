@@ -151,20 +151,82 @@ export function mergeCalendarStores(
   // 5. メタデータ＆最終確認日時（lastSeenAt は常に新しい方を採用）
   const localMeta = local.metadata;
   const remoteMeta = remote.metadata;
-  const newerMeta =
-    toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt) ? remoteMeta : localMeta;
 
-  const partnerALastSeen =
-    toTimeMs(remoteMeta?.partners?.partnerA?.lastSeenAt) >
-    toTimeMs(localMeta?.partners?.partnerA?.lastSeenAt)
-      ? remoteMeta.partners.partnerA.lastSeenAt
-      : localMeta.partners.partnerA.lastSeenAt;
+  // 📸 お気に入り写真・ウェルカム設定のマージ保護（同期によって写真が消滅するバグを完全解消）
+  const localWelcome = localMeta?.welcomeImageConfig;
+  const remoteWelcome = remoteMeta?.welcomeImageConfig;
+  let mergedWelcome = localWelcome || remoteWelcome;
+  if (localWelcome?.dataUrl && !remoteWelcome?.dataUrl) {
+    mergedWelcome = localWelcome;
+  } else if (!localWelcome?.dataUrl && remoteWelcome?.dataUrl) {
+    mergedWelcome = remoteWelcome;
+  } else if (localWelcome?.dataUrl && remoteWelcome?.dataUrl) {
+    // 両方にある場合はより新しいか有効な方を採用
+    mergedWelcome =
+      toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt)
+        ? remoteWelcome
+        : localWelcome;
+  }
 
-  const partnerBLastSeen =
-    toTimeMs(remoteMeta?.partners?.partnerB?.lastSeenAt) >
-    toTimeMs(localMeta?.partners?.partnerB?.lastSeenAt)
-      ? remoteMeta.partners.partnerB.lastSeenAt
-      : localMeta.partners.partnerB.lastSeenAt;
+  // 👫 パートナーA / B のアイコン・プロフィールマージ保護（相手端末の同期でアイコンが初期化されるのを完全防止）
+  const mergePartnerProfile = (
+    pid: 'partnerA' | 'partnerB',
+    defaultAvatar: string,
+    defaultName: string
+  ) => {
+    const locP = localMeta?.partners?.[pid];
+    const remP = remoteMeta?.partners?.[pid];
+    if (!locP && !remP) {
+      return { name: defaultName, avatar: defaultAvatar, themeColor: '', bgColor: '', lastSeenAt: '' };
+    }
+    if (!remP) return locP;
+    if (!locP) return remP;
+
+    // もしローカルのアバターがデフォルト以外にカスタマイズされていて、リモートがデフォルトならローカルを優先
+    const locCustom = locP.avatar && locP.avatar !== defaultAvatar;
+    const remCustom = remP.avatar && remP.avatar !== defaultAvatar;
+
+    let chosenAvatar = locP.avatar || defaultAvatar;
+    let chosenName = locP.name || defaultName;
+
+    if (locCustom && !remCustom) {
+      chosenAvatar = locP.avatar;
+    } else if (!locCustom && remCustom) {
+      chosenAvatar = remP.avatar;
+    } else {
+      // 両方カスタムまたは両方デフォルトの場合は更新時刻が新しい方を優先
+      chosenAvatar =
+        toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt)
+          ? remP.avatar || locP.avatar || defaultAvatar
+          : locP.avatar || remP.avatar || defaultAvatar;
+    }
+
+    if (locP.name && locP.name !== defaultName && (!remP.name || remP.name === defaultName)) {
+      chosenName = locP.name;
+    } else if (remP.name && remP.name !== defaultName && (!locP.name || locP.name === defaultName)) {
+      chosenName = remP.name;
+    } else {
+      chosenName =
+        toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt)
+          ? remP.name || locP.name || defaultName
+          : locP.name || remP.name || defaultName;
+    }
+
+    const lastSeen =
+      toTimeMs(remP.lastSeenAt) > toTimeMs(locP.lastSeenAt)
+        ? remP.lastSeenAt
+        : locP.lastSeenAt;
+
+    return {
+      ...(toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt) ? remP : locP),
+      name: chosenName,
+      avatar: chosenAvatar,
+      lastSeenAt: lastSeen,
+    };
+  };
+
+  const partnerA = mergePartnerProfile('partnerA', '🐻', 'ゆうと');
+  const partnerB = mergePartnerProfile('partnerB', '🐰', 'さや');
 
   const nowIso = new Date().toISOString();
 
@@ -172,20 +234,15 @@ export function mergeCalendarStores(
     version: 1,
     metadata: {
       partners: {
-        partnerA: {
-          ...(newerMeta?.partners?.partnerA || localMeta.partners.partnerA),
-          lastSeenAt: partnerALastSeen,
-        },
-        partnerB: {
-          ...(newerMeta?.partners?.partnerB || localMeta.partners.partnerB),
-          lastSeenAt: partnerBLastSeen,
-        },
+        partnerA,
+        partnerB,
       },
+      welcomeImageConfig: mergedWelcome,
       lastSyncedAt: nowIso,
       updatedAt:
         toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt)
           ? remoteMeta.updatedAt
-          : localMeta.updatedAt,
+          : localMeta.updatedAt || nowIso,
     },
     categories: mergedCategories,
     stamps: mergedStamps,
