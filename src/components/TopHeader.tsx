@@ -203,34 +203,50 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </button>
           </div>
 
-          {/* 右側：操作中パートナー切替（🐻ゆうと ⇔ 🐰さや）※1段目にゆったり配置して他と絶対に被らない！ */}
-          <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200 shadow-2xs shrink-0">
-            <button
-              type="button"
-              onClick={() => onToggleActivePartner('partnerA')}
-              className={`px-2 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black transition-all flex items-center gap-0.5 ${
-                activePartner === 'partnerA'
-                  ? 'bg-[#56CFE1] text-white shadow-xs'
-                  : 'text-stone-500 hover:text-stone-700'
-              }`}
-              title={`${partnerA.name}として操作`}
-            >
-              <span>{partnerA.avatar}</span>
-              <span>{partnerA.name}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onToggleActivePartner('partnerB')}
-              className={`px-2 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black transition-all flex items-center gap-0.5 ${
-                activePartner === 'partnerB'
-                  ? 'bg-[#B388EB] text-white shadow-xs'
-                  : 'text-stone-500 hover:text-stone-700'
-              }`}
-              title={`${partnerB.name}として操作`}
-            >
-              <span>{partnerB.avatar}</span>
-              <span>{partnerB.name}</span>
-            </button>
+          {/* 右側：📸 写真保存 ＆ 操作中パートナー切替 */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* 📸 写真（シフト表・カレンダー画像保存・共有）※ご要望により1段目のゆったりエリアに配置 */}
+            {onOpenShiftExport && (
+              <button
+                type="button"
+                onClick={onOpenShiftExport}
+                className="px-2.5 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-xs font-black flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
+                title="シフト表・カレンダーを写真(画像)として保存・共有"
+              >
+                <Camera className="w-3.5 h-3.5 text-[#0284C7]" />
+                <span className="text-xs">写真共有</span>
+              </button>
+            )}
+
+            {/* 操作中パートナー切替（🐻ゆうと ⇔ 🐰さや） */}
+            <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200 shadow-2xs shrink-0">
+              <button
+                type="button"
+                onClick={() => onToggleActivePartner('partnerA')}
+                className={`px-2 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black transition-all flex items-center gap-0.5 ${
+                  activePartner === 'partnerA'
+                    ? 'bg-[#56CFE1] text-white shadow-xs'
+                    : 'text-stone-500 hover:text-stone-700'
+                }`}
+                title={`${partnerA.name}として操作`}
+              >
+                <span>{partnerA.avatar}</span>
+                <span>{partnerA.name}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleActivePartner('partnerB')}
+                className={`px-2 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black transition-all flex items-center gap-0.5 ${
+                  activePartner === 'partnerB'
+                    ? 'bg-[#B388EB] text-white shadow-xs'
+                    : 'text-stone-500 hover:text-stone-700'
+                }`}
+                title={`${partnerB.name}として操作`}
+              >
+                <span>{partnerB.avatar}</span>
+                <span>{partnerB.name}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -453,19 +469,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               >
                 <span>🔑</span>
                 <span>共有</span>
-              </button>
-            )}
-
-            {/* 📸 写真保存 */}
-            {onOpenShiftExport && (
-              <button
-                type="button"
-                onClick={onOpenShiftExport}
-                className="px-2 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-xs font-black flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
-                title="シフト表を写真(PNG)として保存"
-              >
-                <Camera className="w-3.5 h-3.5 text-[#0284C7]" />
-                <span className="text-xs">写真</span>
               </button>
             )}
 
