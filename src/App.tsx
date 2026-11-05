@@ -1434,6 +1434,7 @@ export const App: React.FC = () => {
               openShiftManagerModal(pid || activePartner);
             }}
             onOpenCategoryManager={openCategoryManagerModal}
+            onOpenShiftInput={openStampDrawer}
           />
         </ErrorBoundary>
       )}
