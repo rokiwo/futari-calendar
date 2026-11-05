@@ -34,6 +34,11 @@ import {
   setActivePartnerId,
   setSavedPassHash,
   syncWithGitHub,
+  getSavedSharedKeyword,
+  setSavedSharedKeyword,
+  isSharedKeywordValid,
+  setCustomKeywordDef,
+  getCustomKeywordDef,
 } from './utils/storage';
 import { MonthlyOvertimeSummary, TopHeader } from './components/TopHeader';
 import { MonthlyCalendarGrid } from './components/MonthlyCalendarGrid';
@@ -48,6 +53,7 @@ import { CategoryManagerModal } from './components/CategoryManagerModal';
 import { ExportPartnerMode, ShiftExportModal } from './components/ShiftExportModal';
 import { TaskManagerModal } from './components/TaskManagerModal';
 import { WelcomeImageModal } from './components/WelcomeImageModal';
+import { SharedKeywordModal } from './components/SharedKeywordModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 // 日付文字列 "YYYY-MM-DD" に deltaDays 日を加算した "YYYY-MM-DD" を返す
@@ -111,7 +117,9 @@ export const App: React.FC = () => {
   const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(false);
   const [welcomePreviewConfig, setWelcomePreviewConfig] = useState<WelcomeImageConfig | null>(null);
 
-  // クラウド同期状態（パスワードロックは不要なため撤廃し、いつでもワンタップで使えます）
+  // クラウド同期状態（特定の合言葉が入力された場合のみ共有同期が有効になる）
+  const [savedSharedKeyword, setSavedSharedKeywordState] = useState<string | null>(() => getSavedSharedKeyword());
+  const [sharedKeywordModalOpen, setSharedKeywordModalOpen] = useState<boolean>(false);
   const [savedPassHash, setSavedPassHashState] = useState<string | null>(null);
   const [sessionPassword, setSessionPassword] = useState<string>('');
   const [syncConfig, setSyncConfig] = useState<CloudSyncConfig>(() => loadSyncConfig());
@@ -141,6 +149,7 @@ export const App: React.FC = () => {
   const shiftExportOpenRef = useRef(shiftExportOpen);
   const taskManagerOpenRef = useRef(taskManagerOpen);
   const welcomeModalOpenRef = useRef(welcomeModalOpen);
+  const sharedKeywordModalOpenRef = useRef(sharedKeywordModalOpen);
   const stampDrawerOpenRef = useRef(stampDrawerOpen);
   const isWidgetModeRef = useRef(isWidgetMode);
   const lastBackPressTimeRef = useRef<number>(0);
@@ -156,6 +165,7 @@ export const App: React.FC = () => {
   useEffect(() => { shiftExportOpenRef.current = shiftExportOpen; }, [shiftExportOpen]);
   useEffect(() => { taskManagerOpenRef.current = taskManagerOpen; }, [taskManagerOpen]);
   useEffect(() => { welcomeModalOpenRef.current = welcomeModalOpen; }, [welcomeModalOpen]);
+  useEffect(() => { sharedKeywordModalOpenRef.current = sharedKeywordModalOpen; }, [sharedKeywordModalOpen]);
   useEffect(() => { stampDrawerOpenRef.current = stampDrawerOpen; }, [stampDrawerOpen]);
   useEffect(() => { isWidgetModeRef.current = isWidgetMode; }, [isWidgetMode]);
 
@@ -258,6 +268,11 @@ export const App: React.FC = () => {
     pushNavLayer('welcomeModal');
   }, [pushNavLayer]);
 
+  const openSharedKeywordModal = useCallback(() => {
+    setSharedKeywordModalOpen(true);
+    pushNavLayer('sharedKeyword');
+  }, [pushNavLayer]);
+
   const enterCalendarMode = useCallback(() => {
     setIsWidgetMode(false);
     pushNavLayer('calendar');
@@ -290,7 +305,8 @@ export const App: React.FC = () => {
         widgetGuideOpenRef.current ||
         shiftExportOpenRef.current ||
         taskManagerOpenRef.current ||
-        welcomeModalOpenRef.current
+        welcomeModalOpenRef.current ||
+        sharedKeywordModalOpenRef.current
       ) {
         setDayDetailOpen(false);
         setOpenEventFormDirectly(false);
@@ -304,6 +320,7 @@ export const App: React.FC = () => {
         setTaskManagerOpen(false);
         setWelcomeModalOpen(false);
         setWelcomePreviewConfig(null);
+        setSharedKeywordModalOpen(false);
         return;
       }
 
@@ -495,6 +512,28 @@ export const App: React.FC = () => {
       if (shouldApplySayaPresets) {
         localStorage.setItem(SAYA_10_SHIFTS_FLAG, '1');
       }
+      // 🔑 共有キーワード（合言葉）の認証状態をチェック
+      let currentKeyword = getSavedSharedKeyword();
+      if (!currentKeyword && inviteKeyFromHash && isSharedKeywordValid(inviteKeyFromHash)) {
+        setSavedSharedKeyword(inviteKeyFromHash);
+        currentKeyword = inviteKeyFromHash;
+      }
+      setSavedSharedKeywordState(currentKeyword);
+
+      // 合言葉が未入力の場合（初回起動・未共有端末）はまっさらな状態のカレンダーで起動
+      if (!currentKeyword) {
+        const freshStore = createInitialDataStore();
+        setStore(freshStore);
+        setIsLoaded(true);
+        // 初回ロード完了後にふんわり合言葉入力モーダルを開く
+        setTimeout(() => {
+          if (mounted) {
+            setSharedKeywordModalOpen(true);
+          }
+        }, 350);
+        return;
+      }
+
       if (shouldClearAll || hasAnyPresetChange) {
         await saveLocalStore(nextStore, activeSessionPass || undefined);
       }
@@ -502,7 +541,7 @@ export const App: React.FC = () => {
       setStore(nextStore);
       setIsLoaded(true);
 
-      // 初回起動時に自動でクラウドから最新データをマージ取得（夫婦間の設定不要同期）
+      // 合言葉認証済みの端末のみクラウドから最新データを自動マージ取得
       const initialCfg = loadSyncConfig();
       if (initialCfg.enabled && initialCfg.githubToken) {
         try {
@@ -605,6 +644,71 @@ export const App: React.FC = () => {
     },
     [sessionPassword, syncConfig]
   );
+
+  // 🔑 合言葉の検証と共有カレンダー同期開始
+  const handleSubmitKeyword = useCallback(
+    async (keyword: string): Promise<{ success: boolean; message?: string }> => {
+      const isValid = isSharedKeywordValid(keyword);
+      if (!isValid) {
+        return {
+          success: false,
+          message: '合言葉が一致しませんでした。正しい合言葉を入力してください。',
+        };
+      }
+
+      // 合言葉をローカルに保存
+      setSavedSharedKeyword(keyword);
+      setSavedSharedKeywordState(keyword);
+
+      // クラウド同期設定を有効化
+      const nextSyncCfg = loadSyncConfig();
+      nextSyncCfg.enabled = true;
+      saveSyncConfig(nextSyncCfg);
+      setSyncConfig(nextSyncCfg);
+
+      // 直ちにクラウドから最新データを同期ダウンロード
+      try {
+        setIsSyncing(true);
+        const { mergedStore } = await syncWithGitHub(store, nextSyncCfg, sessionPassword);
+        const preservedWelcome =
+          store.metadata?.welcomeImageConfig?.dataUrl
+            ? store.metadata.welcomeImageConfig
+            : mergedStore.metadata?.welcomeImageConfig;
+        const finalStore: CalendarDataStore = {
+          ...mergedStore,
+          metadata: {
+            ...mergedStore.metadata,
+            welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+          },
+        };
+        setStore(finalStore);
+        await saveLocalStore(finalStore, sessionPassword || undefined);
+        showToast('✨ 合言葉が確認できました！カレンダーの共有を開始しました💕');
+        return { success: true };
+      } catch (err: any) {
+        showToast('⚠️ 同期中に一時的なエラーが発生しました');
+        return { success: true };
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    [sessionPassword, showToast, store]
+  );
+
+  // 🚪 カレンダーの共有を解除（ログアウトしてまっさらな状態に戻す）
+  const handleUnshareCalendar = useCallback(async () => {
+    setSavedSharedKeyword(null);
+    setSavedSharedKeywordState(null);
+    const nextSyncCfg = loadSyncConfig();
+    nextSyncCfg.enabled = false;
+    saveSyncConfig(nextSyncCfg);
+    setSyncConfig(nextSyncCfg);
+
+    const freshStore = createInitialDataStore();
+    setStore(freshStore);
+    await saveLocalStore(freshStore);
+    showToast('カレンダーの共有を解除し、まっさらな状態に戻しました🐾');
+  }, [showToast]);
 
   // 選択日を移動し、月が変わればカレンダー表示月も追従させる
   const moveSelectedDate = useCallback((deltaDays: number) => {
@@ -1324,6 +1428,8 @@ export const App: React.FC = () => {
             }}
             onOpenShiftExport={() => openShiftExportModal(activePartner)}
             onOpenWelcomeImage={openWelcomeModal}
+            isShared={Boolean(savedSharedKeyword)}
+            onOpenSharedKeywordModal={openSharedKeywordModal}
           />
 
           {/* 月間カレンダーグリッド（シングルタップ移動・ダブルタップ予定一覧・右下＋予定追加） */}
@@ -1592,6 +1698,9 @@ export const App: React.FC = () => {
             setWelcomeModalOpen(true);
             pushNavLayer('welcomeModal');
           }}
+          isShared={Boolean(savedSharedKeyword)}
+          onOpenSharedKeywordModal={openSharedKeywordModal}
+          onUnshareCalendar={handleUnshareCalendar}
         />
       )}
 
@@ -1661,6 +1770,14 @@ export const App: React.FC = () => {
           }}
         />
       )}
+
+      {/* 🗝️ ふたりの合言葉（初回認証・カレンダー共有）モーダル */}
+      <SharedKeywordModal
+        isOpen={sharedKeywordModalOpen}
+        onClose={() => closeNavLayer(() => setSharedKeywordModalOpen(false))}
+        onSubmitKeyword={handleSubmitKeyword}
+        isSyncing={isSyncing}
+      />
     </div>
   );
 };
