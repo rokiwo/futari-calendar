@@ -54,6 +54,7 @@ import { ExportPartnerMode, ShiftExportModal } from './components/ShiftExportMod
 import { TaskManagerModal } from './components/TaskManagerModal';
 import { WelcomeImageModal } from './components/WelcomeImageModal';
 import { SharedKeywordModal } from './components/SharedKeywordModal';
+import { PartnerEventsModal } from './components/PartnerEventsModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 // 日付文字列 "YYYY-MM-DD" に deltaDays 日を加算した "YYYY-MM-DD" を返す
@@ -116,6 +117,7 @@ export const App: React.FC = () => {
   const [taskManagerOpen, setTaskManagerOpen] = useState<boolean>(false);
   const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(false);
   const [welcomePreviewConfig, setWelcomePreviewConfig] = useState<WelcomeImageConfig | null>(null);
+  const [partnerEventsModalOpen, setPartnerEventsModalOpen] = useState<boolean>(false);
 
   // クラウド同期状態（特定の合言葉が入力された場合のみ共有同期が有効になる）
   const [savedSharedKeyword, setSavedSharedKeywordState] = useState<string | null>(() => getSavedSharedKeyword());
@@ -150,6 +152,7 @@ export const App: React.FC = () => {
   const taskManagerOpenRef = useRef(taskManagerOpen);
   const welcomeModalOpenRef = useRef(welcomeModalOpen);
   const sharedKeywordModalOpenRef = useRef(sharedKeywordModalOpen);
+  const partnerEventsModalOpenRef = useRef(partnerEventsModalOpen);
   const stampDrawerOpenRef = useRef(stampDrawerOpen);
   const isWidgetModeRef = useRef(isWidgetMode);
   const lastBackPressTimeRef = useRef<number>(0);
@@ -166,6 +169,7 @@ export const App: React.FC = () => {
   useEffect(() => { taskManagerOpenRef.current = taskManagerOpen; }, [taskManagerOpen]);
   useEffect(() => { welcomeModalOpenRef.current = welcomeModalOpen; }, [welcomeModalOpen]);
   useEffect(() => { sharedKeywordModalOpenRef.current = sharedKeywordModalOpen; }, [sharedKeywordModalOpen]);
+  useEffect(() => { partnerEventsModalOpenRef.current = partnerEventsModalOpen; }, [partnerEventsModalOpen]);
   useEffect(() => { stampDrawerOpenRef.current = stampDrawerOpen; }, [stampDrawerOpen]);
   useEffect(() => { isWidgetModeRef.current = isWidgetMode; }, [isWidgetMode]);
 
@@ -273,6 +277,11 @@ export const App: React.FC = () => {
     pushNavLayer('sharedKeyword');
   }, [pushNavLayer]);
 
+  const openPartnerEventsModal = useCallback(() => {
+    setPartnerEventsModalOpen(true);
+    pushNavLayer('partnerEvents');
+  }, [pushNavLayer]);
+
   const enterCalendarMode = useCallback(() => {
     setIsWidgetMode(false);
     pushNavLayer('calendar');
@@ -306,7 +315,8 @@ export const App: React.FC = () => {
         shiftExportOpenRef.current ||
         taskManagerOpenRef.current ||
         welcomeModalOpenRef.current ||
-        sharedKeywordModalOpenRef.current
+        sharedKeywordModalOpenRef.current ||
+        partnerEventsModalOpenRef.current
       ) {
         setDayDetailOpen(false);
         setOpenEventFormDirectly(false);
@@ -321,6 +331,7 @@ export const App: React.FC = () => {
         setWelcomeModalOpen(false);
         setWelcomePreviewConfig(null);
         setSharedKeywordModalOpen(false);
+        setPartnerEventsModalOpen(false);
         return;
       }
 
@@ -1238,6 +1249,27 @@ export const App: React.FC = () => {
     return count;
   }, [activePartner, store.events, store.metadata.partners, store.shifts]);
 
+  // 相手（otherPartner）が作成・更新した未確認アイテム（新着予定＋シフト）の総数
+  const partnerNewCount = useMemo(() => {
+    const otherId: PartnerId = activePartner === 'partnerA' ? 'partnerB' : 'partnerA';
+    const mySeenMs = Date.parse(store.metadata.partners[activePartner].lastSeenAt || '') || 0;
+    let count = 0;
+
+    for (const ev of Object.values(store.events || {})) {
+      if (!ev || ev.deletedAt) continue;
+      if (ev.createdBy === otherId && (Date.parse(ev.updatedAt || ev.createdAt) || 0) > mySeenMs) {
+        count++;
+      }
+    }
+    for (const s of Object.values(store.shifts || {})) {
+      if (!s || s.deletedAt) continue;
+      if (s.partnerId === otherId && (Date.parse(s.updatedAt || s.createdAt) || 0) > mySeenMs) {
+        count++;
+      }
+    }
+    return count;
+  }, [activePartner, store.events, store.metadata.partners, store.shifts]);
+
   const handleTriggerCloudSync = useCallback(
     async (configOverride?: CloudSyncConfig, passwordOverride?: string) => {
       const cfg = configOverride || syncConfig;
@@ -1430,6 +1462,8 @@ export const App: React.FC = () => {
             onOpenWelcomeImage={openWelcomeModal}
             isShared={Boolean(savedSharedKeyword)}
             onOpenSharedKeywordModal={openSharedKeywordModal}
+            partnerNewCount={partnerNewCount}
+            onOpenPartnerEvents={openPartnerEventsModal}
           />
 
           {/* 月間カレンダーグリッド（シングルタップ移動・ダブルタップ予定一覧・右下＋予定追加） */}
@@ -1778,6 +1812,20 @@ export const App: React.FC = () => {
         onSubmitKeyword={handleSubmitKeyword}
         isSyncing={isSyncing}
       />
+
+      {/* 💌 相手が打った予定確認モーダル（相手の予定一覧 ＆ すべて既読にするボタン） */}
+      {partnerEventsModalOpen && (
+        <PartnerEventsModal
+          isOpen={partnerEventsModalOpen}
+          onClose={() => closeNavLayer(() => setPartnerEventsModalOpen(false))}
+          store={store}
+          activePartner={activePartner}
+          onMarkSeenNow={handleMarkSeenNow}
+          onSelectDate={(dateStr) => {
+            openDayDetailModal(dateStr, false);
+          }}
+        />
+      )}
     </div>
   );
 };
