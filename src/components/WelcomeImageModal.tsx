@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Heart, X, Settings, Sparkles, Calendar, Maximize2 } from 'lucide-react';
 import { CalendarDataStore, PartnerId, WelcomeImageConfig } from '../types/calendar';
 import { formatMinutesShort, getJapaneseHoliday, getShiftOvertimeMinutes } from '../utils/presets';
+import { loadDedicatedWelcomePhoto } from '../utils/storage';
 
 interface WelcomeImageModalProps {
   store: CalendarDataStore;
@@ -20,6 +21,22 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [dontShowToday, setDontShowToday] = useState(false);
+
+  // 📸 表示中の写真を内部stateで強固に保護（親の同期や再レンダリングで写真が一瞬消えるのを100%防止）
+  const [displayPhotoUrl, setDisplayPhotoUrl] = useState<string>(() => config.dataUrl || '');
+
+  React.useEffect(() => {
+    if (config.dataUrl) {
+      setDisplayPhotoUrl(config.dataUrl);
+    } else {
+      // 専用ストレージから直接安全に補完復元
+      loadDedicatedWelcomePhoto().then((saved) => {
+        if (saved?.dataUrl) {
+          setDisplayPhotoUrl(saved.dataUrl);
+        }
+      });
+    }
+  }, [config.dataUrl]);
 
   const today = new Date();
   const year = today.getFullYear();
@@ -91,7 +108,7 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
   };
 
   // 全画面写真ビュー
-  if (isFullscreen && config.dataUrl) {
+  if (isFullscreen && displayPhotoUrl) {
     return (
       <div
         onClick={() => setIsFullscreen(false)}
@@ -105,7 +122,7 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
           <X className="w-6 h-6" />
         </button>
         <img
-          src={config.dataUrl}
+          src={displayPhotoUrl}
           alt="お気に入り写真"
           className="max-h-[90vh] max-w-[95vw] object-contain rounded-2xl shadow-2xl"
         />
@@ -118,11 +135,6 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
 
   return (
     <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          handleClose();
-        }
-      }}
       className="fixed inset-0 z-[70] bg-stone-900/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in"
     >
       <div
@@ -173,10 +185,10 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
 
         {/* メイン写真エリア */}
         <div className="relative bg-stone-100 flex-1 min-h-[220px] max-h-[50vh] overflow-hidden flex items-center justify-center group">
-          {config.dataUrl ? (
+          {displayPhotoUrl ? (
             <>
               <img
-                src={config.dataUrl}
+                src={displayPhotoUrl}
                 alt="起動時お気に入り写真"
                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102 cursor-pointer"
                 onClick={() => setIsFullscreen(true)}
