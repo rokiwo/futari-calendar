@@ -1170,7 +1170,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 type="button"
                 onClick={() => {
                   onUpdatePartnerProfiles(
-                    nameA.trim() || '夫',
+                    nameA.trim() || 'ゆうと',
                     avatarA || '🐻',
                     nameB.trim() || 'さや',
                     avatarB || '🐰'
