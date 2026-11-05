@@ -95,7 +95,7 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
     return (
       <div
         onClick={() => setIsFullscreen(false)}
-        className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-2 cursor-pointer animate-fade-in"
+        className="fixed inset-0 z-[80] bg-black/95 flex flex-col items-center justify-center p-2 cursor-pointer animate-fade-in"
       >
         <button
           type="button"
@@ -119,7 +119,7 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
   return (
     <div
       onClick={handleClose}
-      className="fixed inset-0 z-40 bg-stone-900/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in"
+      className="fixed inset-0 z-[70] bg-stone-900/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in"
     >
       <div
         onClick={(e) => e.stopPropagation()}
