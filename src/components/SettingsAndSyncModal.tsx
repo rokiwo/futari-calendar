@@ -119,6 +119,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   const [statusMsg, setStatusMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
+  const [welcomeSavedSuccess, setWelcomeSavedSuccess] = useState(false);
 
   const icsFileInputRef = useRef<HTMLInputElement>(null);
   const jsonRestoreInputRef = useRef<HTMLInputElement>(null);
@@ -175,9 +176,13 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
       lastShownDate: store.metadata.welcomeImageConfig?.lastShownDate,
     };
     onUpdateWelcomeImageConfig?.(newConfig);
+    setWelcomeSavedSuccess(true);
+    setTimeout(() => {
+      setWelcomeSavedSuccess(false);
+    }, 4000);
     setStatusMsg({
       type: 'ok',
-      text: '📸 起動時のお気に入り写真・ウェルカム設定を保存しました✨',
+      text: '📸 起動時のお気に入り写真・ウェルカム設定を保存・適用しました✨',
     });
   };
 
@@ -1015,11 +1020,25 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   />
                   <button
                     type="button"
-                    onClick={() => jsonRestoreInputRef.current?.click()}
-                    className="px-3.5 py-2.5 rounded-xl bg-[#E6F7EF] hover:bg-[#52B788] text-[#1E6645] hover:text-white font-extrabold flex items-center gap-1.5 transition-colors"
+                    onClick={async () => {
+                      try {
+                        if ('serviceWorker' in navigator) {
+                          const regs = await navigator.serviceWorker.getRegistrations();
+                          for (const r of regs) await r.unregister();
+                        }
+                        if ('caches' in window) {
+                          const keys = await caches.keys();
+                          for (const k of keys) await caches.delete(k);
+                        }
+                      } catch {
+                        // ignore
+                      }
+                      window.location.reload();
+                    }}
+                    className="px-3.5 py-2.5 rounded-xl bg-[#FFF0F5] hover:bg-[#FFE5EC] border border-[#FFC2D1] text-[#9E2A47] font-extrabold flex items-center gap-1.5 transition-colors"
                   >
-                    <Upload className="w-4 h-4" />
-                    <span>📂 JSONファイルからマージ復元</span>
+                    <RefreshCw className="w-4 h-4 text-[#FF8FAB]" />
+                    <span>🔄 最新版へ完全更新（キャッシュ破棄＆再読込）</span>
                   </button>
                 </div>
               </div>
@@ -1347,6 +1366,33 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 </div>
               </div>
 
+              {/* 保存完了インライン通知バッジ */}
+              {welcomeSavedSuccess && (
+                <div className="p-3 rounded-2xl bg-emerald-50 border-2 border-emerald-400 text-emerald-800 text-xs font-black flex items-center justify-between gap-2 shadow-sm animate-pop">
+                  <div className="flex items-center gap-1.5">
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>✅ 適用されました！次回起動時またはプレビューで表示されます</span>
+                  </div>
+                  {onPreviewWelcomeImage && welcomeDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPreviewWelcomeImage({
+                          enabled: welcomeEnabled,
+                          dataUrl: welcomeDataUrl,
+                          message: welcomeMessage,
+                          mode: welcomeMode,
+                        });
+                      }}
+                      className="px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-extrabold text-[11px] shrink-0 shadow-2xs hover:bg-emerald-700 flex items-center gap-1"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>今すぐ見る</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* 保存＆プレビューボタン */}
               <div className="pt-2 flex items-center gap-2">
                 {welcomeDataUrl && (
@@ -1362,7 +1408,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                         });
                       }
                     }}
-                    className="py-3 px-4 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                    className="py-3 px-4 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs active:scale-95 shrink-0"
                   >
                     <Eye className="w-4 h-4" />
                     <span>プレビュー確認</span>
@@ -1372,10 +1418,23 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveWelcomeConfig}
-                  className="flex-1 py-3 rounded-2xl bg-[#FF8FAB] hover:bg-[#E06C88] text-white font-extrabold text-sm shadow-sm transition-colors flex items-center justify-center gap-1.5"
+                  className={`flex-1 py-3.5 rounded-2xl text-white font-black text-sm shadow-md transition-all flex items-center justify-center gap-1.5 active:scale-95 ${
+                    welcomeSavedSuccess
+                      ? 'bg-emerald-500 ring-2 ring-emerald-300 scale-[1.01]'
+                      : 'bg-gradient-to-r from-[#FF8FAB] to-[#FF758F] hover:opacity-95'
+                  }`}
                 >
-                  <Sparkles className="w-4 h-4" />
-                  <span>お気に入り写真設定を保存</span>
+                  {welcomeSavedSuccess ? (
+                    <>
+                      <Check className="w-4 h-4 text-white animate-bounce" />
+                      <span>🎉 適用されました！（保存完了）</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>お気に入り写真設定を保存</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
