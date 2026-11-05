@@ -8,6 +8,7 @@ import {
   ScheduleEvent,
   ShiftEntry,
   StampPreset,
+  WelcomeImageConfig,
 } from '../types/calendar';
 import { decryptCalendarStore, encryptCalendarStore } from './crypto';
 import {
@@ -26,6 +27,7 @@ const LS_ENCRYPTED_KEY = 'futarical_encrypted_v1';
 const LS_PASS_HASH_KEY = 'futarical_pass_hash_v1';
 const LS_SYNC_CONFIG_KEY = 'futarical_sync_config_v1';
 const LS_ACTIVE_PARTNER_KEY = 'futarical_active_partner_v1';
+export const LS_WELCOME_PHOTO_KEY = 'paircal_welcome_photo_dedicated_v1';
 
 const GIST_FILENAME = 'futari-calendar-encrypted.json';
 
@@ -76,6 +78,31 @@ async function idbSet<T>(key: string, val: T): Promise<void> {
   } catch {
     // IndexedDBが使えない環境ではlocalStorageでカバー
   }
+}
+
+// 📸 お気に入り写真・ウェルカム画像の専用永続化（クラウド同期や容量制限で絶対に消えない独立保存領域）
+export async function saveDedicatedWelcomePhoto(config: WelcomeImageConfig): Promise<void> {
+  try {
+    await idbSet(LS_WELCOME_PHOTO_KEY, config);
+  } catch {}
+  try {
+    localStorage.setItem(LS_WELCOME_PHOTO_KEY, JSON.stringify(config));
+  } catch {}
+}
+
+export async function loadDedicatedWelcomePhoto(): Promise<WelcomeImageConfig | null> {
+  const fromIdb = await idbGet<WelcomeImageConfig>(LS_WELCOME_PHOTO_KEY);
+  if (fromIdb && fromIdb.dataUrl) {
+    return fromIdb;
+  }
+  try {
+    const raw = localStorage.getItem(LS_WELCOME_PHOTO_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as WelcomeImageConfig;
+      if (parsed && parsed.dataUrl) return parsed;
+    }
+  } catch {}
+  return fromIdb || null;
 }
 
 // ISO日時文字列をミリ秒に変換
@@ -152,20 +179,22 @@ export function mergeCalendarStores(
   const localMeta = local.metadata;
   const remoteMeta = remote.metadata;
 
-  // 📸 お気に入り写真・ウェルカム設定のマージ保護（同期によって写真が消滅するバグを完全解消）
+  // 📸 お気に入り写真・ウェルカム設定のマージ保護
+  // ローカルに写真があれば、クラウド同期で写真が未設定のリモートデータが降ってきても100%ローカルの写真を保持！
   const localWelcome = localMeta?.welcomeImageConfig;
   const remoteWelcome = remoteMeta?.welcomeImageConfig;
-  let mergedWelcome = localWelcome || remoteWelcome;
-  if (localWelcome?.dataUrl && !remoteWelcome?.dataUrl) {
+  let mergedWelcome: WelcomeImageConfig | undefined = localWelcome || remoteWelcome;
+
+  if (localWelcome?.dataUrl) {
+    // ローカルに写真があれば絶対に保護
     mergedWelcome = localWelcome;
-  } else if (!localWelcome?.dataUrl && remoteWelcome?.dataUrl) {
+  } else if (remoteWelcome?.dataUrl) {
+    // ローカルに無くてリモートに写真があれば採用
     mergedWelcome = remoteWelcome;
-  } else if (localWelcome?.dataUrl && remoteWelcome?.dataUrl) {
-    // 両方にある場合はより新しいか有効な方を採用
-    mergedWelcome =
-      toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt)
-        ? remoteWelcome
-        : localWelcome;
+  } else if (localWelcome) {
+    mergedWelcome = localWelcome;
+  } else if (remoteWelcome) {
+    mergedWelcome = remoteWelcome;
   }
 
   // 👫 パートナーA / B のアイコン・プロフィールマージ保護（相手端末の同期でアイコンが初期化されるのを完全防止）
@@ -253,34 +282,59 @@ export function mergeCalendarStores(
   };
 }
 
-// ローカルからデータストアを読み込み
+// ローカルからデータストアを読み込み（写真専用ストレージとも自動連携復元）
 export async function loadLocalStore(): Promise<CalendarDataStore> {
+  let loadedStore: CalendarDataStore | null = null;
   const idbData = await idbGet<CalendarDataStore>(LS_STORE_KEY);
   if (idbData && idbData.version) {
-    return idbData;
-  }
-  try {
-    const raw = localStorage.getItem(LS_STORE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as CalendarDataStore;
-      if (parsed && parsed.version) {
-        await idbSet(LS_STORE_KEY, parsed);
-        return parsed;
+    loadedStore = idbData;
+  } else {
+    try {
+      const raw = localStorage.getItem(LS_STORE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as CalendarDataStore;
+        if (parsed && parsed.version) {
+          await idbSet(LS_STORE_KEY, parsed);
+          loadedStore = parsed;
+        }
       }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
-  const initial = createInitialDataStore();
-  await saveLocalStore(initial);
-  return initial;
+
+  if (!loadedStore) {
+    loadedStore = createInitialDataStore();
+    await saveLocalStore(loadedStore);
+  }
+
+  // 📸 写真専用ストレージからの確実な復元（ストア内に写真が無ければ独立保存領域から復元）
+  const dedicatedPhoto = await loadDedicatedWelcomePhoto();
+  if (dedicatedPhoto && dedicatedPhoto.dataUrl) {
+    if (!loadedStore.metadata?.welcomeImageConfig?.dataUrl) {
+      loadedStore = {
+        ...loadedStore,
+        metadata: {
+          ...loadedStore.metadata,
+          welcomeImageConfig: dedicatedPhoto,
+        },
+      };
+    }
+  }
+
+  return loadedStore;
 }
 
-// ローカルへデータストアを保存（IndexedDB + localStorage 両方に保存し、パスワードがあれば暗号化データも更新）
+// ローカルへデータストアを保存（IndexedDB + localStorage 両方に保存し、写真専用ストレージにも二重保存）
 export async function saveLocalStore(
   store: CalendarDataStore,
   password?: string
 ): Promise<void> {
+  // 📸 写真データがあれば専用ストレージにも即座に二重保存（クラウド同期や容量制限で消えるのを100%防止）
+  if (store.metadata?.welcomeImageConfig?.dataUrl) {
+    await saveDedicatedWelcomePhoto(store.metadata.welcomeImageConfig);
+  }
+
   try {
     localStorage.setItem(LS_STORE_KEY, JSON.stringify(store));
   } catch {
