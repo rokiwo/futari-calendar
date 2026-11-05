@@ -933,16 +933,17 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   </div>
                 ) : (
                   <>
-                    {/* パターン別アイコン＆定型予定ワンタップ選択パレット */}
+                    {/* 充実した絵文字アイコンパレット（ご要望：「定型パターンはいらない。アイコンをもっと充実させてほしい」） */}
                     <div className="bg-[#FFFBF7] rounded-2xl p-2.5 border border-[#FFE5EC] space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-extrabold text-[#9E2A47]">
-                          🎨 パターン別アイコン＆定型予定（1タップ入力）
+                        <span className="text-[11px] font-extrabold text-[#9E2A47] flex items-center gap-1">
+                          <span>✨</span>
+                          <span>アイコン絵文字パレット（タップでタイトルの先頭に入ります）</span>
                         </span>
                       </div>
 
-                      {/* パターンカテゴリ切替タブ */}
-                      <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                      {/* 絵文字カテゴリ切替タブ */}
+                      <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
                         {EVENT_PATTERN_CATEGORIES.map((grp) => {
                           const active = patternTabId === grp.id;
                           return (
@@ -967,60 +968,25 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           EVENT_PATTERN_CATEGORIES.find((g) => g.id === patternTabId) ||
                           EVENT_PATTERN_CATEGORIES[0];
                         return (
-                          <>
-                            {/* ワンタップ定型予定チップ */}
-                            <div className="flex flex-wrap gap-1">
-                              {currentGrp.items.map((item) => (
-                                <button
-                                  key={item.label}
-                                  type="button"
-                                  onClick={() => {
-                                    setTitle(item.title);
-                                    if (item.startTime) {
-                                      setIsAllDay(false);
-                                      setStartTime(item.startTime);
-                                      if (item.endTime) setEndTime(item.endTime);
-                                    }
-                                    if (
-                                      item.supportBadge &&
-                                      !eventBadges.includes(item.supportBadge)
-                                    ) {
-                                      setEventBadges([...eventBadges, item.supportBadge]);
-                                    }
-                                  }}
-                                  className="px-2 py-1 rounded-xl bg-white hover:bg-[#FFE5EC] border border-stone-200/90 text-[11px] font-extrabold text-stone-700 flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
-                                >
-                                  <span>{item.icon}</span>
-                                  <span>{item.label}</span>
-                                </button>
-                              ))}
-                            </div>
-
-                            {/* アイコン絵文字だけ先頭に付ける／差し替えるボタン群 */}
-                            <div className="pt-1 border-t border-stone-200/60">
-                              <div className="text-[10px] font-bold text-stone-400 mb-1">
-                                👇 アイコンだけ選んでタイトルの先頭に付ける：
-                              </div>
-                              <div className="flex flex-wrap gap-1">
-                                {currentGrp.icons.map((ic) => (
-                                  <button
-                                    key={ic}
-                                    type="button"
-                                    onClick={() => {
-                                      const cleaned = title.replace(
-                                        /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/u,
-                                        ''
-                                      );
-                                      setTitle(`${ic} ${cleaned}`);
-                                    }}
-                                    className="w-7 h-7 rounded-lg bg-white hover:bg-[#FFE5EC] border border-stone-200/80 text-sm flex items-center justify-center active:scale-90 transition-transform"
-                                  >
-                                    {ic}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          </>
+                          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto p-0.5">
+                            {currentGrp.icons.map((ic) => (
+                              <button
+                                key={ic}
+                                type="button"
+                                onClick={() => {
+                                  const cleaned = title.replace(
+                                    /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/u,
+                                    ''
+                                  );
+                                  setTitle(`${ic} ${cleaned}`);
+                                }}
+                                className="w-8 h-8 rounded-xl bg-white hover:bg-[#FFE5EC] border border-stone-200/80 text-base flex items-center justify-center active:scale-90 transition-transform shadow-2xs shrink-0"
+                                title={`タイトルの先頭に「${ic}」を付ける`}
+                              >
+                                {ic}
+                              </button>
+                            ))}
+                          </div>
                         );
                       })()}
                     </div>
@@ -1033,7 +999,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                         placeholder={
                           isTask
                             ? 'タスク・やることを入力（例：市役所へ行く、振込、牛乳を買うなど）'
-                            : '予定タイトルを入力（上のパターンをタップするか、キーボードの🎤でも入力可能）'
+                            : '予定タイトルを入力（上のアイコンをタップすると先頭に絵文字が入ります）'
                         }
                         autoFocus
                         className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] text-sm font-bold text-stone-800 focus:border-[#FF8FAB] focus:outline-none"
@@ -1203,20 +1169,31 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       />
                     </div>
 
-                    <div className="flex justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setShowEventForm(false)}
-                        className="px-3.5 py-1.5 rounded-xl bg-stone-100 text-stone-600 text-xs font-bold"
-                      >
-                        キャンセル
-                      </button>
+                    {/* 確定・保存ボタン（ご要望：「予定の保存・編集の確定ボタンが探しにくい」を完全に解消する特大目立ちボタン） */}
+                    <div className="pt-2 space-y-2">
                       <button
                         type="submit"
-                        className="px-4 py-1.5 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-xs"
+                        className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-[#FF8FAB] via-[#FF758F] to-[#B388EB] hover:opacity-95 text-white text-sm font-black shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
                       >
-                        {editingEventId ? '更新する' : isTask ? 'タスクを追加する' : '予定を追加する'}
+                        <CheckCircle2 className="w-5 h-5 text-white shrink-0" />
+                        <span>
+                          {editingEventId
+                            ? '✏️ 変更を確定・保存する'
+                            : isTask
+                            ? '✅ タスクを追加・登録する'
+                            : '✨ この予定を保存・確定する'}
+                        </span>
                       </button>
+
+                      <div className="flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() => setShowEventForm(false)}
+                          className="text-stone-400 hover:text-stone-600 text-xs font-bold py-1 px-3 rounded-lg hover:bg-stone-100 transition-colors"
+                        >
+                          キャンセルして閉じる
+                        </button>
+                      </div>
                     </div>
                   </>
                 )}
@@ -1570,8 +1547,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                               onUpdateShiftDetails(dateStr, pid, {
                                 subStampId: 'shift_part',
                                 subCustomLabel: '夜勤バイト',
-                                subStartTime: '18:30',
-                                subEndTime: '22:00',
+                                subStartTime: '21:00',
+                                subEndTime: '23:59',
                               });
                             }
                           }}
@@ -1582,7 +1559,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           }`}
                         >
                           <span>🌙</span>
-                          <span>{hasSubWork ? '🌙 夜勤バイト設定中 (18:30〜22:00)' : '＋🌙 夜勤バイト (18:30〜22:00)'}</span>
+                          <span>{hasSubWork ? '🌙 夜勤バイト設定中 (21:00〜23:59)' : '＋🌙 夜勤バイト (21:00〜23:59)'}</span>
                         </button>
                       </div>
 
@@ -1591,7 +1568,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           <span className="text-[11px] font-bold text-stone-600">時間:</span>
                           <input
                             type="time"
-                            value={shift?.subStartTime || '18:30'}
+                            value={shift?.subStartTime || '21:00'}
                             onChange={(e) =>
                               onUpdateShiftDetails(dateStr, pid, {
                                 subStartTime: e.target.value,
@@ -1602,7 +1579,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           <span>〜</span>
                           <input
                             type="time"
-                            value={shift?.subEndTime || '22:00'}
+                            value={shift?.subEndTime || '23:59'}
                             onChange={(e) =>
                               onUpdateShiftDetails(dateStr, pid, {
                                 subEndTime: e.target.value,
