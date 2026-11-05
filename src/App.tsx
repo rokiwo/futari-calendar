@@ -421,6 +421,41 @@ export const App: React.FC = () => {
         }
       }
 
+      // ご要望：「夫→ゆうとに名前変更」を自動適用
+      const YUUTO_NAME_FLAG = 'paircal_yuuto_name_preset_20261105_v1';
+      let hasRenamedToYuuto = false;
+      if (localStorage.getItem(YUUTO_NAME_FLAG) !== '1') {
+        if (!nextMetadata?.partners?.partnerA?.name || nextMetadata.partners.partnerA.name === '夫') {
+          nextMetadata = {
+            ...nextMetadata,
+            partners: {
+              ...nextMetadata.partners,
+              partnerA: {
+                ...nextMetadata.partners.partnerA,
+                name: 'ゆうと',
+              },
+            },
+          };
+          hasRenamedToYuuto = true;
+        }
+        localStorage.setItem(YUUTO_NAME_FLAG, '1');
+      }
+
+      // カテゴリ名の「夫予定」も「ゆうと予定」に自動追従
+      const nextCategories = (loaded.categories && loaded.categories.length > 0
+        ? loaded.categories
+        : DEFAULT_CATEGORIES
+      ).map((cat) => {
+        if (cat.id === 'partnerA' && (cat.label === '夫予定' || cat.shortLabel === '夫予定')) {
+          return {
+            ...cat,
+            label: 'ゆうと予定',
+            shortLabel: 'ゆうと予定',
+          };
+        }
+        return cat;
+      });
+
       const baseShifts = shouldClearAll ? {} : loaded.shifts || {};
       const nextShifts = shouldApplyNursecal202611
         ? { ...baseShifts, ...createUploaded2026NovShifts('partnerA', nextStamps) }
@@ -428,7 +463,10 @@ export const App: React.FC = () => {
 
       const nowIso = new Date().toISOString();
       const hasAnyPresetChange =
-        shouldApplyHusband12Presets || shouldApplyNursecal202611 || shouldApplySayaPresets;
+        shouldApplyHusband12Presets ||
+        shouldApplyNursecal202611 ||
+        shouldApplySayaPresets ||
+        hasRenamedToYuuto;
 
       const nextStore: CalendarDataStore = {
         ...loaded,
@@ -436,10 +474,7 @@ export const App: React.FC = () => {
         shifts: nextShifts,
         events: shouldClearAll ? {} : loaded.events || {},
         daySupports: shouldClearAll ? {} : loaded.daySupports || {},
-        categories:
-          loaded.categories && loaded.categories.length > 0
-            ? loaded.categories
-            : DEFAULT_CATEGORIES,
+        categories: nextCategories,
         stamps: nextStamps,
         updatedAt: hasAnyPresetChange ? nowIso : loaded.updatedAt || nowIso,
       };
@@ -1313,6 +1348,7 @@ export const App: React.FC = () => {
             onOpenTaskManager={openTaskManagerModal}
             onOpenShiftExport={() => openShiftExportModal(currentDrawerPartner)}
             metadata={store.metadata}
+            activePartner={activePartner}
           />
         </>
       )}
