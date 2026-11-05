@@ -162,7 +162,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const weekDay = ['日', '月', '火', '水', '木', '金', '土'][Number.isNaN(dt.getDay()) ? 0 : dt.getDay()];
   const holidayName = dateStr ? getJapaneseHoliday(dateStr) : null;
 
-  const partnerA = store.metadata?.partners?.partnerA || { name: '夫', avatar: '🐻' };
+  const partnerA = store.metadata?.partners?.partnerA || { name: 'ゆうと', avatar: '🐻' };
   const partnerB = store.metadata?.partners?.partnerB || { name: 'さや', avatar: '🐰' };
   const currentPartnerInfo =
     activePartner === 'partnerB' ? partnerB : partnerA;
@@ -1382,8 +1382,51 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {(['partnerA', 'partnerB'] as PartnerId[]).map((pid) => {
+            {/* 相手のシフト状況表示（操作UIは出さず、現在のシフトだけ確認できるようにする） */}
+            {(() => {
+              const otherId: PartnerId = activePartner === 'partnerA' ? 'partnerB' : 'partnerA';
+              const otherP = store.metadata?.partners?.[otherId] || (otherId === 'partnerB' ? partnerB : partnerA);
+              const otherShift = otherId === 'partnerA' ? shiftA : shiftB;
+              const otherStamp = otherId === 'partnerA' ? stampA : stampB;
+              const otherOt = getShiftOvertimeMinutes(otherShift);
+              const otherHw = getShiftHolidayWorkMinutes(otherShift);
+              const otherSub = Boolean(otherShift?.subCustomLabel || otherShift?.subStampId);
+
+              return (
+                <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-white border border-stone-200/80 shadow-2xs text-xs">
+                  <span className="font-extrabold text-stone-600 flex items-center gap-1.5">
+                    <span>{otherP.avatar}</span>
+                    <span>{otherP.name}の予定:</span>
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    {otherStamp ? (
+                      <span
+                        style={{ backgroundColor: otherStamp.color, color: otherStamp.textColor }}
+                        className="px-2 py-0.5 rounded-lg font-black text-xs shadow-2xs"
+                      >
+                        {otherStamp.icon}{otherShift?.customLabel || otherStamp.label}
+                      </span>
+                    ) : (
+                      <span className="text-stone-400 font-bold">シフト未設定</span>
+                    )}
+                    {otherSub && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 font-black text-[10px] shadow-2xs">
+                        夜バ
+                      </span>
+                    )}
+                    {(otherOt > 0 || otherHw > 0) && (
+                      <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white font-black text-[10px] shadow-2xs">
+                        {otherHw > 0 ? `休${formatMinutesShort(otherHw)}` : `残${formatMinutesShort(otherOt)}`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 操作中パートナーのみのシフト入力UI（ご要望：「夫として操作中は妻の方のシフト操作UIいらない」） */}
+            <div className="grid grid-cols-1 gap-3">
+              {[activePartner].map((pid) => {
                 const pInfo =
                   store.metadata?.partners?.[pid] || (pid === 'partnerB' ? partnerB : partnerA);
                 const shift = pid === 'partnerA' ? shiftA : shiftB;
@@ -1400,13 +1443,16 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                 return (
                   <div
                     key={pid}
-                    className="bg-[#FFFBF7] rounded-2xl p-3 border border-stone-200/90 space-y-2.5"
+                    className="bg-[#FFFBF7] rounded-2xl p-3 border-2 border-[#56CFE1]/40 shadow-xs space-y-2.5"
                   >
                     {/* パートナー名＆現在のメインシフト表示 */}
                     <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs font-extrabold text-stone-800 flex items-center gap-1">
+                      <span className="text-xs font-black text-stone-800 flex items-center gap-1.5">
                         <span className="text-base">{pInfo.avatar}</span>
-                        <span>{pInfo.name}のシフト</span>
+                        <span>{pInfo.name}のシフト入力</span>
+                        <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-md bg-[#E2F9FC] text-[#136370]">
+                          操作中
+                        </span>
                       </span>
 
                       {shift && stamp ? (
@@ -1456,7 +1502,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                               style={{ backgroundColor: s.color, color: s.textColor }}
                               className={`py-1.5 px-1 rounded-xl font-extrabold text-[11px] flex flex-col items-center justify-center active:scale-90 transition-all border ${
                                 isCurrent
-                                  ? 'border-stone-800 ring-1 ring-stone-800'
+                                   ? 'border-stone-800 ring-1 ring-stone-800'
                                   : 'border-white'
                               }`}
                             >
@@ -1484,12 +1530,12 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       </div>
                     )}
 
-                    {/* ② 仕事終わりや休日の「＋バイト・掛け持ち」重ね記載欄 */}
+                    {/* ② 夜勤バイト（ご要望：「アルバイトは夜勤バイトだけ」「カレンダーは夜バ表示」） */}
                     <div className="pt-2 border-t border-stone-200/60 space-y-1.5">
                       <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-extrabold text-stone-600 flex items-center gap-1">
-                          <Briefcase className="w-3 h-3 text-amber-600" />
-                          <span>＋仕事終わり・休日のバイト</span>
+                        <span className="font-extrabold text-stone-700 flex items-center gap-1">
+                          <Briefcase className="w-3.5 h-3.5 text-amber-600" />
+                          <span>🌙 夜勤バイト（カレンダー表示: 夜バ）</span>
                         </span>
                         {hasSubWork && (
                           <button
@@ -1504,56 +1550,45 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                             }
                             className="text-[10px] font-bold text-rose-500 hover:underline"
                           >
-                            バイト解除
+                            夜勤バイト解除
                           </button>
                         )}
                       </div>
 
-                      <div className="flex flex-wrap gap-1">
-                        {[
-                          { label: '🏪夜バイト', sub: 'バイト', start: '18:30', end: '22:00' },
-                          { label: '🏪昼バイト', sub: 'バイト', start: '10:00', end: '15:00' },
-                          { label: '💻副業', sub: '副業', start: '20:00', end: '23:00' },
-                        ].map((preset) => {
-                          const isSelectedSub =
-                            shift?.subCustomLabel === preset.sub &&
-                            shift?.subStartTime === preset.start;
-                          return (
-                            <button
-                              key={preset.label}
-                              type="button"
-                              onClick={() =>
-                                onUpdateShiftDetails(dateStr, pid, {
-                                  subStampId: 'shift_part',
-                                  subCustomLabel: preset.sub,
-                                  subStartTime: preset.start,
-                                  subEndTime: preset.end,
-                                })
-                              }
-                              className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all ${
-                                isSelectedSub
-                                  ? 'bg-[#FFF3D6] border-[#FFB703] text-[#996300] shadow-2xs'
-                                  : 'bg-white border-stone-200 text-stone-600'
-                              }`}
-                            >
-                              ＋{preset.label}({preset.start}-{preset.end})
-                            </button>
-                          );
-                        })}
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (hasSubWork) {
+                              onUpdateShiftDetails(dateStr, pid, {
+                                subStampId: undefined,
+                                subCustomLabel: undefined,
+                                subStartTime: undefined,
+                                subEndTime: undefined,
+                              });
+                            } else {
+                              onUpdateShiftDetails(dateStr, pid, {
+                                subStampId: 'shift_part',
+                                subCustomLabel: '夜勤バイト',
+                                subStartTime: '18:30',
+                                subEndTime: '22:00',
+                              });
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-all flex items-center gap-1.5 ${
+                            hasSubWork
+                              ? 'bg-amber-300 border-amber-400 text-stone-900 shadow-xs'
+                              : 'bg-white border-stone-200 text-stone-700 hover:bg-amber-50'
+                          }`}
+                        >
+                          <span>🌙</span>
+                          <span>{hasSubWork ? '🌙 夜勤バイト設定中 (18:30〜22:00)' : '＋🌙 夜勤バイト (18:30〜22:00)'}</span>
+                        </button>
                       </div>
 
                       {hasSubWork && (
-                        <div className="flex items-center gap-1 pt-0.5 text-[11px]">
-                          <input
-                            type="text"
-                            value={shift?.subCustomLabel || 'バイト'}
-                            onChange={(e) =>
-                              onUpdateShiftDetails(dateStr, pid, {
-                                subCustomLabel: e.target.value,
-                              })
-                            }
-                            className="w-16 px-2 py-1 rounded-lg border border-stone-200 bg-white font-extrabold text-amber-900"
-                          />
+                        <div className="flex items-center gap-1.5 pt-0.5 text-xs">
+                          <span className="text-[11px] font-bold text-stone-600">時間:</span>
                           <input
                             type="time"
                             value={shift?.subStartTime || '18:30'}
@@ -1562,7 +1597,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                                 subStartTime: e.target.value,
                               })
                             }
-                            className="px-1.5 py-1 rounded-lg border border-stone-200 bg-white font-bold"
+                            className="px-2 py-1 rounded-lg border border-stone-200 bg-white font-bold"
                           />
                           <span>〜</span>
                           <input
@@ -1573,7 +1608,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                                 subEndTime: e.target.value,
                               })
                             }
-                            className="px-1.5 py-1 rounded-lg border border-stone-200 bg-white font-bold"
+                            className="px-2 py-1 rounded-lg border border-stone-200 bg-white font-bold"
                           />
                         </div>
                       )}
