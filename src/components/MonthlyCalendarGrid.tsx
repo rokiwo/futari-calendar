@@ -167,7 +167,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     stampMap.set(s.id, s);
   }
 
-  const partnerA = store.metadata?.partners?.partnerA || { name: '夫', avatar: '🐻' };
+  const partnerA = store.metadata?.partners?.partnerA || { name: 'ゆうと', avatar: '🐻' };
   const partnerB = store.metadata?.partners?.partnerB || { name: 'さや', avatar: '🐰' };
   const otherPartnerId: PartnerId = activePartner === 'partnerA' ? 'partnerB' : 'partnerA';
   const otherPartner =
@@ -248,7 +248,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     }
   };
 
-  // 各パートナーのシフト枠（メインシフト＋仕事終わり/休日のバイト＋残業時間バッジ）を描画
+  // 各パートナーのシフト枠（三段表示：1段目メインシフト ＋ 2段目「夜バ」 ＋ 3段目残業時間バッジ）を描画
   const renderPartnerShiftBox = (
     shift: ShiftEntry | undefined,
     partnerAvatar: string,
@@ -256,7 +256,6 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   ) => {
     const stamp = shift ? stampMap.get(shift.stampId) : undefined;
     const subStamp = shift?.subStampId ? stampMap.get(shift.subStampId) : undefined;
-    const subLabel = shift?.subCustomLabel || subStamp?.shortLabel || '';
     const hasSubWork = Boolean(shift?.subCustomLabel || subStamp);
     const otMin = getShiftOvertimeMinutes(shift);
     const hwMin = getShiftHolidayWorkMinutes(shift);
@@ -279,7 +278,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             ? { backgroundColor: stamp.color, color: stamp.textColor }
             : undefined
         }
-        className={`relative rounded sm:rounded-lg px-[1px] sm:px-0.5 py-[1px] sm:py-0.5 font-black flex flex-col items-center justify-center leading-none sm:leading-tight border pointer-events-none overflow-hidden ${
+        className={`relative w-full min-w-0 max-w-full rounded sm:rounded-lg px-[1px] sm:px-0.5 py-[1px] sm:py-0.5 font-black flex flex-col items-center justify-start leading-none sm:leading-tight border pointer-events-none overflow-hidden ${
           stamp
             ? 'border-black/5'
             : hasExtra
@@ -287,10 +286,10 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             : 'bg-stone-50/90 text-stone-300 border-dashed border-stone-200/80'
         }`}
       >
-        {/* メインシフト行（スマホでも2文字が一切欠けずにくっきり表示） */}
-        <div className="flex items-center justify-center w-full py-[0.5px]">
+        {/* 1段目：メインシフト行（スマホでも2文字が一切欠けずにくっきり表示） */}
+        <div className="flex items-center justify-center w-full min-w-0 py-[0.5px]">
           {stamp ? (
-            <span className="text-[8px] min-[380px]:text-[9px] sm:text-[10px] font-black tracking-[-0.06em] sm:tracking-normal whitespace-nowrap text-center leading-none select-none">
+            <span className="text-[8px] min-[380px]:text-[9px] sm:text-[10px] font-black tracking-[-0.06em] sm:tracking-normal truncate text-center leading-none select-none">
               {twoCharLabel}
             </span>
           ) : (
@@ -298,16 +297,16 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           )}
         </div>
 
-        {/* 仕事終わりや休日のバイト（サブシフト）がある場合の2段目表示 */}
+        {/* 2段目：夜勤バイト（ご要望：「夜バ」と表示・三段配置） */}
         {hasSubWork && (
-          <div className="w-full mt-[1px] px-[1px] rounded-xs bg-amber-100 text-amber-950 text-[7.5px] sm:text-[9px] font-black text-center truncate leading-tight">
-            +{subLabel.slice(0, 2)}
+          <div className="w-full min-w-0 mt-[1px] px-0.5 rounded-xs bg-amber-300 text-stone-900 text-[7px] min-[380px]:text-[8px] sm:text-[9px] font-black text-center truncate leading-tight shadow-2xs">
+            夜バ
           </div>
         )}
 
-        {/* 残業時間・休日出勤時間のバッジ表示（分単位対応） */}
+        {/* 3段目：残業時間・休日出勤時間のバッジ表示（分単位対応・三段配置） */}
         {(otMin > 0 || hwMin > 0) && (
-          <div className="w-full mt-[1px] px-0.5 rounded-xs bg-rose-500 text-white text-[8px] sm:text-[8.5px] font-black text-center truncate leading-tight">
+          <div className="w-full min-w-0 mt-[1px] px-0.5 rounded-xs bg-rose-500 text-white text-[7px] min-[380px]:text-[8px] sm:text-[8.5px] font-black text-center truncate leading-tight shadow-2xs">
             {hwMin > 0 ? `休${formatMinutesShort(hwMin)}` : `残${formatMinutesShort(otMin)}`}
           </div>
         )}
@@ -316,7 +315,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         {showShiftTimeInCell &&
           stamp &&
           (shift?.startTime || stamp.startTime) && (
-            <span className="text-[7.5px] sm:text-[8px] font-bold opacity-90 tracking-tighter truncate max-w-full">
+            <span className="text-[7px] sm:text-[8px] font-bold opacity-90 tracking-tighter truncate max-w-full">
               {shift?.startTime || stamp.startTime}
             </span>
           )}
@@ -335,7 +334,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap bg-stone-800 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-md">
             {shift?.startTime || stamp?.startTime || ''}
             {(shift?.endTime || stamp?.endTime) ? `-${shift?.endTime || stamp?.endTime}` : ''}
-            {shift?.subStartTime ? ` / 🏪${shift.subStartTime}-${shift.subEndTime || ''}` : ''}
+            {shift?.subStartTime ? ` / 🌙夜勤バイト:${shift.subStartTime}-${shift.subEndTime || ''}` : ''}
           </div>
         )}
       </div>
@@ -420,14 +419,14 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+        <div className="grid grid-cols-2 gap-1.5 mb-1.5 items-start">
           <div
             style={
               selStampA
                 ? { backgroundColor: selStampA.color, color: selStampA.textColor }
                 : undefined
             }
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-col items-start gap-1 w-full min-w-0 ${
               selStampA
                 ? ''
                 : getShiftOvertimeMinutes(activeSelShiftA) > 0 ||
@@ -437,23 +436,30 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 : 'bg-stone-100 text-stone-400'
             }`}
           >
-            <span>{partnerA.avatar}{partnerA.name}:</span>
-            <span>
-              {selStampA
-                ? `${selStampA.icon || ''}${activeSelShiftA?.customLabel || selStampA.label}`
-                : 'シフト未定'}
-            </span>
+            {/* 1段目：メインシフト */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <span>{partnerA.avatar}{partnerA.name}:</span>
+              <span>
+                {selStampA
+                  ? `${selStampA.icon || ''}${activeSelShiftA?.customLabel || selStampA.label}`
+                  : 'シフト未定'}
+              </span>
+            </div>
+
+            {/* 2段目：夜勤バイト（勤務の下に配置） */}
             {activeSelShiftA?.subCustomLabel && (
-              <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
-                +🏪{activeSelShiftA.subCustomLabel}
+              <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
+                🌙夜勤バイト (夜バ)
               </span>
             )}
+
+            {/* 3段目：残業・休日出勤（勤務の下に配置） */}
             {(() => {
               const otA = getShiftOvertimeMinutes(activeSelShiftA);
               const hwA = getShiftHolidayWorkMinutes(activeSelShiftA);
               if (otA === 0 && hwA === 0) return null;
               return (
-                <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
+                <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px] font-black shadow-2xs">
                   {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `残業+${formatMinutesShort(otA)}`}
                 </span>
               );
@@ -466,7 +472,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 ? { backgroundColor: selStampB.color, color: selStampB.textColor }
                 : undefined
             }
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center gap-1 ${
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-col items-start gap-1 w-full min-w-0 ${
               selStampB
                 ? ''
                 : getShiftOvertimeMinutes(activeSelShiftB) > 0 ||
@@ -476,23 +482,30 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 : 'bg-stone-100 text-stone-400'
             }`}
           >
-            <span>{partnerB.avatar}{partnerB.name}:</span>
-            <span>
-              {selStampB
-                ? `${selStampB.icon || ''}${activeSelShiftB?.customLabel || selStampB.label}`
-                : 'シフト未定'}
-            </span>
+            {/* 1段目：メインシフト */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <span>{partnerB.avatar}{partnerB.name}:</span>
+              <span>
+                {selStampB
+                  ? `${selStampB.icon || ''}${activeSelShiftB?.customLabel || selStampB.label}`
+                  : 'シフト未定'}
+              </span>
+            </div>
+
+            {/* 2段目：夜勤バイト（勤務の下に配置） */}
             {activeSelShiftB?.subCustomLabel && (
-              <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
-                +🏪{activeSelShiftB.subCustomLabel}
+              <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
+                🌙夜勤バイト (夜バ)
               </span>
             )}
+
+            {/* 3段目：残業・休日出勤（勤務の下に配置） */}
             {(() => {
               const otB = getShiftOvertimeMinutes(activeSelShiftB);
               const hwB = getShiftHolidayWorkMinutes(activeSelShiftB);
               if (otB === 0 && hwB === 0) return null;
               return (
-                <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px]">
+                <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px] font-black shadow-2xs">
                   {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `残業+${formatMinutesShort(otB)}`}
                 </span>
               );
@@ -709,20 +722,22 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                     </div>
 
                     {/* 右：2人のシフト並列（大文字表示） */}
-                    <div className="grid grid-cols-2 gap-1.5 flex-1">
+                    <div className="grid grid-cols-2 gap-1.5 flex-1 items-start">
                       <div
                         style={
                           stA ? { backgroundColor: stA.color, color: stA.textColor } : undefined
                         }
-                        className={`px-2 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center justify-center gap-1 ${
+                        className={`px-2 py-1.5 rounded-xl text-xs font-black flex flex-col items-center justify-center gap-0.5 ${
                           stA ? '' : 'bg-stone-50 text-stone-300 border border-dashed border-stone-200'
                         }`}
                       >
-                        <span>{partnerA.avatar}</span>
-                        <span>{stA ? `${stA.icon || ''}${actA?.customLabel || stA.label}` : '-'}</span>
+                        <div className="flex items-center gap-1">
+                          <span>{partnerA.avatar}</span>
+                          <span>{stA ? `${stA.icon || ''}${actA?.customLabel || stA.label}` : '-'}</span>
+                        </div>
                         {(actA?.subCustomLabel || actA?.subStampId) && (
-                          <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
-                            +🏪{actA.subCustomLabel || 'バイト'}
+                          <span className="px-1.5 py-0.2 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
+                            夜バ
                           </span>
                         )}
                         {(() => {
@@ -730,7 +745,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                           const hwA = getShiftHolidayWorkMinutes(actA);
                           if (otA === 0 && hwA === 0) return null;
                           return (
-                            <span className="px-1 rounded bg-rose-500 text-white text-[10px] font-black">
+                            <span className="px-1.5 py-0.2 rounded bg-rose-500 text-white text-[10px] font-black shadow-2xs">
                               {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `+残${formatMinutesShort(otA)}`}
                             </span>
                           );
@@ -741,15 +756,17 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                         style={
                           stB ? { backgroundColor: stB.color, color: stB.textColor } : undefined
                         }
-                        className={`px-2 py-1.5 rounded-xl text-xs font-black flex flex-wrap items-center justify-center gap-1 ${
+                        className={`px-2 py-1.5 rounded-xl text-xs font-black flex flex-col items-center justify-center gap-0.5 ${
                           stB ? '' : 'bg-stone-50 text-stone-300 border border-dashed border-stone-200'
                         }`}
                       >
-                        <span>{partnerB.avatar}</span>
-                        <span>{stB ? `${stB.icon || ''}${actB?.customLabel || stB.label}` : '-'}</span>
+                        <div className="flex items-center gap-1">
+                          <span>{partnerB.avatar}</span>
+                          <span>{stB ? `${stB.icon || ''}${actB?.customLabel || stB.label}` : '-'}</span>
+                        </div>
                         {(actB?.subCustomLabel || actB?.subStampId) && (
-                          <span className="px-1 rounded bg-amber-100 text-amber-900 text-[10px]">
-                            +🏪{actB.subCustomLabel || 'バイト'}
+                          <span className="px-1.5 py-0.2 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
+                            夜バ
                           </span>
                         )}
                         {(() => {
@@ -757,7 +774,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                           const hwB = getShiftHolidayWorkMinutes(actB);
                           if (otB === 0 && hwB === 0) return null;
                           return (
-                            <span className="px-1 rounded bg-rose-500 text-white text-[10px] font-black">
+                            <span className="px-1.5 py-0.2 rounded bg-rose-500 text-white text-[10px] font-black shadow-2xs">
                               {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `+残${formatMinutesShort(otB)}`}
                             </span>
                           );
