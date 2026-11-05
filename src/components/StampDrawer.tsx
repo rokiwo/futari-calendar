@@ -388,8 +388,8 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                     onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
                       subStampId: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'shift_part',
                       subCustomLabel: currentShiftOnSelectedDate?.subCustomLabel ? undefined : '夜勤バイト',
-                      subStartTime: '18:30',
-                      subEndTime: '22:00',
+                      subStartTime: '21:00',
+                      subEndTime: '23:59',
                     })
                   }
                   className={`px-2.5 py-1 rounded-lg font-black border shrink-0 transition-all ${
