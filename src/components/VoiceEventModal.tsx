@@ -108,6 +108,7 @@ interface SpeechRecognitionInstance {
   continuous: boolean;
   start: () => void;
   stop: () => void;
+  abort?: () => void;
   onresult: ((event: SpeechRecognitionEvent) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
@@ -148,7 +149,31 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   const [applyToShift, setApplyToShift] = useState<boolean>(true);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-  const isListeningRef = useRef(false);
+  const userStoppedRef = useRef<boolean>(true); // ユーザーが自発的に「⏹️ 話し終わった（停止）」を押したか
+  const restartTimerRef = useRef<number | null>(null);
+
+  // マイクインスタンスの安全な完全クリーンアップ（古いイベントハンドラを全解除し、オーディオトラックをOSに即座に返却）
+  const cleanupRecognition = () => {
+    if (restartTimerRef.current) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        if (typeof recognitionRef.current.abort === 'function') {
+          recognitionRef.current.abort();
+        } else {
+          recognitionRef.current.stop();
+        }
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    }
+  };
 
   // 時刻範囲から残業分数を再計算するヘルパー（1分単位）
   const handleRecalculateOvertime = (start: string, end: string) => {
@@ -206,20 +231,18 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     }
   };
 
-  // 音声認識の停止（ユーザーが明示的に押した時のみ完全停止）
+  // 音声認識の停止（ユーザーが「⏹️ 話し終わった」を押した時のみ完全停止）
   const stopListening = () => {
-    isListeningRef.current = false;
-    try {
-      recognitionRef.current?.stop();
-    } catch {
-      // ignore
-    }
+    userStoppedRef.current = true;
+    cleanupRecognition();
     setIsListening(false);
   };
 
-  // 音声認識の開始・再開
+  // 音声認識の開始・再開（iOS SafariのCoreAudio競合を防ぐ解放ディレイ付き）
   const startListening = () => {
     setSpeechError(null);
+    userStoppedRef.current = false;
+
     const w = window as unknown as {
       SpeechRecognition?: new () => SpeechRecognitionInstance;
       webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
@@ -233,50 +256,102 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
       return;
     }
 
-    try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
-      }
+    // 既存セッションを安全に abort して解放
+    cleanupRecognition();
 
-      const rec = new SpeechRec();
-      rec.lang = 'ja-JP';
-      rec.interimResults = true;
-      rec.continuous = false;
+    // iOS Safari / Chrome でマイクハードウェアが完全に解放されるのを180ms待ってから新セッションを起動
+    restartTimerRef.current = window.setTimeout(() => {
+      try {
+        const rec = new SpeechRec();
+        rec.lang = 'ja-JP';
+        rec.interimResults = true;
+        rec.continuous = true; // ← 自動で勝手に切れないように continuous: true を指定！
 
-      rec.onresult = (event: SpeechRecognitionEvent) => {
-        let transcript = '';
-        const resList = event.results;
-        for (let i = 0; i < resList.length; i++) {
-          transcript += resList[i][0]?.transcript || '';
-        }
-        applyVoiceParse(transcript);
-      };
+        rec.onresult = (event: SpeechRecognitionEvent) => {
+          let transcript = '';
+          const resList = event.results;
+          for (let i = 0; i < resList.length; i++) {
+            transcript += resList[i][0]?.transcript || '';
+          }
+          applyVoiceParse(transcript);
+        };
 
-      rec.onerror = () => {
+        rec.onerror = (e) => {
+          // 'no-speech'（沈黙）は無視して聞き取りを継続
+          if (e.error === 'no-speech') {
+            return;
+          }
+          if (e.error === 'not-allowed') {
+            setSpeechError(
+              'マイクの使用が拒否されました。iPhoneの「設定 > Safari > マイク」を許可するか、キーボードの「🎤マイク」からお話しください。'
+            );
+            userStoppedRef.current = true;
+            setIsListening(false);
+            return;
+          }
+
+          // ユーザーが停止していない場合の一時的なエラーは再起動を試みる
+          if (!userStoppedRef.current) {
+            cleanupRecognition();
+            restartTimerRef.current = window.setTimeout(() => {
+              if (!userStoppedRef.current) {
+                startListening();
+              }
+            }, 250);
+          } else {
+            setIsListening(false);
+          }
+        };
+
+        rec.onend = () => {
+          // ユーザーが自発的に「⏹️ 話し終わった」を押すまでは自動で切らずに聞き取りを継続！
+          if (!userStoppedRef.current) {
+            cleanupRecognition();
+            restartTimerRef.current = window.setTimeout(() => {
+              if (!userStoppedRef.current) {
+                try {
+                  startListening();
+                } catch {
+                  setIsListening(false);
+                }
+              }
+            }, 120);
+          } else {
+            setIsListening(false);
+          }
+        };
+
+        recognitionRef.current = rec;
+        rec.start();
+        setIsListening(true);
+      } catch (err) {
+        console.error('Speech recognition failed to start:', err);
         setIsListening(false);
-        isListeningRef.current = false;
+        userStoppedRef.current = true;
         setSpeechError(
-          'マイクの読み取りが中断されました。もう一度マイクボタンを押すか、キーボードの音声入力をお使いください🐾'
+          'マイクの起動に失敗しました。下の「🔄 最初からやり直す」を押すか、キーボードの🎤からお話しください🐾'
         );
-      };
+      }
+    }, 180);
+  };
 
-      rec.onend = () => {
-        setIsListening(false);
-        isListeningRef.current = false;
-      };
-
-      recognitionRef.current = rec;
-      isListeningRef.current = true;
-      rec.start();
-      setIsListening(true);
-    } catch {
-      setIsListening(false);
-      isListeningRef.current = false;
-    }
+  // 最初からやり直す（リセットしてマイクを再起動）
+  const handleRestart = () => {
+    stopListening();
+    setSpokenText('');
+    setTitle('');
+    setOvertimeMinutes(null);
+    setOvertimeHours(null);
+    setOvertimeStartTime(null);
+    setOvertimeEndTime(null);
+    setHolidayWorkMinutes(null);
+    setHolidayWorkHours(null);
+    setSupportBadges([]);
+    setSpeechError(null);
+    // 250ms待って完全にマイクが初期化されてから新規録音開始
+    setTimeout(() => {
+      startListening();
+    }, 250);
   };
 
   // トグル
@@ -290,12 +365,8 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
   useEffect(() => {
     return () => {
-      isListeningRef.current = false;
-      try {
-        recognitionRef.current?.stop();
-      } catch {
-        // ignore
-      }
+      userStoppedRef.current = true;
+      cleanupRecognition();
     };
   }, []);
 
@@ -403,29 +474,64 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
         </div>
 
         <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs">
-          {/* 1. 大型マイクボタン ＆ 明示的な「音声終了」ボタン */}
+          {/* 1. 大型マイクボタン ＆ 明示的な「話し終わった」ボタン */}
           <div className="bg-white rounded-3xl p-4 border-2 border-[#FFE5EC] text-center space-y-3 shadow-xs">
-            <button
-              type="button"
-              onClick={toggleListening}
-              className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center shadow-lg transition-all ${
-                isListening
-                  ? 'bg-rose-500 text-white ring-8 ring-rose-200 animate-pulse scale-105'
-                  : 'bg-gradient-to-tr from-[#FF8FAB] to-[#B388EB] text-white hover:scale-105 active:scale-95'
-              }`}
-              title={isListening ? 'タップして音声を終了する' : 'タップして音声を始める'}
-            >
-              {isListening ? <MicOff className="w-9 h-9" /> : <Mic className="w-9 h-9" />}
-            </button>
+            <div className="flex flex-col items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={toggleListening}
+                className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center shadow-lg transition-all ${
+                  isListening
+                    ? 'bg-rose-500 text-white ring-8 ring-rose-200 animate-pulse scale-105'
+                    : 'bg-gradient-to-tr from-[#FF8FAB] to-[#B388EB] text-white hover:scale-105 active:scale-95'
+                }`}
+                title={isListening ? 'タップして音声を終了する' : 'タップして音声を始める'}
+              >
+                {isListening ? <MicOff className="w-9 h-9" /> : <Mic className="w-9 h-9" />}
+              </button>
 
-            <div className="font-extrabold text-sm text-stone-700">
-              {isListening
-                ? '🔴 聞き取り中...（話し終わると自動で解析されます）'
-                : '上のマイクをタップして話してください'}
+              {isListening ? (
+                <div className="space-y-1.5 w-full max-w-xs">
+                  {/* ご要望：「自動でマイクが切れるのではなく、こちらが話し終わったらマイクを止めれるように」ボタン */}
+                  <button
+                    type="button"
+                    onClick={stopListening}
+                    className="w-full py-2.5 px-4 rounded-2xl bg-rose-500 hover:bg-rose-600 active:scale-95 text-white font-black text-sm shadow-md flex items-center justify-center gap-2 animate-bounce"
+                  >
+                    <span>⏹️</span>
+                    <span>話し終わった（マイクを止める）</span>
+                  </button>
+                  <p className="text-[11px] font-bold text-rose-600">
+                    🔴 聞き取り中…（自動で切れません。話し終わったら上のボタンを押してください）
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={startListening}
+                    className="py-2 px-4 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white font-extrabold text-xs shadow-xs active:scale-95 flex items-center gap-1.5"
+                  >
+                    <Mic className="w-3.5 h-3.5" />
+                    <span>{spokenText ? '🎙️ 続きを話す' : '🎙️ タップして話す'}</span>
+                  </button>
+
+                  {spokenText && (
+                    <button
+                      type="button"
+                      onClick={handleRestart}
+                      className="py-2 px-3 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs active:scale-95 flex items-center gap-1"
+                    >
+                      <span>🔄</span>
+                      <span>最初からやり直す</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* 音声認識テキスト表示欄（手動での修正・キーボード音声入力もOK） */}
-            <div>
+            <div className="space-y-1">
               <input
                 type="text"
                 value={spokenText}
@@ -433,6 +539,9 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                 placeholder="例: 明日2時間残業 / 15日の19時から外食 夜ご飯不要"
                 className="w-full px-3.5 py-2.5 rounded-2xl border-2 border-stone-200 bg-[#FFFBF7] font-bold text-sm text-stone-800 focus:border-[#FF8FAB] focus:outline-none text-center"
               />
+              <p className="text-[10px] text-stone-400 font-bold">
+                💡 iPhoneキーボード左下の「🎤」でも高精度に音声入力できます
+              </p>
             </div>
 
             {/* サンプルフレーズ1タップ体験チップ（1分単位の残業計算フレーズを最優先配置！） */}
