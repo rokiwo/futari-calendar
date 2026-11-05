@@ -28,6 +28,64 @@ const LS_PASS_HASH_KEY = 'futarical_pass_hash_v1';
 const LS_SYNC_CONFIG_KEY = 'futarical_sync_config_v1';
 const LS_ACTIVE_PARTNER_KEY = 'futarical_active_partner_v1';
 export const LS_WELCOME_PHOTO_KEY = 'paircal_welcome_photo_dedicated_v1';
+export const LS_SHARED_KEYWORD_KEY = 'futarical_shared_keyword_v1';
+export const LS_CUSTOM_KEYWORD_DEF_KEY = 'futarical_custom_keyword_def_v1';
+
+// デフォルトの特定の合言葉（ひらがな、カタカナ、アルファベット表記揺れを許容）
+export const DEFAULT_SHARED_KEYWORDS = ['ゆうとさや', 'ゆとさや', 'yutosaya', 'paircal', 'futari'];
+
+/**
+ * 文字列を正規化（全角半角スペース除去、英字小文字化、全角英数を半角化、カタカナをひらがなへ変換）
+ */
+export function normalizeKeyword(input: string): string {
+  if (!input) return '';
+  let s = input.trim().replace(/\s+/g, '').toLowerCase();
+  s = s.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+  s = s.replace(/[\u30a1-\u30f6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+  return s;
+}
+
+/**
+ * 入力された合言葉（キーワード）が合致するか検証
+ */
+export function isSharedKeywordValid(input: string, customDef?: string): boolean {
+  const normInput = normalizeKeyword(input);
+  if (!normInput) return false;
+
+  if (customDef && customDef.trim()) {
+    if (normInput === normalizeKeyword(customDef)) return true;
+  }
+  const savedCustomDef = localStorage.getItem(LS_CUSTOM_KEYWORD_DEF_KEY);
+  if (savedCustomDef && savedCustomDef.trim()) {
+    if (normInput === normalizeKeyword(savedCustomDef)) return true;
+  }
+
+  return DEFAULT_SHARED_KEYWORDS.some((kw) => normInput === normalizeKeyword(kw));
+}
+
+export function getSavedSharedKeyword(): string | null {
+  return localStorage.getItem(LS_SHARED_KEYWORD_KEY);
+}
+
+export function setSavedSharedKeyword(kw: string | null): void {
+  if (!kw) {
+    localStorage.removeItem(LS_SHARED_KEYWORD_KEY);
+  } else {
+    localStorage.setItem(LS_SHARED_KEYWORD_KEY, kw.trim());
+  }
+}
+
+export function getCustomKeywordDef(): string | null {
+  return localStorage.getItem(LS_CUSTOM_KEYWORD_DEF_KEY);
+}
+
+export function setCustomKeywordDef(kw: string | null): void {
+  if (!kw) {
+    localStorage.removeItem(LS_CUSTOM_KEYWORD_DEF_KEY);
+  } else {
+    localStorage.setItem(LS_CUSTOM_KEYWORD_DEF_KEY, kw.trim());
+  }
+}
 
 const GIST_FILENAME = 'futari-calendar-encrypted.json';
 
@@ -376,9 +434,10 @@ export function setActivePartnerId(partnerId: PartnerId): void {
   localStorage.setItem(LS_ACTIVE_PARTNER_KEY, partnerId);
 }
 
-// クラウド同期設定の取得・保存（デフォルトで自動クラウド同期がONになる設計）
+// クラウド同期設定の取得・保存（特定の合言葉が入力された場合のみ自動同期が有効になる）
 export function loadSyncConfig(): CloudSyncConfig {
   const defaults = getDefaultCloudCredentials();
+  const isKeywordAuthenticated = Boolean(getSavedSharedKeyword());
   try {
     const raw = localStorage.getItem(LS_SYNC_CONFIG_KEY);
     if (raw) {
@@ -387,7 +446,7 @@ export function loadSyncConfig(): CloudSyncConfig {
       const gistId = parsed.gistId?.trim() || defaults.gistId;
       return {
         ...parsed,
-        enabled: Boolean(token && (parsed.mode === 'repo' ? parsed.repoOwner : gistId)),
+        enabled: isKeywordAuthenticated && Boolean(token && (parsed.mode === 'repo' ? parsed.repoOwner : gistId)),
         githubToken: token,
         gistId,
         autoSync: parsed.autoSync ?? true,
@@ -397,7 +456,7 @@ export function loadSyncConfig(): CloudSyncConfig {
     // ignore
   }
   return {
-    enabled: Boolean(defaults.token && defaults.gistId),
+    enabled: isKeywordAuthenticated && Boolean(defaults.token && defaults.gistId),
     mode: 'gist',
     githubToken: defaults.token,
     gistId: defaults.gistId,
