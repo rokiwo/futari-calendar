@@ -152,33 +152,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   return (
     <header className="sticky top-0 z-30 bg-[#FFFBF7]/95 backdrop-blur-md border-b border-[#FFE5EC] shadow-xs">
       <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-1.5 pb-1.5 space-y-1.5">
-        {/* 上段：ウィジェットへ戻る ＋ 年月セレクター ＋ ふたり休日一致 ＋ 残業時間集計 ＋ 既読・操作切替 */}
+        {/* 上段：年月セレクター ＋ ふたり休日一致 ＋ 残業時間集計 ＋ 既読・操作切替 */}
         <div className="flex flex-wrap items-center justify-between gap-1.5">
-          {/* 左側：ウィジェット切替＆年月切替＆お休み一致＆残業バッジ */}
+          {/* 左側：年月切替＆お休み一致＆残業バッジ */}
           <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
-            {onOpenWidgetHome && (
-              <button
-                type="button"
-                onClick={onOpenWidgetHome}
-                className="px-2.5 py-1 rounded-2xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[11px] font-extrabold shadow-2xs active:scale-95"
-                title="日々の予定とシフトが縦に並ぶタイムライン（ホーム）画面へ"
-              >
-                📜 タイムライン
-              </button>
-            )}
-
-            {onOpenWelcomeImage && metadata.welcomeImageConfig?.dataUrl && (
-              <button
-                type="button"
-                onClick={onOpenWelcomeImage}
-                className="px-2 py-1 rounded-2xl bg-white border border-pink-200 text-stone-700 text-[11px] font-extrabold shadow-2xs hover:bg-[#FFF5F8] active:scale-95 flex items-center gap-1"
-                title="お気に入り写真・ウェルカム画面を表示"
-              >
-                <span>📸</span>
-                <span className="hidden min-[420px]:inline">フォト</span>
-              </button>
-            )}
-
             <div className="flex items-center bg-white rounded-2xl border border-stone-200/80 shadow-2xs px-0.5 py-0.5">
               <button
                 type="button"
@@ -211,7 +188,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <button
               type="button"
               onClick={onToday}
-              className="px-2 py-1 rounded-xl bg-white border border-stone-200 text-stone-600 text-[11px] font-bold shadow-2xs"
+              className="px-2 py-1 rounded-xl bg-white border border-stone-200 text-stone-600 text-[11px] font-bold shadow-2xs hover:bg-stone-50"
             >
               今日
             </button>
@@ -294,10 +271,14 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 title="今月の残業時間・休日出勤時間・バイト回数を確認"
               >
                 <Timer className="w-3.5 h-3.5 text-[#D49600] shrink-0" />
-                <span>
-                  残業 {partnerA.avatar}
-                  {overtimeSummary.partnerA.totalExtraMinutes}分 / {partnerB.avatar}
-                  {overtimeSummary.partnerB.totalExtraMinutes}分
+                <span>残業</span>
+                <span className="hidden sm:inline">
+                  {partnerA.avatar}{overtimeSummary.partnerA.totalExtraMinutes}分 / {partnerB.avatar}{overtimeSummary.partnerB.totalExtraMinutes}分
+                </span>
+                <span className="sm:hidden text-[10px] font-black">
+                  {overtimeSummary.partnerA.totalExtraMinutes + overtimeSummary.partnerB.totalExtraMinutes > 0
+                    ? `${overtimeSummary.partnerA.totalExtraMinutes + overtimeSummary.partnerB.totalExtraMinutes}分`
+                    : '0分'}
                 </span>
               </button>
 
@@ -462,30 +443,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               </button>
             )}
 
-            {/* 🔄 キャッシュ破棄＆最新版再読込ボタン */}
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  if ('serviceWorker' in navigator) {
-                    const regs = await navigator.serviceWorker.getRegistrations();
-                    for (const r of regs) await r.unregister();
-                  }
-                  if ('caches' in window) {
-                    const keys = await caches.keys();
-                    for (const k of keys) await caches.delete(k);
-                  }
-                } catch {
-                  // ignore
-                }
-                window.location.reload();
-              }}
-              className="px-2 py-1 rounded-xl bg-[#FFF0F5] hover:bg-[#FFE5EC] border border-[#FFC2D1] text-[#9E2A47] text-[10px] font-black flex items-center gap-1 active:scale-95"
-              title="タップすると古いキャッシュを完全破棄して最新版に更新します"
-            >
-              <RefreshCw className="w-3 h-3 text-[#FF8FAB]" />
-              <span>v2.2更新</span>
-            </button>
 
             <button
               type="button"
