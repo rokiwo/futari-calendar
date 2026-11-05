@@ -152,10 +152,9 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   const userStoppedRef = useRef<boolean>(true); // ユーザーが自発的に「⏹️ 話し終わった（停止）」を押したか
   const restartTimerRef = useRef<number | null>(null);
 
-  // 🎙️ 間が空いても消えずに続きから入力できるよう、セッション間を跨いでテキストを累積保持するバッファ
-  const committedTextRef = useRef<string>('');
-  const prevTranscriptRef = useRef<string>('');
-  const latestFullTextRef = useRef<string>('');
+  // 🎙️ どんな単語でも、どれだけ間が空いて考えても、絶対に消えずに続きから追記するための確定バッファ
+  const confirmedTextRef = useRef<string>(''); // これまで話して確定した全テキスト
+  const currentChunkRef = useRef<string>('');  // 現在話しているセッションの最新テキスト
 
   // マイクインスタンスの安全な完全クリーンアップ（古いイベントハンドラを全解除し、オーディオトラックをOSに即座に返却）
   const cleanupRecognition = () => {
@@ -200,7 +199,6 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   const applyVoiceParse = (raw: string) => {
     const cleaned = cleanDuplicateSpeech(raw);
     setSpokenText(cleaned);
-    latestFullTextRef.current = cleaned;
     if (!cleaned.trim()) return;
     const parsed = parseSpokenScheduleText(cleaned, selectedDate, 'shared');
     setDateStr(parsed.date);
@@ -240,10 +238,15 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   // 音声認識の停止（ユーザーが「⏹️ 話し終わった」を押した時のみ完全停止）
   const stopListening = () => {
     userStoppedRef.current = true;
-    if (latestFullTextRef.current.trim()) {
-      committedTextRef.current = latestFullTextRef.current.trim();
+    // 直前の発話チャンクを確定テキストへ完全マージ
+    if (currentChunkRef.current.trim()) {
+      const base = confirmedTextRef.current.trim();
+      const chunk = currentChunkRef.current.trim();
+      if (!base.endsWith(chunk)) {
+        confirmedTextRef.current = base ? `${base} ${chunk}` : chunk;
+      }
+      currentChunkRef.current = '';
     }
-    prevTranscriptRef.current = '';
     cleanupRecognition();
     setIsListening(false);
   };
@@ -253,11 +256,11 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     setSpeechError(null);
     userStoppedRef.current = false;
 
-    // 最新の確定テキストが存在する場合はコミットバッファにセット
-    if (latestFullTextRef.current.trim()) {
-      committedTextRef.current = latestFullTextRef.current.trim();
+    // 現在入力欄にあるテキストをベースとして確実に保護
+    if (spokenText.trim()) {
+      confirmedTextRef.current = spokenText.trim();
     }
-    prevTranscriptRef.current = '';
+    currentChunkRef.current = '';
 
     const w = window as unknown as {
       SpeechRecognition?: new () => SpeechRecognitionInstance;
@@ -292,34 +295,53 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
           sessionTranscript = sessionTranscript.trim();
           if (!sessionTranscript) return;
 
-          const prev = prevTranscriptRef.current.trim();
+          const prevChunk = currentChunkRef.current.trim();
 
-          // 💡 決定打：間が空いてブラウザが結果配列をリセットして「1日」だけを送ってきた場合
-          // （例: 前回は「12月」だったのに、今回突然「1日」だけが来た）
-          if (prev && !sessionTranscript.startsWith(prev) && !prev.endsWith(sessionTranscript)) {
-            committedTextRef.current = committedTextRef.current
-              ? `${committedTextRef.current.trim()} ${prev}`
-              : prev;
+          // 間が空いた後にブラウザが新セッション扱いとして新しい単語だけを送ってきた場合
+          // （例: 前回は「12月」や「明日」だったのに、今回間が空いて「1日」や「残業」が来た）
+          if (prevChunk && !sessionTranscript.startsWith(prevChunk) && !prevChunk.endsWith(sessionTranscript)) {
+            const base = confirmedTextRef.current.trim();
+            if (!base.endsWith(prevChunk)) {
+              confirmedTextRef.current = base ? `${base} ${prevChunk}` : prevChunk;
+            }
           }
 
-          prevTranscriptRef.current = sessionTranscript;
+          currentChunkRef.current = sessionTranscript;
 
-          // 蓄積された過去のテキスト ＋ 今回のセッションで話している最新テキストを確実に連結！
-          const base = committedTextRef.current.trim();
-          let fullText = base
-            ? `${base} ${sessionTranscript}`
-            : sessionTranscript;
+          // 確定済みテキスト ＋ 今回のセッションで話した最新の言葉を確実に連結！
+          const base = confirmedTextRef.current.trim();
+          let fullText = '';
+          if (base) {
+            // base に sessionTranscript が含まれていない場合は後ろに安全に追加
+            if (base.endsWith(sessionTranscript)) {
+              fullText = base;
+            } else {
+              fullText = `${base} ${sessionTranscript}`;
+            }
+          } else {
+            fullText = sessionTranscript;
+          }
 
           fullText = cleanDuplicateSpeech(fullText);
-          latestFullTextRef.current = fullText;
           applyVoiceParse(fullText);
         };
 
         rec.onerror = (e) => {
-          // 'no-speech'（沈黙）は無視して聞き取りを継続
+          // 'no-speech'（沈黙・考える時間）はエラーではなく正常な間！
           if (e.error === 'no-speech') {
             return;
           }
+
+          // エラーが発生した時でも直前の発話チャンクを絶対に逃さず退避保存！
+          if (currentChunkRef.current.trim()) {
+            const base = confirmedTextRef.current.trim();
+            const chunk = currentChunkRef.current.trim();
+            if (!base.endsWith(chunk)) {
+              confirmedTextRef.current = base ? `${base} ${chunk}` : chunk;
+            }
+            currentChunkRef.current = '';
+          }
+
           if (e.error === 'not-allowed') {
             setSpeechError(
               'マイクの使用が拒否されました。iPhoneの「設定 > Safari > マイク」を許可するか、キーボードの「🎤マイク」からお話しください。'
@@ -329,7 +351,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
             return;
           }
 
-          // ユーザーが停止していない場合の一時的なエラーは再起動を試みる
+          // ユーザーが停止していない場合の一時的なエラーは再起動して聞き取りを継続
           if (!userStoppedRef.current) {
             cleanupRecognition();
             restartTimerRef.current = window.setTimeout(() => {
@@ -343,11 +365,15 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
         };
 
         rec.onend = () => {
-          // 間が空いてセッションが切れた場合でも、これまでの最新全体テキストをコミット済みとして完全確定保持！
-          if (latestFullTextRef.current.trim()) {
-            committedTextRef.current = latestFullTextRef.current.trim();
+          // 間が空いてセッションが切れた場合でも、直前までの言葉を確定テキストへ完全退避！
+          if (currentChunkRef.current.trim()) {
+            const base = confirmedTextRef.current.trim();
+            const chunk = currentChunkRef.current.trim();
+            if (!base.endsWith(chunk)) {
+              confirmedTextRef.current = base ? `${base} ${chunk}` : chunk;
+            }
+            currentChunkRef.current = '';
           }
-          prevTranscriptRef.current = '';
 
           // ユーザーが自発的に「⏹️ 話し終わった」を押すまでは自動で切らずに聞き取りを継続！
           if (!userStoppedRef.current) {
@@ -383,9 +409,8 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   // 最初からやり直す（リセットしてマイクを再起動）
   const handleRestart = () => {
     stopListening();
-    committedTextRef.current = '';
-    prevTranscriptRef.current = '';
-    latestFullTextRef.current = '';
+    confirmedTextRef.current = '';
+    currentChunkRef.current = '';
     setSpokenText('');
     setTitle('');
     setOvertimeMinutes(null);
@@ -585,16 +610,15 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                 value={spokenText}
                 onChange={(e) => {
                   const val = e.target.value;
-                  committedTextRef.current = val;
-                  prevTranscriptRef.current = '';
-                  latestFullTextRef.current = val;
+                  confirmedTextRef.current = val;
+                  currentChunkRef.current = '';
                   applyVoiceParse(val);
                 }}
                 placeholder="例: 明日2時間残業 / 15日の19時から外食 夜ご飯不要"
                 className="w-full px-3.5 py-2.5 rounded-2xl border-2 border-stone-200 bg-[#FFFBF7] font-bold text-sm text-stone-800 focus:border-[#FF8FAB] focus:outline-none text-center"
               />
               <p className="text-[10px] text-emerald-600 font-bold">
-                ✨ 間が空いても消えずに続きから入力できます
+                ✨ どんな言葉でも間が空いても消えずに続きから入力できます
               </p>
             </div>
 
@@ -611,9 +635,8 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                   key={sample}
                   type="button"
                   onClick={() => {
-                    committedTextRef.current = sample;
-                    prevTranscriptRef.current = '';
-                    latestFullTextRef.current = sample;
+                    confirmedTextRef.current = sample;
+                    currentChunkRef.current = '';
                     applyVoiceParse(sample);
                   }}
                   className="px-2 py-1 rounded-lg bg-[#FFFBF7] hover:bg-[#FFE5EC] border border-stone-200 text-[10px] font-bold text-stone-600 transition-colors"
