@@ -78,7 +78,7 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
         <div className="font-extrabold text-xs sm:text-sm flex items-center gap-1 mt-0.5 truncate">
           <span>{stamp?.icon || ''}</span>
           <span>{label}</span>
-          {sub && <span className="text-[10px] px-1 rounded bg-amber-100 text-amber-900">+{sub}</span>}
+          {sub && <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-300 text-stone-900 font-black shadow-2xs">夜バ</span>}
           {ot > 0 && <span className="text-[10px] px-1 rounded bg-rose-500 text-white">+{formatMinutesShort(ot)}</span>}
         </div>
         {(shift?.startTime || stamp?.startTime) && (
@@ -118,7 +118,11 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
 
   return (
     <div
-      onClick={handleClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          handleClose();
+        }
+      }}
       className="fixed inset-0 z-[70] bg-stone-900/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in"
     >
       <div
