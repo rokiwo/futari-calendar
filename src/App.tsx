@@ -397,28 +397,30 @@ export const App: React.FC = () => {
         .filter((s) => s.type === 'shift' && !LEGACY_DEFAULT_STAMP_IDS.has(s.id))
         .map((s) => ({ ...s, partnerId: s.partnerId || 'partnerA' }));
 
+      // 既存のスタンプデータがある場合はユーザーのカスタム編集・アイコンを最優先で維持！
       let nextStamps =
-        shouldApplyHusband12Presets || cleanedLoadedStamps.length === 0
-          ? [...DEFAULT_STAMP_PRESETS]
-          : cleanedLoadedStamps;
+        cleanedLoadedStamps.length > 0
+          ? cleanedLoadedStamps
+          : [...DEFAULT_STAMP_PRESETS];
 
       let nextMetadata = loaded.metadata;
-      if (shouldApplySayaPresets) {
-        // さや（partnerB）のスタンプを最新の10種類＋休み・有休でセット
+      if (shouldApplySayaPresets && !nextStamps.some((s) => s.partnerId === 'partnerB')) {
+        // さや（partnerB）のスタンプが未登録の場合のみ初期テンプレを投入
         const nonPartnerBStamps = nextStamps.filter((s) => s.partnerId !== 'partnerB');
         nextStamps = [...nonPartnerBStamps, ...SAYA_DEFAULT_STAMPS];
-        if (nextMetadata?.partners?.partnerB?.name === '妻') {
-          nextMetadata = {
-            ...nextMetadata,
-            partners: {
-              ...nextMetadata.partners,
-              partnerB: {
-                ...nextMetadata.partners.partnerB,
-                name: 'さや',
-              },
+      }
+
+      if (nextMetadata?.partners?.partnerB?.name === '妻') {
+        nextMetadata = {
+          ...nextMetadata,
+          partners: {
+            ...nextMetadata.partners,
+            partnerB: {
+              ...nextMetadata.partners.partnerB,
+              name: 'さや',
             },
-          };
-        }
+          },
+        };
       }
 
       // ご要望：「夫→ゆうとに名前変更」を自動適用
@@ -1535,8 +1537,7 @@ export const App: React.FC = () => {
               },
               updatedAt: new Date().toISOString(),
             };
-            setStore(nextStore);
-            await saveLocalStore(nextStore, sessionPassword || undefined);
+            commitStore(nextStore);
             showToast('📸 お気に入り写真設定を保存しました✨');
           }}
           onPreviewWelcomeImage={(cfg) => {
@@ -1608,8 +1609,7 @@ export const App: React.FC = () => {
               },
               updatedAt: new Date().toISOString(),
             };
-            setStore(nextStore);
-            await saveLocalStore(nextStore, sessionPassword || undefined);
+            commitStore(nextStore);
           }}
         />
       )}
