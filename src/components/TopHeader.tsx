@@ -79,6 +79,8 @@ interface TopHeaderProps {
   onOpenWelcomeImage?: () => void;
   isShared?: boolean;
   onOpenSharedKeywordModal?: () => void;
+  partnerNewCount?: number;
+  onOpenPartnerEvents?: () => void;
 }
 
 export function formatLastSeen(isoStr?: string): string {
@@ -140,6 +142,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenWelcomeImage,
   isShared = false,
   onOpenSharedKeywordModal,
+  partnerNewCount = 0,
+  onOpenPartnerEvents,
 }) => {
   const [showHolidayPopup, setShowHolidayPopup] = useState(false);
   const [showOvertimePopup, setShowOvertimePopup] = useState(false);
@@ -399,6 +403,42 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 </div>
               )}
             </div>
+
+            {/* 💌 パートナーが打った予定確認ボタン */}
+            {onOpenPartnerEvents && (
+              <button
+                type="button"
+                onClick={onOpenPartnerEvents}
+                className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-xs font-black shadow-2xs active:scale-95 transition-all border shrink-0 ${
+                  partnerNewCount > 0
+                    ? 'bg-gradient-to-r from-rose-500 to-[#FF8FAB] text-white border-rose-300 ring-2 ring-rose-200 animate-pulse'
+                    : 'bg-white hover:bg-stone-50 text-stone-700 border-stone-200'
+                }`}
+                title={`${otherPartner.name}が打った予定・シフトを確認`}
+              >
+                <span>💌</span>
+                <span className="hidden min-[370px]:inline">{otherPartner.name}の</span>
+                <span>予定</span>
+                {partnerNewCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-white text-rose-600 text-[10px] font-black">
+                    {partnerNewCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* ✅ すべて既読にするクイックボタン（新着がある時だけヘッダーにも即座に表示！） */}
+            {partnerNewCount > 0 && (
+              <button
+                type="button"
+                onClick={onMarkSeenNow}
+                className="hidden min-[420px]:flex items-center gap-0.5 px-2 py-1 rounded-xl bg-white hover:bg-emerald-50 text-emerald-600 border border-emerald-300 text-[11px] font-black shadow-2xs active:scale-95 transition-all shrink-0"
+                title="相手の新着予定をすべて既読にする"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                <span>既読</span>
+              </button>
+            )}
           </div>
 
           {/* 右側：アプリツール群（未読表示は撤去、写真・同期・合言葉・設定のみ配置） */}
