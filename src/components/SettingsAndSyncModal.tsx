@@ -53,6 +53,9 @@ interface SettingsAndSyncModalProps {
   ) => void;
   onUpdateWelcomeImageConfig?: (config: WelcomeImageConfig) => void;
   onPreviewWelcomeImage?: (config: WelcomeImageConfig) => void;
+  isShared?: boolean;
+  onOpenSharedKeywordModal?: () => void;
+  onUnshareCalendar?: () => void;
 }
 
 type SettingsTab = 'sync' | 'ical_backup' | 'profile' | 'welcome_image';
@@ -76,6 +79,9 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   onUpdatePartnerProfiles,
   onUpdateWelcomeImageConfig,
   onPreviewWelcomeImage,
+  isShared = false,
+  onOpenSharedKeywordModal,
+  onUnshareCalendar,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('sync');
 
@@ -588,6 +594,79 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
             const inviteUrl = 'https://rokiwo.github.io/futari-calendar/';
             return (
             <div className="space-y-4">
+              {/* 🔑 合言葉によるカレンダー共有ステータス */}
+              <div className="bg-white rounded-3xl p-4 border-2 border-[#BCEBF5] space-y-3 shadow-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-extrabold text-stone-800 text-sm flex items-center gap-1.5">
+                    <span>🔑</span>
+                    <span>合言葉によるカレンダー共有</span>
+                  </div>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full font-extrabold text-[10px] ${
+                      isShared
+                        ? 'bg-[#E6F7EF] text-[#1E6645]'
+                        : 'bg-amber-100 text-amber-800 animate-pulse'
+                    }`}
+                  >
+                    {isShared ? '✅ 認証済：共有中' : '⚠️ 未共有（まっさら状態）'}
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-stone-600 leading-relaxed">
+                  初めてURLを開いた端末はまっさらな状態で起動します。ふたりのカレンダーデータを共有するには、合言葉（例：<strong>ゆうとさや</strong>）を入力してください。
+                </p>
+
+                <div className="flex flex-wrap gap-2">
+                  {!isShared ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenSharedKeywordModal?.();
+                      }}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-rose-400 text-white font-extrabold text-xs shadow-xs hover:opacity-95 flex items-center gap-1.5"
+                    >
+                      <span>🔑</span>
+                      <span>合言葉を入力して共有する</span>
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenSharedKeywordModal?.();
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs flex items-center gap-1"
+                      >
+                        <span>🔑</span>
+                        <span>合言葉を再入力</span>
+                      </button>
+
+                      {onUnshareCalendar && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                'カレンダーの共有を解除し、この端末をまっさらな初期状態に戻しますか？\n（クラウド上のデータは消えません。再度合言葉を入力すればいつでも元に戻せます）'
+                              )
+                            ) {
+                              onUnshareCalendar();
+                              onClose();
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs border border-rose-200 flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>共有を解除（まっさらに戻す）</span>
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
               {/* 💑 設定不要！URLを送るだけの超かんたん夫婦共有 */}
               <div className="bg-white rounded-3xl p-4 border-2 border-[#FF8FAB] space-y-3 shadow-xs">
                 <div className="flex items-center justify-between gap-2">
@@ -604,7 +683,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 <div className="p-3 rounded-2xl bg-[#EAF7FA] border border-[#BCEBF5] flex items-center gap-2.5 text-stone-700">
                   <span className="text-xl shrink-0">🔓</span>
                   <div className="text-[11px] font-bold leading-relaxed">
-                    <strong>パスワードロック不要！</strong> パートナーもURLを開くだけで、ログインやパスコード入力の手間なくすぐに同じカレンダーを閲覧・更新できます✨
+                    <strong>パスワード入力不要！</strong> 初回に合言葉（ゆうとさや）を入力するだけで、以後はパスワード入力なしでずっと同じカレンダーが共有されます✨
                   </div>
                 </div>
 
@@ -615,14 +694,14 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   <p className="text-[11px] font-bold">
                     ① 下のボタンで<strong>パートナーにLINEで招待URLを送る</strong>（またはQRコードを読み取ってもらう）
                     <br />
-                    ② パートナーが開いて、画面上のスイッチを<strong>「🐰 妻（または🐻 夫）」</strong>に切り替えるだけでずっと自動同期されます✨
+                    ② パートナーが開いて、合言葉<strong>「ゆうとさや」</strong>を入力するだけでふたりのカレンダーが同期されます✨
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <a
                     href={`https://line.me/R/share?text=${encodeURIComponent(
-                      `🐻💕🐰 ふたりの共有シフト＆予定カレンダー「ペアカレ」\nこの招待リンクを開いてホーム画面に追加してね👇\n${inviteUrl}`
+                      `🐻💕🐰 ふたりの共有シフト＆予定カレンダー「ペアカレ」\nこの招待リンクを開いて、合言葉【ゆうとさや】を入れてね👇\n${inviteUrl}`
                     )}`}
                     target="_blank"
                     rel="noreferrer"
