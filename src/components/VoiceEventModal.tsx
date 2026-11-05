@@ -152,6 +152,10 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   const userStoppedRef = useRef<boolean>(true); // ユーザーが自発的に「⏹️ 話し終わった（停止）」を押したか
   const restartTimerRef = useRef<number | null>(null);
 
+  // 🎙️ 間が空いても消えずに続きから入力できるよう、セッション間を跨いでテキストを累積保持するバッファ
+  const accumulatedTextRef = useRef<string>('');
+  const currentSessionTextRef = useRef<string>('');
+
   // マイクインスタンスの安全な完全クリーンアップ（古いイベントハンドラを全解除し、オーディオトラックをOSに即座に返却）
   const cleanupRecognition = () => {
     if (restartTimerRef.current) {
@@ -234,6 +238,13 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   // 音声認識の停止（ユーザーが「⏹️ 話し終わった」を押した時のみ完全停止）
   const stopListening = () => {
     userStoppedRef.current = true;
+    if (currentSessionTextRef.current) {
+      const base = accumulatedTextRef.current.trim();
+      accumulatedTextRef.current = base
+        ? `${base} ${currentSessionTextRef.current.trim()}`
+        : currentSessionTextRef.current.trim();
+      currentSessionTextRef.current = '';
+    }
     cleanupRecognition();
     setIsListening(false);
   };
@@ -242,6 +253,12 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   const startListening = () => {
     setSpeechError(null);
     userStoppedRef.current = false;
+
+    // 現在の入力欄のテキストを累積ベースとしてセット（手動編集や前回の続きから自然に入力可能）
+    if (spokenText.trim()) {
+      accumulatedTextRef.current = spokenText.trim();
+    }
+    currentSessionTextRef.current = '';
 
     const w = window as unknown as {
       SpeechRecognition?: new () => SpeechRecognitionInstance;
@@ -268,12 +285,21 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
         rec.continuous = true; // ← 自動で勝手に切れないように continuous: true を指定！
 
         rec.onresult = (event: SpeechRecognitionEvent) => {
-          let transcript = '';
+          let sessionText = '';
           const resList = event.results;
           for (let i = 0; i < resList.length; i++) {
-            transcript += resList[i][0]?.transcript || '';
+            sessionText += resList[i][0]?.transcript || '';
           }
-          applyVoiceParse(transcript);
+          currentSessionTextRef.current = sessionText;
+
+          // 蓄積された過去の確定テキスト ＋ 今回のセッションで話している最新テキストを結合
+          const base = accumulatedTextRef.current.trim();
+          const fullText = base
+            ? sessionText
+              ? `${base} ${sessionText}`
+              : base
+            : sessionText;
+          applyVoiceParse(fullText);
         };
 
         rec.onerror = (e) => {
@@ -304,6 +330,15 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
         };
 
         rec.onend = () => {
+          // 間が空いてセッションが切れた場合でも、話した内容を累積バッファに保存！
+          if (currentSessionTextRef.current) {
+            const base = accumulatedTextRef.current.trim();
+            accumulatedTextRef.current = base
+              ? `${base} ${currentSessionTextRef.current.trim()}`
+              : currentSessionTextRef.current.trim();
+            currentSessionTextRef.current = '';
+          }
+
           // ユーザーが自発的に「⏹️ 話し終わった」を押すまでは自動で切らずに聞き取りを継続！
           if (!userStoppedRef.current) {
             cleanupRecognition();
@@ -338,6 +373,8 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   // 最初からやり直す（リセットしてマイクを再起動）
   const handleRestart = () => {
     stopListening();
+    accumulatedTextRef.current = '';
+    currentSessionTextRef.current = '';
     setSpokenText('');
     setTitle('');
     setOvertimeMinutes(null);
@@ -535,12 +572,17 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
               <input
                 type="text"
                 value={spokenText}
-                onChange={(e) => applyVoiceParse(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  accumulatedTextRef.current = val;
+                  currentSessionTextRef.current = '';
+                  applyVoiceParse(val);
+                }}
                 placeholder="例: 明日2時間残業 / 15日の19時から外食 夜ご飯不要"
                 className="w-full px-3.5 py-2.5 rounded-2xl border-2 border-stone-200 bg-[#FFFBF7] font-bold text-sm text-stone-800 focus:border-[#FF8FAB] focus:outline-none text-center"
               />
-              <p className="text-[10px] text-stone-400 font-bold">
-                💡 iPhoneキーボード左下の「🎤」でも高精度に音声入力できます
+              <p className="text-[10px] text-emerald-600 font-bold">
+                ✨ 間が空いても消えずに続きから入力できます
               </p>
             </div>
 
@@ -556,7 +598,11 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                 <button
                   key={sample}
                   type="button"
-                  onClick={() => applyVoiceParse(sample)}
+                  onClick={() => {
+                    accumulatedTextRef.current = sample;
+                    currentSessionTextRef.current = '';
+                    applyVoiceParse(sample);
+                  }}
                   className="px-2 py-1 rounded-lg bg-[#FFFBF7] hover:bg-[#FFE5EC] border border-stone-200 text-[10px] font-bold text-stone-600 transition-colors"
                 >
                   💬「{sample}」
