@@ -205,46 +205,44 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
           {/* 右側：📸 写真保存 ＆ 操作中パートナー切替 */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* 📸 写真（シフト表・カレンダー画像保存・共有）※ご要望により1段目のゆったりエリアに配置 */}
+            {/* 📸 写真（シフト表・カレンダー画像保存・共有） */}
             {onOpenShiftExport && (
               <button
                 type="button"
                 onClick={onOpenShiftExport}
-                className="px-2.5 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-xs font-black flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
+                className="px-2 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-xs font-black flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
                 title="シフト表・カレンダーを写真(画像)として保存・共有"
               >
                 <Camera className="w-3.5 h-3.5 text-[#0284C7]" />
-                <span className="text-xs">写真共有</span>
+                <span className="text-xs">写真</span>
               </button>
             )}
 
-            {/* 操作中パートナー切替（🐻ゆうと ⇔ 🐰さや） */}
+            {/* 操作中パートナー切替（ご要望：文字をなくしアイコンのみで超コンパクトに！押したら入力が切り替わる） */}
             <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200 shadow-2xs shrink-0">
               <button
                 type="button"
                 onClick={() => onToggleActivePartner('partnerA')}
-                className={`px-2 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black transition-all flex items-center gap-0.5 ${
+                className={`w-7 h-7 sm:w-8 sm:h-7.5 rounded-lg text-sm sm:text-base font-black transition-all flex items-center justify-center leading-none ${
                   activePartner === 'partnerA'
-                    ? 'bg-[#56CFE1] text-white shadow-xs'
-                    : 'text-stone-500 hover:text-stone-700'
+                    ? 'bg-[#56CFE1] text-white shadow-xs scale-105'
+                    : 'text-stone-400 hover:text-stone-700 hover:bg-stone-200/50 opacity-60'
                 }`}
-                title={`${partnerA.name}として操作`}
+                title={`現在: ${partnerA.name}（タップで選択）`}
               >
                 <span>{partnerA.avatar}</span>
-                <span>{partnerA.name}</span>
               </button>
               <button
                 type="button"
                 onClick={() => onToggleActivePartner('partnerB')}
-                className={`px-2 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black transition-all flex items-center gap-0.5 ${
+                className={`w-7 h-7 sm:w-8 sm:h-7.5 rounded-lg text-sm sm:text-base font-black transition-all flex items-center justify-center leading-none ${
                   activePartner === 'partnerB'
-                    ? 'bg-[#B388EB] text-white shadow-xs'
-                    : 'text-stone-500 hover:text-stone-700'
+                    ? 'bg-[#B388EB] text-white shadow-xs scale-105'
+                    : 'text-stone-400 hover:text-stone-700 hover:bg-stone-200/50 opacity-60'
                 }`}
-                title={`${partnerB.name}として操作`}
+                title={`現在: ${partnerB.name}（タップで選択）`}
               >
                 <span>{partnerB.avatar}</span>
-                <span>{partnerB.name}</span>
               </button>
             </div>
           </div>
