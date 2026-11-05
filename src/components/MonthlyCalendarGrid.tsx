@@ -226,20 +226,20 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   // スマホ用のカレンダー表示スタイル切替（'grid' = 7列マス目 / 'list' = 縦1列くっきりリスト）
   const [mobileLayout, setMobileLayout] = useState<'grid' | 'list'>('grid');
 
-  // 詳細プレビューバーの表示位置（'top' = 上 / 'bottom' = 下 / 'hidden' = 非表示）
-  const [previewPosition, setPreviewPosition] = useState<'bottom' | 'top' | 'hidden'>(() => {
+  // 詳細プレビューバーの表示（'bottom' = カレンダー下部に表示 / 'hidden' = 非表示）
+  const [previewPosition, setPreviewPosition] = useState<'bottom' | 'hidden'>(() => {
     try {
       const saved =
         localStorage.getItem('paircal_preview_position') ||
         localStorage.getItem('futarical_preview_position');
-      if (saved === 'top' || saved === 'bottom' || saved === 'hidden') return saved;
+      if (saved === 'bottom' || saved === 'hidden') return saved;
     } catch {
       // ignore
     }
-    return 'top'; // ユーザー要望に合わせてデフォルトを「上」に設定！
+    return 'bottom'; // カレンダーを上部に最大化するためデフォルトは下部に配置
   });
 
-  const handleSetPreviewPosition = (pos: 'bottom' | 'top' | 'hidden') => {
+  const handleSetPreviewPosition = (pos: 'bottom' | 'hidden') => {
     setPreviewPosition(pos);
     try {
       localStorage.setItem('paircal_preview_position', pos);
@@ -351,20 +351,18 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   const selStampB = activeSelShiftB ? stampMap.get(activeSelShiftB.stampId) : undefined;
   const selEvents = eventsByDate.get(selectedDate) || [];
 
-  // 選択日の大文字プレビューカード（カレンダーの上または下に自由に配置可能）
-  const renderSelectedDatePreviewCard = (pos: 'top' | 'bottom') => {
+  // 選択日の大文字プレビューカード（カレンダーの下部に配置・親指で押しやすい設計）
+  const renderSelectedDatePreviewCard = () => {
     if (!selectedCell || previewPosition === 'hidden') return null;
 
     return (
       <div
         onClick={() => onCellDoubleTap(selectedDate)}
-        className={`${
-          pos === 'top' ? 'mb-2' : 'mt-2.5'
-        } mx-1 sm:mx-0 p-3 rounded-2xl bg-white border-2 border-[#FF8FAB] shadow-sm cursor-pointer hover:bg-[#FFF9FB] transition-all animate-pop`}
+        className="mt-2 mx-0.5 sm:mx-0 p-2.5 sm:p-3 rounded-2xl bg-white border border-[#FF8FAB]/60 shadow-sm cursor-pointer hover:bg-[#FFF9FB] transition-all animate-pop"
       >
         <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
-          <div className="font-extrabold text-sm text-stone-800 flex items-center gap-1.5">
-            <span className="px-2 py-0.5 rounded-lg bg-[#FFE5EC] text-[#9E2A47] text-xs font-black">
+          <div className="font-extrabold text-xs sm:text-sm text-stone-800 flex items-center gap-1.5">
+            <span className="px-2 py-0.5 rounded-lg bg-[#FFE5EC] text-[#9E2A47] text-[10px] sm:text-xs font-black">
               選択中
             </span>
             <span>
@@ -374,33 +372,19 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             {selectedCell.holidayName && (
               <span className="text-xs text-rose-500 font-bold">{selectedCell.holidayName}</span>
             )}
+            <span className="text-[11px] text-stone-500 font-bold ml-1">
+              (予定 {selEvents.length}件)
+            </span>
           </div>
 
           <div className="flex items-center gap-1">
-            {/* 上/下 切替ボタン */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSetPreviewPosition(previewPosition === 'top' ? 'bottom' : 'top');
-              }}
-              className="px-2 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-black transition-colors"
-              title={previewPosition === 'top' ? 'カレンダーの下に表示' : 'カレンダーの上に表示'}
-            >
-              {previewPosition === 'top' ? '⬇️ 下に移動' : '⬆️ 上に移動'}
-            </button>
-
-            <span className="px-2 py-1 rounded-xl bg-stone-100 text-stone-700 text-xs font-extrabold">
-              📋 全{selEvents.length}件
-            </span>
-
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onQuickAddForSelectedDate();
               }}
-              className="px-2.5 py-1 rounded-xl bg-[#FF8FAB] text-white text-xs font-extrabold shadow-2xs hover:bg-[#FF758F]"
+              className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#FF758F] text-white text-xs font-extrabold shadow-2xs hover:opacity-90 active:scale-95"
             >
               ＋ 予定追加
             </button>
@@ -412,7 +396,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 handleSetPreviewPosition('hidden');
               }}
               className="p-1 rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100"
-              title="詳細プレビューを非表示にする"
+              title="プレビューを非表示にする"
             >
               <X className="w-4 h-4" />
             </button>
@@ -567,81 +551,40 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         stampModeActive ? 'pb-72' : 'pb-28'
       }`}
     >
-      {/* スマホ専用：7列カレンダー ⇔ 縦1列くっきりリスト 1タップ切替バー ＆ 凡例 */}
-      <div className="flex items-center justify-between gap-1 px-1.5 mb-1.5 sm:hidden">
-        <div className="flex items-center gap-1.5 text-[10px] font-extrabold text-stone-500">
-          <span className="px-1.5 py-0.5 rounded bg-[#E2F9FC] text-[#126875]">
-            左:{partnerA.avatar}{partnerA.name}
+      {/* カレンダー上部スリムバー（左：凡例 右：7列マス目 ⇔ 縦1列リスト切替） */}
+      <div className="flex items-center justify-between px-1 py-1 mb-1 text-[10px] font-extrabold text-stone-500">
+        <div className="flex items-center gap-1.5">
+          <span className="px-1.5 py-0.5 rounded-md bg-[#E2F9FC] text-[#126875]">
+            左: {partnerA.avatar}{partnerA.name}
           </span>
-          <span className="px-1.5 py-0.5 rounded bg-[#F3EAFF] text-[#6638A6]">
-            右:{partnerB.avatar}{partnerB.name}
+          <span className="px-1.5 py-0.5 rounded-md bg-[#F3EAFF] text-[#6638A6]">
+            右: {partnerB.avatar}{partnerB.name}
           </span>
         </div>
 
-        <div className="flex items-center bg-stone-200/70 p-0.5 rounded-xl text-[11px] font-extrabold">
+        <div className="flex items-center bg-stone-100 p-0.5 rounded-lg text-[10px] font-extrabold">
           <button
             type="button"
             onClick={() => setMobileLayout('grid')}
-            className={`px-2.5 py-1 rounded-lg transition-all ${
+            className={`px-2 py-0.5 rounded-md transition-all ${
               mobileLayout === 'grid'
                 ? 'bg-white text-[#9E2A47] shadow-2xs'
-                : 'text-stone-600'
+                : 'text-stone-500 hover:text-stone-700'
             }`}
           >
-            📅 7列マス目
+            📅 マス目
           </button>
           <button
             type="button"
             onClick={() => setMobileLayout('list')}
-            className={`px-2.5 py-1 rounded-lg transition-all ${
+            className={`px-2 py-0.5 rounded-md transition-all sm:hidden ${
               mobileLayout === 'list'
                 ? 'bg-white text-[#9E2A47] shadow-2xs'
-                : 'text-stone-600'
+                : 'text-stone-500 hover:text-stone-700'
             }`}
           >
-            📋 縦1列(大文字)
+            📋 リスト
           </button>
-        </div>
-      </div>
-
-      {/* 操作ガイドバー（日付タップ・詳細カード位置「⬆️ 上 / ⬇️ 下」切り替え） */}
-      <div className="mx-1 sm:mx-0 mb-2 px-3 py-1.5 rounded-2xl bg-gradient-to-r from-[#FFF5F8] to-[#FBF7FF] border border-pink-200/80 shadow-2xs flex items-center justify-between text-xs font-bold text-stone-700 gap-2 flex-wrap">
-        <div className="flex items-center gap-1.5 text-stone-700">
-          <span className="text-sm">👆</span>
-          <span className="text-[11px] sm:text-xs font-extrabold text-[#9E2A47]">
-            タップで日付選択（ダブルタップで全予定一覧）
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 bg-white/90 px-2.5 py-1 rounded-xl border border-pink-200 shadow-2xs">
-          <span className="text-[11px] font-black text-stone-600">詳細の位置:</span>
-          <div className="inline-flex rounded-lg bg-stone-100 p-0.5">
-            <button
-              type="button"
-              onClick={() => handleSetPreviewPosition('top')}
-              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all flex items-center gap-0.5 ${
-                previewPosition === 'top'
-                  ? 'bg-gradient-to-r from-[#FF8FAB] to-[#FF758F] text-white shadow-xs'
-                  : 'text-stone-600 hover:text-stone-900'
-              }`}
-              title="選択日の詳細カードをカレンダーの上に表示"
-            >
-              <span>⬆️</span>
-              <span>上</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSetPreviewPosition('bottom')}
-              className={`px-2 py-0.5 rounded-md text-[11px] font-black transition-all flex items-center gap-0.5 ${
-                previewPosition === 'bottom'
-                  ? 'bg-gradient-to-r from-[#FF8FAB] to-[#FF758F] text-white shadow-xs'
-                  : 'text-stone-600 hover:text-stone-900'
-              }`}
-              title="選択日の詳細カードをカレンダーの下に表示"
-            >
-              <span>⬇️</span>
-              <span>下</span>
-            </button>
-          </div>
         </div>
       </div>
 
@@ -845,9 +788,6 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
 
       {/* 📅 7列月間カレンダーグリッド（PCでは常時表示、スマホでは 'grid' 選択時に表示） */}
       <div className={mobileLayout === 'list' ? 'hidden sm:block' : 'block'}>
-        {/* 上部配置の場合の選択日プレビューカード */}
-        {previewPosition === 'top' && renderSelectedDatePreviewCard('top')}
-
         {/* 曜日ヘッダー */}
         <div className="grid grid-cols-7 gap-[1.5px] sm:gap-1.5 mb-1">
           {weekDays.map((w) => (
@@ -899,7 +839,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 onClick={() => handleDateCellTap(cell.dateStr)}
                 onDoubleClick={() => triggerDoubleTap(cell.dateStr)}
                 className={`group relative flex flex-col rounded-lg sm:rounded-2xl border transition-all cursor-pointer select-none overflow-hidden ${
-                  isExpandedView ? 'min-h-[118px] sm:min-h-[146px]' : 'min-h-[112px] sm:min-h-[136px]'
+                  isExpandedView ? 'min-h-[105px] sm:min-h-[136px]' : 'min-h-[82px] sm:min-h-[118px]'
                 } ${
                   !cell.isCurrentMonth ? 'opacity-40 bg-stone-50/70' : 'bg-white'
                 } ${
@@ -1027,23 +967,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
         </div>
 
         {/* 下部配置の場合の選択日プレビューカード */}
-        {previewPosition === 'bottom' && renderSelectedDatePreviewCard('bottom')}
+        {previewPosition === 'bottom' && renderSelectedDatePreviewCard()}
       </div>
-
-      {/* ➕ 右下フローティング「＋」ボタン（シフト入力ドロワーが開いている時は重ならないよう非表示） */}
-      {!stampModeActive && (
-        <button
-          type="button"
-          onClick={onQuickAddForSelectedDate}
-          title="選択中の日に予定・タスクを追加"
-          className="fixed right-4 bottom-20 z-30 flex items-center gap-1.5 px-4 py-3.5 rounded-full bg-gradient-to-tr from-[#FF8FAB] to-[#B388EB] text-white font-black shadow-xl hover:scale-105 active:scale-95 transition-all border-2 border-white"
-        >
-          <span className="text-xl leading-none">＋</span>
-          <span className="text-xs">
-            {selectedCell ? `${month}/${selectedCell.dayNumber}に予定追加` : '予定追加'}
-          </span>
-        </button>
-      )}
     </div>
   );
 };
