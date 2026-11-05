@@ -505,15 +505,29 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 <div
                   key={ev.id}
                   style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5 ${
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center justify-between gap-1.5 ${
                     ev.isTask && ev.isCompleted ? 'opacity-65 line-through' : ''
-                  }`}
+                  } ${isNewFromPartner(ev.updatedAt, ev.createdBy) ? 'ring-2 ring-rose-400 shadow-xs' : ''}`}
                 >
-                  <span className="shrink-0">
-                    {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
-                  </span>
-                  {!ev.isAllDay && ev.startTime && <span className="shrink-0">{ev.startTime}</span>}
-                  <span className="truncate whitespace-nowrap overflow-hidden flex-1">{ev.title}</span>
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span className="shrink-0">
+                      {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
+                    </span>
+                    {isNewFromPartner(ev.updatedAt, ev.createdBy) && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black shrink-0 animate-pulse">
+                        🆕 新着
+                      </span>
+                    )}
+                    {!ev.isAllDay && ev.startTime && <span className="shrink-0 text-stone-700">{ev.startTime}</span>}
+                    <span className="truncate whitespace-nowrap overflow-hidden flex-1">{ev.title}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0 text-[10px] font-bold opacity-85">
+                    <span>
+                      {(ev.createdBy === 'partnerB' ? partnerB : partnerA).avatar}
+                      {(ev.createdBy === 'partnerB' ? partnerB : partnerA).name}が登録
+                    </span>
+                  </div>
                 </div>
               );
             })}
@@ -747,6 +761,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                           store.categories,
                           store.metadata
                         );
+                        const isFromOther = ev.createdBy === otherPartnerId;
+                        const unreadForMe = isNewFromPartner(ev.updatedAt, ev.createdBy);
                         return (
                           <div
                             key={ev.id}
@@ -762,6 +778,16 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                             <span className="text-[10px] opacity-85 shrink-0">
                               {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
                             </span>
+                            {isFromOther && (
+                              <span className="text-xs shrink-0" title={`${otherPartner.name}が登録`}>
+                                {otherPartner.avatar}
+                              </span>
+                            )}
+                            {unreadForMe && (
+                              <span className="px-1 py-0.2 rounded bg-rose-500 text-white text-[9px] font-black shrink-0 animate-pulse">
+                                🆕
+                              </span>
+                            )}
                             {!ev.isAllDay && ev.startTime && (
                               <span className="text-[11px] font-black shrink-0">
                                 {ev.startTime}
@@ -928,18 +954,30 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                         }`}
                       >
                         <div className="flex items-center justify-between gap-0.5 min-w-0">
-                          <div className="min-w-0 flex-1 truncate whitespace-nowrap overflow-hidden">
+                          <div className="min-w-0 flex-1 truncate whitespace-nowrap overflow-hidden flex items-center">
                             {ev.isTask && (
-                              <span className="mr-0.5 text-[9px]">
+                              <span className="mr-0.5 text-[9px] shrink-0">
                                 {ev.isCompleted ? '✅' : '⬜'}
                               </span>
                             )}
+                            {/* 相手が打った予定には相手のアバターアイコンを表示 */}
+                            {ev.createdBy === otherPartnerId && (
+                              <span className="mr-0.5 text-[8.5px] sm:text-[9.5px] shrink-0" title={`${otherPartner.name}が登録`}>
+                                {otherPartner.avatar}
+                              </span>
+                            )}
+                            {/* 自分が未確認の新着予定には 🆕 バッジを表示 */}
+                            {unreadForMe && (
+                              <span className="mr-0.5 px-0.5 py-0.1 rounded-xs bg-rose-500 text-white text-[7.5px] sm:text-[8px] font-black shrink-0 animate-pulse">
+                                🆕
+                              </span>
+                            )}
                             {!ev.isAllDay && ev.startTime && (
-                              <span className="hidden sm:inline text-[8px] font-extrabold opacity-80 mr-0.5">
+                              <span className="hidden sm:inline text-[8px] font-extrabold opacity-80 mr-0.5 shrink-0">
                                 {ev.startTime}
                               </span>
                             )}
-                            <span>{ev.title}</span>
+                            <span className="truncate">{ev.title}</span>
                           </div>
 
                           {(unreadForOther || unreadForMe) && (
