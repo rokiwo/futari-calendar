@@ -26,8 +26,8 @@ export const DEFAULT_CATEGORIES: CalendarCategoryItem[] = [
   },
   {
     id: 'partnerA',
-    label: '夫予定',
-    shortLabel: '夫予定',
+    label: 'ゆうと予定',
+    shortLabel: 'ゆうと予定',
     icon: '🐻',
     accentColor: '#56CFE1',
     bgColor: '#E2F9FC',
@@ -639,8 +639,7 @@ export const SHIFT_TIME_PRESETS = [
   { label: '時間なし（休日等）', start: '', end: '' },
   { label: '08:30〜17:30 (日勤)', start: '08:30', end: '17:30' },
   { label: '09:00〜18:00 (定時)', start: '09:00', end: '18:00' },
-  { label: '18:00〜22:00 (夜バイト)', start: '18:00', end: '22:00' },
-  { label: '10:00〜15:00 (昼バイト)', start: '10:00', end: '15:00' },
+  { label: '18:30〜22:00 (夜勤バイト)', start: '18:30', end: '22:00' },
   { label: '16:30〜09:00 (夜勤)', start: '16:30', end: '09:00' },
   { label: '07:00〜16:00 (早番)', start: '07:00', end: '16:00' },
   { label: '11:00〜20:00 (遅番)', start: '11:00', end: '20:00' },
@@ -731,7 +730,7 @@ export function createDefaultMetadata(): CoupleMetadata {
   return {
     partners: {
       partnerA: {
-        name: '夫',
+        name: 'ゆうと',
         avatar: '🐻',
         themeColor: '#56CFE1',
         bgColor: '#E2F9FC',
