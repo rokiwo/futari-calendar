@@ -64,6 +64,7 @@ interface StampDrawerProps {
   onOpenTaskManager?: () => void;
   onOpenShiftExport?: () => void;
   metadata: CoupleMetadata;
+  activePartner?: PartnerId;
 }
 
 export const StampDrawer: React.FC<StampDrawerProps> = ({
@@ -92,12 +93,13 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   onOpenTaskManager,
   onOpenShiftExport,
   metadata,
+  activePartner = 'partnerA',
 }) => {
   const partnerA = metadata.partners.partnerA;
   const partnerB = metadata.partners.partnerB;
 
   const currentShiftPartner: PartnerId =
-    activeTab === 'partnerB_shift' ? 'partnerB' : 'partnerA';
+    activePartner || (activeTab === 'partnerB_shift' ? 'partnerB' : 'partnerA');
 
   const shiftStamps = getPartnerShiftStamps(stamps, currentShiftPartner);
 
@@ -267,45 +269,36 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
           <span>💡 カレンダーの数字をタップするとその日へ移動し、下のボタンでシフトが入ります</span>
         </div>
 
-        {/* 2. 対象切替タブ：[🐻夫のシフト] [🐰妻のシフト] [🍳ごはん・お迎え目印] */}
-        <div className="grid grid-cols-3 gap-1 bg-[#FFFBF7] p-1 rounded-2xl border border-stone-200/70">
+        {/* 2. 対象切替タブ（ユーザー要望：「夫として操作中は妻の方のシフト操作UIいらない」ため、操作中パートナー＋ごはんタブで構成） */}
+        <div className="grid grid-cols-2 gap-1.5 bg-[#FFFBF7] p-1 rounded-2xl border border-stone-200/70">
           <button
             type="button"
-            onClick={() => onChangeTab('partnerA_shift')}
-            className={`py-1.5 px-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1 ${
-              activeTab === 'partnerA_shift'
-                ? 'bg-[#56CFE1] text-white shadow-sm'
+            onClick={() => onChangeTab(activePartner === 'partnerB' ? 'partnerB_shift' : 'partnerA_shift')}
+            className={`py-1.5 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+              activeTab !== 'support_badge'
+                ? activePartner === 'partnerB'
+                  ? 'bg-[#B388EB] text-white shadow-sm'
+                  : 'bg-[#56CFE1] text-white shadow-sm'
                 : 'text-stone-600 hover:bg-white'
             }`}
           >
-            <span>{partnerA.avatar}</span>
-            <span className="truncate">{partnerA.name}のシフト</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onChangeTab('partnerB_shift')}
-            className={`py-1.5 px-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1 ${
-              activeTab === 'partnerB_shift'
-                ? 'bg-[#B388EB] text-white shadow-sm'
-                : 'text-stone-600 hover:bg-white'
-            }`}
-          >
-            <span>{partnerB.avatar}</span>
-            <span className="truncate">{partnerB.name}のシフト</span>
+            <span>{activePartner === 'partnerB' ? partnerB.avatar : partnerA.avatar}</span>
+            <span className="truncate">
+              {activePartner === 'partnerB' ? partnerB.name : partnerA.name}のシフト入力
+            </span>
           </button>
 
           <button
             type="button"
             onClick={() => onChangeTab('support_badge')}
-            className={`py-1.5 px-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1 ${
+            className={`py-1.5 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
               activeTab === 'support_badge'
                 ? 'bg-[#FFB703] text-stone-900 shadow-sm'
                 : 'text-stone-600 hover:bg-white'
             }`}
           >
             <span>🍳</span>
-            <span className="truncate">ごはん・家事</span>
+            <span className="truncate">ごはん・家事目印</span>
           </button>
         </div>
 
@@ -394,18 +387,19 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                   onClick={() =>
                     onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
                       subStampId: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'shift_part',
-                      subCustomLabel: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'バイト',
+                      subCustomLabel: currentShiftOnSelectedDate?.subCustomLabel ? undefined : '夜勤バイト',
                       subStartTime: '18:30',
                       subEndTime: '22:00',
                     })
                   }
-                  className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 ${
+                  className={`px-2.5 py-1 rounded-lg font-black border shrink-0 transition-all ${
                     currentShiftOnSelectedDate?.subCustomLabel
-                      ? 'bg-[#FFF3D6] border-[#FFB703] text-[#996300]'
-                      : 'bg-[#FFFBF7] border-stone-200 text-stone-600'
+                      ? 'bg-amber-300 border-amber-400 text-stone-900 shadow-2xs'
+                      : 'bg-[#FFFBF7] border-stone-200 text-stone-600 hover:bg-amber-50'
                   }`}
+                  title="仕事終わりの夜勤バイトを1タップで追加（カレンダーに夜バと表示されます）"
                 >
-                  ＋🏪バイト
+                  {currentShiftOnSelectedDate?.subCustomLabel ? '🌙夜勤バイト中' : '＋🌙夜勤バイト'}
                 </button>
 
                 {/* ⚡ 開始〜終了時刻から自動計算のトグルボタン */}
