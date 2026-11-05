@@ -156,7 +156,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   return (
     <header className="sticky top-0 z-30 bg-[#FFFBF7]/95 backdrop-blur-md border-b border-[#FFE5EC] shadow-xs">
       <div className="max-w-5xl mx-auto px-2 sm:px-4 pt-1.5 pb-1.5 space-y-1.5">
-        {/* 1段目：年月ナビゲーション ＆ アプリツール（合言葉・写真・同期・設定） */}
+        {/* 1段目：年月ナビゲーション ＆ 操作パートナー切替（🐻ゆうと ⇔ 🐰さや） */}
         <div className="flex items-center justify-between gap-1.5 sm:gap-2">
           {/* 左側：年月切替 ＆ 今日 */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
@@ -199,62 +199,40 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </button>
           </div>
 
-          {/* 右側：アプリツール群（合言葉・写真・同期・設定） */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* 🔑 合言葉で共有ボタン（未共有の場合に目立つバッジボタンとして表示） */}
-            {!isShared && onOpenSharedKeywordModal && (
-              <button
-                type="button"
-                onClick={onOpenSharedKeywordModal}
-                className="px-2 py-1 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[10px] sm:text-xs font-black shadow-xs flex items-center gap-1 active:scale-95 animate-pulse"
-                title="合言葉を入力してカレンダーを共有"
-              >
-                <span>🔑</span>
-                <span>合言葉で共有</span>
-              </button>
-            )}
-
-            {/* 📸 写真保存 */}
-            {onOpenShiftExport && (
-              <button
-                type="button"
-                onClick={onOpenShiftExport}
-                className="px-2 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-xs font-black flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
-                title="シフト表を写真(PNG)として保存"
-              >
-                <Camera className="w-3.5 h-3.5 text-[#0284C7]" />
-                <span className="text-xs">写真</span>
-              </button>
-            )}
-
-            {/* 🔄 同期中アイコンまたは手動同期 */}
-            {syncEnabled && (
-              <button
-                type="button"
-                onClick={onTriggerSync}
-                disabled={isSyncing}
-                className="p-1 sm:p-1.5 rounded-xl bg-white border border-stone-200 text-stone-600 active:scale-90 shadow-2xs hover:bg-stone-50"
-                title="クラウド同期"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#FF8FAB]' : ''}`} />
-              </button>
-            )}
-
-            {/* ⚙️ 設定 */}
+          {/* 右側：操作中パートナー切替（🐻ゆうと ⇔ 🐰さや）※1段目にゆったり配置して他と絶対に被らない！ */}
+          <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200 shadow-2xs shrink-0">
             <button
               type="button"
-              onClick={onOpenSettings}
-              className="p-1 sm:p-1.5 rounded-xl bg-white border border-stone-200 text-stone-700 active:scale-90 shadow-2xs hover:bg-stone-50"
-              title="設定・クラウド同期・iCal連携"
+              onClick={() => onToggleActivePartner('partnerA')}
+              className={`px-2 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black transition-all flex items-center gap-0.5 ${
+                activePartner === 'partnerA'
+                  ? 'bg-[#56CFE1] text-white shadow-xs'
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+              title={`${partnerA.name}として操作`}
             >
-              <Settings className="w-3.5 h-3.5 text-[#FF8FAB]" />
+              <span>{partnerA.avatar}</span>
+              <span>{partnerA.name}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleActivePartner('partnerB')}
+              className={`px-2 py-1 sm:px-2.5 sm:py-1 rounded-lg text-xs font-black transition-all flex items-center gap-0.5 ${
+                activePartner === 'partnerB'
+                  ? 'bg-[#B388EB] text-white shadow-xs'
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+              title={`${partnerB.name}として操作`}
+            >
+              <span>{partnerB.avatar}</span>
+              <span>{partnerB.name}</span>
             </button>
           </div>
         </div>
 
-        {/* 2段目：ふたりのステータス ＆ 操作切り替え（残業時間・休一致 ＆ 操作パートナー・既読） */}
+        {/* 2段目：ふたりの集計（残業時間・休一致）＆ アプリツール（写真・同期・設定） */}
         <div className="flex items-center justify-between gap-1 sm:gap-2">
-          {/* 左側：⏱️残業時間 ＆ ✨休一致（絶対に重ならず、タップしやすい独立スペース！） */}
+          {/* 左側：⏱️残業時間 ＆ ✨休一致（広々と配置され、右側はツールアイコンのみなので絶対に被らない！） */}
           <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
             {/* ⏱️ 今月の残業時間バッジ */}
             <div className="relative shrink-0">
@@ -423,53 +401,55 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </div>
           </div>
 
-          {/* 右側：操作中パートナー切替 ＆ 既読確認 */}
+          {/* 右側：アプリツール群（未読表示は撤去、写真・同期・合言葉・設定のみ配置） */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* 操作中パートナー切替（🐻ゆうと ⇔ 🐰さや） */}
-            <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200 shadow-2xs">
+            {/* 🔑 合言葉で共有ボタン（未共有の場合に目立つバッジボタンとして表示） */}
+            {!isShared && onOpenSharedKeywordModal && (
               <button
                 type="button"
-                onClick={() => onToggleActivePartner('partnerA')}
-                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-black transition-all flex items-center gap-0.5 ${
-                  activePartner === 'partnerA'
-                    ? 'bg-[#56CFE1] text-white shadow-xs'
-                    : 'text-stone-500 hover:text-stone-700'
-                }`}
-                title={`${partnerA.name}として操作`}
+                onClick={onOpenSharedKeywordModal}
+                className="px-2 py-1 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[10px] sm:text-xs font-black shadow-xs flex items-center gap-1 active:scale-95 animate-pulse"
+                title="合言葉を入力してカレンダーを共有"
               >
-                <span>{partnerA.avatar}</span>
-                <span>{partnerA.name}</span>
+                <span>🔑</span>
+                <span>共有</span>
               </button>
-              <button
-                type="button"
-                onClick={() => onToggleActivePartner('partnerB')}
-                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-black transition-all flex items-center gap-0.5 ${
-                  activePartner === 'partnerB'
-                    ? 'bg-[#B388EB] text-white shadow-xs'
-                    : 'text-stone-500 hover:text-stone-700'
-                }`}
-                title={`${partnerB.name}として操作`}
-              >
-                <span>{partnerB.avatar}</span>
-                <span>{partnerB.name}</span>
-              </button>
-            </div>
+            )}
 
-            {/* 既読確認ボタン */}
+            {/* 📸 写真保存 */}
+            {onOpenShiftExport && (
+              <button
+                type="button"
+                onClick={onOpenShiftExport}
+                className="px-2 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#126875] hover:text-white border border-[#A9E9F2] text-xs font-black flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
+                title="シフト表を写真(PNG)として保存"
+              >
+                <Camera className="w-3.5 h-3.5 text-[#0284C7]" />
+                <span className="text-xs">写真</span>
+              </button>
+            )}
+
+            {/* 🔄 同期中アイコンまたは手動同期 */}
+            {syncEnabled && (
+              <button
+                type="button"
+                onClick={onTriggerSync}
+                disabled={isSyncing}
+                className="p-1 sm:p-1.5 rounded-xl bg-white border border-stone-200 text-stone-600 active:scale-90 shadow-2xs hover:bg-stone-50"
+                title="クラウド同期"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#FF8FAB]' : ''}`} />
+              </button>
+            )}
+
+            {/* ⚙️ 設定 */}
             <button
               type="button"
-              onClick={onMarkSeenNow}
-              className="flex items-center gap-0.5 px-2 py-1 rounded-xl bg-white border border-stone-200/90 text-stone-700 text-xs font-bold shadow-2xs active:scale-95 hover:bg-stone-50"
-              title={`相手の確認: ${formatLastSeen(otherPartner.lastSeenAt)}（タップで既読更新）`}
+              onClick={onOpenSettings}
+              className="p-1 sm:p-1.5 rounded-xl bg-white border border-stone-200 text-stone-700 active:scale-90 shadow-2xs hover:bg-stone-50"
+              title="設定・クラウド同期・iCal連携"
             >
-              <span>{otherPartner.avatar}</span>
-              {unreadCountForPartner > 0 ? (
-                <span className="px-1.5 py-0.2 rounded-full bg-[#FFE5EC] text-[#D63864] font-black text-[10px]">
-                  未{unreadCountForPartner}
-                </span>
-              ) : (
-                <CheckCircle2 className="w-3.5 h-3.5 text-[#52B788]" />
-              )}
+              <Settings className="w-3.5 h-3.5 text-[#FF8FAB]" />
             </button>
           </div>
         </div>
