@@ -301,7 +301,7 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
         return fallbackColor || '#37474F';
       };
 
-      // ──【モード1: ゆうとのみ または さやのみ】（添付写真のようにマス全体に特大描画！）──
+      // ──【モード1: ゆうとのみ または さやのみ】（シフト文字位置固定で波打ち解消＆夜バ・残業・休出を拡大表示）──
       if (exportMode === 'partnerA' || exportMode === 'partnerB') {
         const isPartnerA = exportMode === 'partnerA';
         const label = isPartnerA ? labelA : labelB;
@@ -313,53 +313,98 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
           const hasSub = Boolean(shift?.subCustomLabel || shift?.subStampId);
           const otMin = getShiftOvertimeMinutes(shift);
           const hwMin = getShiftHolidayWorkMinutes(shift);
-          const hasExtra = hasSub || otMin > 0 || hwMin > 0;
 
-          // シフトテキスト（マス目の中央にドーンと大きく！）
+          // シフトテキスト（波打ち防止：バイトや残業の有無に関係なくY座標を完全に固定！）
           ctx.fillStyle = shiftColor;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
-          // 文字数に応じてフォントサイズを自動調整
-          const fontSize = label.length <= 2 ? 38 : label.length <= 3 ? 32 : 26;
+          // 文字数に応じたフォントサイズ
+          const fontSize = label.length <= 2 ? 40 : label.length <= 3 ? 33 : 26;
           ctx.font = `900 ${fontSize}px "Zen Maru Gothic", "M PLUS Rounded 1c", sans-serif`;
 
-          // 夜勤バイトや残業がある場合は少し上に配置し、下に綺麗に並べる
-          const shiftCenterY = hasExtra ? y + cellHeight * 0.44 : y + cellHeight * 0.58;
+          // メインシフト位置：常にマス目の高さ45%（y + 72）に水平一直線で固定！
+          const shiftCenterY = y + 72;
           ctx.fillText(label, x + cellWidth / 2, shiftCenterY);
 
-          // 勤務の「下」に夜勤バイト（夜バ）と残業を配置
-          let extraY = shiftCenterY + 28;
+          // 勤務の「下」のエリア（y + 118）に夜勤バイト（夜バ）と残業・休日出勤を大きく記載
+          const extraY = y + 120;
+          const badges: { text: string; bg: string; color: string; width: number }[] = [];
 
-          // 夜勤バイトバッジ（夜バ）
           if (hasSub) {
-            ctx.fillStyle = '#FFC107'; // アンバー
-            ctx.beginPath();
-            const badgeW = 44;
-            const badgeH = 18;
-            const bx = x + cellWidth / 2 - badgeW / 2;
-            const by = extraY - badgeH / 2;
-            ctx.roundRect ? ctx.roundRect(bx, by, badgeW, badgeH, 4) : ctx.rect(bx, by, badgeW, badgeH);
-            ctx.fill();
-
-            ctx.fillStyle = '#212121';
-            ctx.font = '900 11px "Zen Maru Gothic", sans-serif';
-            ctx.fillText('夜バ', x + cellWidth / 2, extraY);
-
-            extraY += 20;
+            badges.push({
+              text: '夜バ',
+              bg: '#FFC107', // アンバー
+              color: '#212121',
+              width: 56,
+            });
           }
 
-          // 残業・休出バッジ（+残○○）
-          if (otMin > 0 || hwMin > 0) {
-            ctx.fillStyle = '#D32F2F';
-            ctx.font = '900 13px "Zen Maru Gothic", sans-serif';
-            const extraTxt = hwMin > 0 ? `休出${formatMinutesShort(hwMin)}` : `+残${formatMinutesShort(otMin)}`;
-            ctx.fillText(extraTxt, x + cellWidth / 2, extraY);
+          if (hwMin > 0) {
+            // 休日出勤（オレンジ赤バッジではっきりと区別）
+            badges.push({
+              text: `休出${formatMinutesShort(hwMin)}`,
+              bg: '#E65100', // 濃いオレンジ
+              color: '#FFFFFF',
+              width: 66,
+            });
+          } else if (otMin > 0) {
+            // 通常残業（鮮やかな赤バッジ）
+            badges.push({
+              text: `残+${formatMinutesShort(otMin)}`,
+              bg: '#D32F2F', // 赤
+              color: '#FFFFFF',
+              width: 66,
+            });
+          }
+
+          if (badges.length === 1) {
+            // 1つの場合：中央に大きく配置（フォント16px, 高さ26px）
+            const b = badges[0];
+            const badgeW = Math.max(b.width + 10, 68);
+            const badgeH = 26;
+            const bx = x + cellWidth / 2 - badgeW / 2;
+            const by = extraY - badgeH / 2;
+
+            ctx.fillStyle = b.bg;
+            ctx.beginPath();
+            ctx.roundRect ? ctx.roundRect(bx, by, badgeW, badgeH, 6) : ctx.rect(bx, by, badgeW, badgeH);
+            ctx.fill();
+
+            ctx.fillStyle = b.color;
+            ctx.font = '900 16px "Zen Maru Gothic", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(b.text, x + cellWidth / 2, extraY);
+          } else if (badges.length >= 2) {
+            // 2つの場合：横並びに大きく配置（各フォント14px, 高さ24px）
+            const badgeH = 24;
+            const gap = 5;
+            const totalW = badges[0].width + badges[1].width + gap;
+            let currentX = x + cellWidth / 2 - totalW / 2;
+
+            for (const b of badges) {
+              const bx = currentX;
+              const by = extraY - badgeH / 2;
+
+              ctx.fillStyle = b.bg;
+              ctx.beginPath();
+              ctx.roundRect ? ctx.roundRect(bx, by, b.width, badgeH, 5) : ctx.rect(bx, by, b.width, badgeH);
+              ctx.fill();
+
+              ctx.fillStyle = b.color;
+              ctx.font = '900 14px "Zen Maru Gothic", sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(b.text, bx + b.width / 2, extraY);
+
+              currentX += b.width + gap;
+            }
           }
         }
       }
 
-      // ──【モード2: 2人両方】（上段にゆうと、下段にさやをそれぞれ配置！）──
+      // ──【モード2: 2人両方】（上段にゆうと、下段にさやを波打ちゼロで固定配置！）──
       else {
         const hasA = Boolean(labelA);
         const hasB = Boolean(labelB);
@@ -374,101 +419,111 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // 上段：ゆうと（勤務の横ではなく「下」に残業・夜勤バイトを配置）
+        // 上段：ゆうと（位置固定で波打ち解消＆下段に残業・夜勤バイトを拡大配置）
         if (hasA) {
           const colorA = resolveShiftColor(labelA, stampA?.textColor);
           ctx.fillStyle = colorA;
-          const fontSizeA = labelA.length <= 2 ? 26 : 22;
+          const fontSizeA = labelA.length <= 2 ? 28 : 22;
           ctx.font = `900 ${fontSizeA}px "Zen Maru Gothic", sans-serif`;
 
-          const yA = y + cellHeight * 0.36;
+          // メインシフトY位置固定（波打ちゼロ）
+          const yA = y + 52;
           ctx.fillText(`${labelA}`, x + cellWidth / 2 + 10, yA);
 
           // 左横に夫のアバターアイコン
-          ctx.font = '700 13px sans-serif';
+          ctx.font = '700 15px sans-serif';
           ctx.fillStyle = '#56CFE1';
           ctx.fillText(partnerA.avatar, x + 18, yA);
 
-          // 勤務の「下」に残業・夜勤バイトを配置
+          // 勤務の「下」に残業・休日出勤・夜勤バイトを配置
           const subA = Boolean(actA?.subCustomLabel || actA?.subStampId);
           const otMinA = getShiftOvertimeMinutes(actA);
           const hwMinA = getShiftHolidayWorkMinutes(actA);
 
           if (subA || otMinA > 0 || hwMinA > 0) {
-            const subYA = yA + 19;
-            const badges: { text: string; bg?: string; color: string }[] = [];
-            if (subA) badges.push({ text: '夜バ', bg: '#FFC107', color: '#212121' });
-            if (hwMinA > 0) badges.push({ text: `休${formatMinutesShort(hwMinA)}`, bg: '#D32F2F', color: '#FFFFFF' });
-            else if (otMinA > 0) badges.push({ text: `残${formatMinutesShort(otMinA)}`, bg: '#D32F2F', color: '#FFFFFF' });
+            const subYA = yA + 23;
+            const badges: { text: string; bg: string; color: string; width: number }[] = [];
+            if (subA) badges.push({ text: '夜バ', bg: '#FFC107', color: '#212121', width: 38 });
+            if (hwMinA > 0) badges.push({ text: `休出${formatMinutesShort(hwMinA)}`, bg: '#E65100', color: '#FFFFFF', width: 48 });
+            else if (otMinA > 0) badges.push({ text: `残+${formatMinutesShort(otMinA)}`, bg: '#D32F2F', color: '#FFFFFF', width: 48 });
 
-            let badgeStartX = x + cellWidth / 2 + 10 - ((badges.length - 1) * 22);
+            const gap = 4;
+            const totalW = badges.reduce((acc, b) => acc + b.width, 0) + (badges.length - 1) * gap;
+            let currentX = x + cellWidth / 2 + 10 - totalW / 2;
+
             for (const b of badges) {
-              if (b.bg) {
-                ctx.fillStyle = b.bg;
-                const bWidth = b.text.length > 2 ? 38 : 28;
-                const bHeight = 15;
-                const bx = badgeStartX - bWidth / 2;
-                const by = subYA - bHeight / 2;
-                ctx.roundRect ? ctx.roundRect(bx, by, bWidth, bHeight, 3) : ctx.rect(bx, by, bWidth, bHeight);
-                ctx.fill();
-              }
+              const bHeight = 19;
+              const bx = currentX;
+              const by = subYA - bHeight / 2;
+
+              ctx.fillStyle = b.bg;
+              ctx.beginPath();
+              ctx.roundRect ? ctx.roundRect(bx, by, b.width, bHeight, 4) : ctx.rect(bx, by, b.width, bHeight);
+              ctx.fill();
+
               ctx.fillStyle = b.color;
-              ctx.font = '900 10px "Zen Maru Gothic", sans-serif';
-              ctx.fillText(b.text, badgeStartX, subYA);
-              badgeStartX += 36;
+              ctx.font = '900 12px "Zen Maru Gothic", sans-serif';
+              ctx.fillText(b.text, bx + b.width / 2, subYA);
+
+              currentX += b.width + gap;
             }
           }
         }
 
-        // 下段：さや（勤務の横ではなく「下」に残業・夜勤バイトを配置）
+        // 下段：さや（位置固定で波打ち解消＆下段に残業・夜勤バイトを拡大配置）
         if (hasB) {
           const colorB = resolveShiftColor(labelB, stampB?.textColor);
           ctx.fillStyle = colorB;
-          const fontSizeB = labelB.length <= 2 ? 26 : 22;
+          const fontSizeB = labelB.length <= 2 ? 28 : 22;
           ctx.font = `900 ${fontSizeB}px "Zen Maru Gothic", sans-serif`;
 
-          const yB = y + cellHeight * 0.72;
+          // メインシフトY位置固定（波打ちゼロ）
+          const yB = y + 120;
           ctx.fillText(`${labelB}`, x + cellWidth / 2 + 10, yB);
 
           // 左横に妻のアバターアイコン
-          ctx.font = '700 13px sans-serif';
+          ctx.font = '700 15px sans-serif';
           ctx.fillStyle = '#B388EB';
           ctx.fillText(partnerB.avatar, x + 18, yB);
 
-          // 勤務の「下」に残業・夜勤バイトを配置
+          // 勤務の「下」に残業・休日出勤・夜勤バイトを配置
           const subB = Boolean(actB?.subCustomLabel || actB?.subStampId);
           const otMinB = getShiftOvertimeMinutes(actB);
           const hwMinB = getShiftHolidayWorkMinutes(actB);
 
           if (subB || otMinB > 0 || hwMinB > 0) {
-            const subYB = yB + 19;
-            const badges: { text: string; bg?: string; color: string }[] = [];
-            if (subB) badges.push({ text: '夜バ', bg: '#FFC107', color: '#212121' });
-            if (hwMinB > 0) badges.push({ text: `休${formatMinutesShort(hwMinB)}`, bg: '#D32F2F', color: '#FFFFFF' });
-            else if (otMinB > 0) badges.push({ text: `残${formatMinutesShort(otMinB)}`, bg: '#D32F2F', color: '#FFFFFF' });
+            const subYB = yB + 23;
+            const badges: { text: string; bg: string; color: string; width: number }[] = [];
+            if (subB) badges.push({ text: '夜バ', bg: '#FFC107', color: '#212121', width: 38 });
+            if (hwMinB > 0) badges.push({ text: `休出${formatMinutesShort(hwMinB)}`, bg: '#E65100', color: '#FFFFFF', width: 48 });
+            else if (otMinB > 0) badges.push({ text: `残+${formatMinutesShort(otMinB)}`, bg: '#D32F2F', color: '#FFFFFF', width: 48 });
 
-            let badgeStartX = x + cellWidth / 2 + 10 - ((badges.length - 1) * 22);
+            const gap = 4;
+            const totalW = badges.reduce((acc, b) => acc + b.width, 0) + (badges.length - 1) * gap;
+            let currentX = x + cellWidth / 2 + 10 - totalW / 2;
+
             for (const b of badges) {
-              if (b.bg) {
-                ctx.fillStyle = b.bg;
-                const bWidth = b.text.length > 2 ? 38 : 28;
-                const bHeight = 15;
-                const bx = badgeStartX - bWidth / 2;
-                const by = subYB - bHeight / 2;
-                ctx.roundRect ? ctx.roundRect(bx, by, bWidth, bHeight, 3) : ctx.rect(bx, by, bWidth, bHeight);
-                ctx.fill();
-              }
+              const bHeight = 19;
+              const bx = currentX;
+              const by = subYB - bHeight / 2;
+
+              ctx.fillStyle = b.bg;
+              ctx.beginPath();
+              ctx.roundRect ? ctx.roundRect(bx, by, b.width, bHeight, 4) : ctx.rect(bx, by, b.width, bHeight);
+              ctx.fill();
+
               ctx.fillStyle = b.color;
-              ctx.font = '900 10px "Zen Maru Gothic", sans-serif';
-              ctx.fillText(b.text, badgeStartX, subYB);
-              badgeStartX += 36;
+              ctx.font = '900 12px "Zen Maru Gothic", sans-serif';
+              ctx.fillText(b.text, bx + b.width / 2, subYB);
+
+              currentX += b.width + gap;
             }
           }
         }
 
         // 2人とも休みの時の記念ハート
         if (bothHoliday) {
-          ctx.font = '700 13px sans-serif';
+          ctx.font = '700 14px sans-serif';
           ctx.fillStyle = '#E91E63';
           ctx.fillText('💕', x + cellWidth - 16, y + 14);
         }
