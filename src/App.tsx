@@ -27,6 +27,8 @@ import {
   loadLocalStore,
   loadSyncConfig,
   mergeCalendarStores,
+  saveDedicatedWelcomePhoto,
+  loadDedicatedWelcomePhoto,
   saveLocalStore,
   saveSyncConfig,
   setActivePartnerId,
@@ -511,7 +513,18 @@ export const App: React.FC = () => {
             activeSessionPass || undefined
           );
           if (mounted) {
-            setStore(mergedStore);
+            // 📸 クラウドから返ってきた mergedStore に写真が無い場合でもローカルの写真を100%保護
+            const preservedWelcome =
+              nextStore.metadata?.welcomeImageConfig?.dataUrl
+                ? nextStore.metadata.welcomeImageConfig
+                : mergedStore.metadata?.welcomeImageConfig;
+            setStore({
+              ...mergedStore,
+              metadata: {
+                ...mergedStore.metadata,
+                welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+              },
+            });
           }
         } catch {
           // オフライン時はローカルデータを維持
@@ -572,7 +585,17 @@ export const App: React.FC = () => {
         try {
           setIsSyncing(true);
           const { mergedStore } = await syncWithGitHub(stamped, syncConfig, sessionPassword);
-          setStore(mergedStore);
+          const preservedWelcome =
+            stamped.metadata?.welcomeImageConfig?.dataUrl
+              ? stamped.metadata.welcomeImageConfig
+              : mergedStore.metadata?.welcomeImageConfig;
+          setStore({
+            ...mergedStore,
+            metadata: {
+              ...mergedStore.metadata,
+              welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+            },
+          });
         } catch {
           // オフライン時はローカル保存を維持
         } finally {
@@ -1118,7 +1141,17 @@ export const App: React.FC = () => {
       setIsSyncing(true);
       try {
         const { mergedStore, statusMessage } = await syncWithGitHub(store, cfg, pass);
-        setStore(mergedStore);
+        const preservedWelcome =
+          store.metadata?.welcomeImageConfig?.dataUrl
+            ? store.metadata.welcomeImageConfig
+            : mergedStore.metadata?.welcomeImageConfig;
+        setStore({
+          ...mergedStore,
+          metadata: {
+            ...mergedStore.metadata,
+            welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+          },
+        });
         showToast(statusMessage);
       } catch (err) {
         showToast(err instanceof Error ? err.message : '同期エラーが発生しました');
@@ -1135,7 +1168,19 @@ export const App: React.FC = () => {
     if (!isLoaded || !syncConfig.enabled || !syncConfig.githubToken) return;
     const onFocus = () => {
       syncWithGitHub(store, syncConfig, sessionPassword)
-        .then(({ mergedStore }) => setStore(mergedStore))
+        .then(({ mergedStore }) => {
+          const preservedWelcome =
+            store.metadata?.welcomeImageConfig?.dataUrl
+              ? store.metadata.welcomeImageConfig
+              : mergedStore.metadata?.welcomeImageConfig;
+          setStore({
+            ...mergedStore,
+            metadata: {
+              ...mergedStore.metadata,
+              welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+            },
+          });
+        })
         .catch(() => {});
     };
     window.addEventListener('focus', onFocus);
@@ -1528,6 +1573,7 @@ export const App: React.FC = () => {
             });
           }}
           onUpdateWelcomeImageConfig={async (newCfg) => {
+            await saveDedicatedWelcomePhoto(newCfg);
             const nextStore: CalendarDataStore = {
               ...store,
               metadata: {
@@ -1600,6 +1646,7 @@ export const App: React.FC = () => {
             })
           }
           onUpdateConfig={async (newCfg) => {
+            await saveDedicatedWelcomePhoto(newCfg);
             const nextStore: CalendarDataStore = {
               ...store,
               metadata: {
