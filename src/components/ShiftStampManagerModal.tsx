@@ -60,9 +60,9 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
 }) => {
   const [targetPartner, setTargetPartner] = useState<PartnerId>(initialPartnerId);
 
-  const partnerAName = metadata?.partners.partnerA.name || '夫';
+  const partnerAName = metadata?.partners.partnerA.name || 'ゆうと';
   const partnerAAvatar = metadata?.partners.partnerA.avatar || '🐻';
-  const partnerBName = metadata?.partners.partnerB.name || '妻';
+  const partnerBName = metadata?.partners.partnerB.name || 'さや';
   const partnerBAvatar = metadata?.partners.partnerB.avatar || '🐰';
 
   // 現在選択中のパートナーのシフトリスト
