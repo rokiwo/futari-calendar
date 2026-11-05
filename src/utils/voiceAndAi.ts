@@ -188,13 +188,20 @@ export function parseSpokenScheduleText(
     targetDay = dt.getDate();
     text = text.replace(/(明日|あした)の?/g, ' ');
   } else {
-    // 「11月24日」または「24日」
+    // 「11月24日」または「12月 1日」などの月日指定
     const mdMatch = text.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*の?/);
     if (mdMatch) {
       targetMonth = Math.min(12, Math.max(1, Number(mdMatch[1])));
       targetDay = Math.min(31, Math.max(1, Number(mdMatch[2])));
       text = text.replace(mdMatch[0], ' ');
     } else {
+      // 「12月」のみ話した途中段階
+      const mOnlyMatch = text.match(/(?:^|\s)(\d{1,2})\s*月\s*(?!日)/);
+      if (mOnlyMatch) {
+        targetMonth = Math.min(12, Math.max(1, Number(mOnlyMatch[1])));
+        text = text.replace(mOnlyMatch[0], ' ');
+      }
+      // 「1日」のみ
       const dOnlyMatch = text.match(/(?:^|\s)(\d{1,2})\s*日\s*の?/);
       if (dOnlyMatch) {
         targetDay = Math.min(31, Math.max(1, Number(dOnlyMatch[1])));
