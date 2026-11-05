@@ -104,6 +104,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   );
 
   // 新規・編集用フォームステート
+  const [eventDate, setEventDate] = useState<string>(dateStr);
   const [title, setTitle] = useState('');
   const [categoryId, setCategoryId] = useState<CalendarCategoryId>(
     activePartner === 'partnerB' ? 'partnerB' : 'shared'
@@ -118,6 +119,12 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const [endTime, setEndTime] = useState('11:00');
   const [memo, setMemo] = useState('');
   const [eventBadges, setEventBadges] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!editingEventId) {
+      setEventDate(dateStr);
+    }
+  }, [dateStr, editingEventId]);
 
   useEffect(() => {
     if (initialOpenEventForm) {
@@ -229,6 +236,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     mode: 'event' | 'task' = 'event'
   ) => {
     setEditingEventId(null);
+    setEventDate(dateStr);
     setTitle('');
     setFormTabMode(mode);
     const defaultTaskMode = mode === 'task';
@@ -254,6 +262,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
   const handleStartEditEvent = (ev: ScheduleEvent) => {
     setEditingEventId(ev.id);
+    setEventDate(ev.date || dateStr);
     setTitle(ev.title);
     setCategoryId(ev.categoryId);
     const taskFlag = Boolean(ev.isTask);
@@ -284,10 +293,11 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     const nowIso = new Date().toISOString();
     const cat = resolveCategoryInfo(categoryId, store.categories, store.metadata);
     const existing = editingEventId ? store.events[editingEventId] : undefined;
+    const finalDate = (eventDate || dateStr).trim();
 
     const newEvent: ScheduleEvent = {
       id: editingEventId || `ev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      date: dateStr,
+      date: finalDate,
       title: title.trim(),
       categoryId,
       color: cat.accentColor,
@@ -569,6 +579,27 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                           </div>
                         );
                       })()}
+                    </div>
+
+                    {/* 📅 予定の日付（間違えても後からいつでも日程を変更可能！） */}
+                    <div className="flex items-center justify-between gap-2 p-2 rounded-2xl bg-white border border-[#FFE5EC] shadow-2xs">
+                      <span className="text-xs font-black text-stone-700 flex items-center gap-1.5 shrink-0">
+                        <span>📅</span>
+                        <span>予定の日付:</span>
+                      </span>
+                      <div className="flex items-center gap-1.5 flex-1 justify-end">
+                        <input
+                          type="date"
+                          value={eventDate}
+                          onChange={(e) => setEventDate(e.target.value)}
+                          className="px-2.5 py-1 rounded-xl border border-stone-200 bg-[#FFFBF7] text-xs font-black text-stone-800 focus:border-[#FF8FAB] focus:outline-none"
+                        />
+                        {eventDate !== dateStr && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-[#FFE5EC] text-[#D63864] text-[10px] font-black shrink-0 animate-pop">
+                            日付変更
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div>
