@@ -449,7 +449,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             {/* 2段目：夜勤バイト（勤務の下に配置） */}
             {activeSelShiftA?.subCustomLabel && (
               <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
-                🌙夜勤バイト (夜バ)
+                夜バ
               </span>
             )}
 
@@ -495,7 +495,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             {/* 2段目：夜勤バイト（勤務の下に配置） */}
             {activeSelShiftB?.subCustomLabel && (
               <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
-                🌙夜勤バイト (夜バ)
+                夜バ
               </span>
             )}
 
