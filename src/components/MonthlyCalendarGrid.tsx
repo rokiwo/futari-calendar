@@ -13,6 +13,7 @@ import {
   getJapaneseHoliday,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
+  isShiftExtraTentative,
   resolveCategoryInfo,
 } from '../utils/presets';
 
@@ -308,12 +309,24 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           </div>
         )}
 
-        {/* 3段目：残業時間・休日出勤時間のバッジ表示（操作中パートナーのみ・三段配置） */}
-        {showOvertime && (
-          <div className="w-full min-w-0 mt-[1px] px-0.5 rounded-xs bg-rose-500 text-white text-[7px] min-[380px]:text-[8px] sm:text-[8.5px] font-black text-center truncate leading-tight shadow-2xs">
-            {hwMin > 0 ? `休${formatMinutesShort(hwMin)}` : `残${formatMinutesShort(otMin)}`}
-          </div>
-        )}
+        {/* 3段目：残業時間・休日出勤時間のバッジ表示（操作中パートナーのみ・仮予定の時は(仮)表記） */}
+        {showOvertime && (() => {
+          const isTentative = isShiftExtraTentative(shift);
+          const prefix = isTentative ? '仮' : '';
+          return (
+            <div
+              className={`w-full min-w-0 mt-[1px] px-0.5 rounded-xs text-[7px] min-[380px]:text-[8px] sm:text-[8.5px] font-black text-center truncate leading-tight shadow-2xs ${
+                isTentative
+                  ? 'bg-amber-400 text-stone-900 border border-amber-500 font-extrabold'
+                  : 'bg-rose-500 text-white'
+              }`}
+            >
+              {hwMin > 0
+                ? `${prefix}休${formatMinutesShort(hwMin)}`
+                : `${prefix}残${formatMinutesShort(otMin)}`}
+            </div>
+          );
+        })()}
 
         {/* シフト時間常時表示ONの時 */}
         {showShiftTimeInCell &&
