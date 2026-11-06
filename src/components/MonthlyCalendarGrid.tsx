@@ -252,14 +252,18 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   const renderPartnerShiftBox = (
     shift: ShiftEntry | undefined,
     partnerAvatar: string,
-    unreadColorClass: string
+    unreadColorClass: string,
+    boxPartnerId?: PartnerId
   ) => {
     const stamp = shift ? stampMap.get(shift.stampId) : undefined;
     const subStamp = shift?.subStampId ? stampMap.get(shift.subStampId) : undefined;
     const hasSubWork = Boolean(shift?.subCustomLabel || subStamp);
     const otMin = getShiftOvertimeMinutes(shift);
     const hwMin = getShiftHolidayWorkMinutes(shift);
-    const hasExtra = hasSubWork || otMin > 0 || hwMin > 0;
+    // 操作しているパートナー（activePartner）のみ残業時間を表示（さや操作中はゆうとの残業を非表示）
+    const isTargetPartner = boxPartnerId ? boxPartnerId === activePartner : shift?.partnerId === activePartner;
+    const showOvertime = isTargetPartner && (otMin > 0 || hwMin > 0);
+    const hasExtra = hasSubWork || showOvertime;
 
     const timeInfo =
       shift?.startTime || stamp?.startTime
@@ -304,8 +308,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           </div>
         )}
 
-        {/* 3段目：残業時間・休日出勤時間のバッジ表示（分単位対応・三段配置） */}
-        {(otMin > 0 || hwMin > 0) && (
+        {/* 3段目：残業時間・休日出勤時間のバッジ表示（操作中パートナーのみ・三段配置） */}
+        {showOvertime && (
           <div className="w-full min-w-0 mt-[1px] px-0.5 rounded-xs bg-rose-500 text-white text-[7px] min-[380px]:text-[8px] sm:text-[8.5px] font-black text-center truncate leading-tight shadow-2xs">
             {hwMin > 0 ? `休${formatMinutesShort(hwMin)}` : `残${formatMinutesShort(otMin)}`}
           </div>
@@ -413,8 +417,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-col items-start gap-1 w-full min-w-0 ${
               selStampA
                 ? ''
-                : getShiftOvertimeMinutes(activeSelShiftA) > 0 ||
-                  getShiftHolidayWorkMinutes(activeSelShiftA) > 0 ||
+                : (activePartner === 'partnerA' &&
+                    (getShiftOvertimeMinutes(activeSelShiftA) > 0 ||
+                      getShiftHolidayWorkMinutes(activeSelShiftA) > 0)) ||
                   activeSelShiftA?.subCustomLabel
                 ? 'bg-rose-50 text-rose-900 border border-rose-200'
                 : 'bg-stone-100 text-stone-400'
@@ -437,8 +442,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
               </span>
             )}
 
-            {/* 3段目：残業・休日出勤（勤務の下に配置） */}
+            {/* 3段目：残業・休日出勤（操作中のパートナーのみ表示） */}
             {(() => {
+              if (activePartner !== 'partnerA') return null;
               const otA = getShiftOvertimeMinutes(activeSelShiftA);
               const hwA = getShiftHolidayWorkMinutes(activeSelShiftA);
               if (otA === 0 && hwA === 0) return null;
@@ -459,8 +465,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-col items-start gap-1 w-full min-w-0 ${
               selStampB
                 ? ''
-                : getShiftOvertimeMinutes(activeSelShiftB) > 0 ||
-                  getShiftHolidayWorkMinutes(activeSelShiftB) > 0 ||
+                : (activePartner === 'partnerB' &&
+                    (getShiftOvertimeMinutes(activeSelShiftB) > 0 ||
+                      getShiftHolidayWorkMinutes(activeSelShiftB) > 0)) ||
                   activeSelShiftB?.subCustomLabel
                 ? 'bg-rose-50 text-rose-900 border border-rose-200'
                 : 'bg-stone-100 text-stone-400'
@@ -483,8 +490,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
               </span>
             )}
 
-            {/* 3段目：残業・休日出勤（勤務の下に配置） */}
+            {/* 3段目：残業・休日出勤（操作中のパートナーのみ表示） */}
             {(() => {
+              if (activePartner !== 'partnerB') return null;
               const otB = getShiftOvertimeMinutes(activeSelShiftB);
               const hwB = getShiftHolidayWorkMinutes(activeSelShiftB);
               if (otB === 0 && hwB === 0) return null;
@@ -698,6 +706,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                           </span>
                         )}
                         {(() => {
+                          if (activePartner !== 'partnerA') return null;
                           const otA = getShiftOvertimeMinutes(actA);
                           const hwA = getShiftHolidayWorkMinutes(actA);
                           if (otA === 0 && hwA === 0) return null;
@@ -727,6 +736,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                           </span>
                         )}
                         {(() => {
+                          if (activePartner !== 'partnerB') return null;
                           const otB = getShiftOvertimeMinutes(actB);
                           const hwB = getShiftHolidayWorkMinutes(actB);
                           if (otB === 0 && hwB === 0) return null;
@@ -914,10 +924,10 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                   )}
                 </div>
 
-                {/* 2. シフト2人並列バー（夫・妻横並び＋バイト＋残業表示） */}
+                {/* 2. シフト2人並列バー（夫・妻横並び＋バイト＋残業は操作中パートナーのみ表示） */}
                 <div className="grid grid-cols-2 gap-[1px] sm:gap-0.5 mb-0.5 shrink-0">
-                  {renderPartnerShiftBox(activeShiftA, partnerA.avatar, 'bg-[#FF8FAB]')}
-                  {renderPartnerShiftBox(activeShiftB, partnerB.avatar, 'bg-[#B388EB]')}
+                  {renderPartnerShiftBox(activeShiftA, partnerA.avatar, 'bg-[#FF8FAB]', 'partnerA')}
+                  {renderPartnerShiftBox(activeShiftB, partnerB.avatar, 'bg-[#B388EB]', 'partnerB')}
                 </div>
 
                 {/* 3. すれ違いサポートアイコン */}
