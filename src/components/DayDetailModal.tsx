@@ -994,7 +994,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       🌙 夜バ
                     </span>
                   )}
-                  {(getShiftHolidayWorkMinutes(shiftA) > 0 || getShiftOvertimeMinutes(shiftA) > 0) && (
+                  {activePartner === 'partnerA' && (getShiftHolidayWorkMinutes(shiftA) > 0 || getShiftOvertimeMinutes(shiftA) > 0) && (
                     <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white font-black text-[10px] shadow-2xs">
                       {getShiftHolidayWorkMinutes(shiftA) > 0
                         ? `💼 休出${formatMinutesShort(getShiftHolidayWorkMinutes(shiftA))}`
@@ -1035,7 +1035,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       🌙 夜バ
                     </span>
                   )}
-                  {(getShiftHolidayWorkMinutes(shiftB) > 0 || getShiftOvertimeMinutes(shiftB) > 0) && (
+                  {activePartner === 'partnerB' && (getShiftHolidayWorkMinutes(shiftB) > 0 || getShiftOvertimeMinutes(shiftB) > 0) && (
                     <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white font-black text-[10px] shadow-2xs">
                       {getShiftHolidayWorkMinutes(shiftB) > 0
                         ? `💼 休出${formatMinutesShort(getShiftHolidayWorkMinutes(shiftB))}`
