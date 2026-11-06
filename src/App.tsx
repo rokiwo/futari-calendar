@@ -99,8 +99,12 @@ export const App: React.FC = () => {
   // シフト連続入力ドロワー状態 ＆ 連続翌日移動ON/OFF
   const [stampDrawerOpen, setStampDrawerOpen] = useState<boolean>(false);
   const [autoAdvance, setAutoAdvance] = useState<boolean>(true);
-  const [stampDrawerTab, setStampDrawerTab] = useState<StampDrawerTab>('partnerA_shift');
-  const [selectedStampId, setSelectedStampId] = useState<string | null>('shift_a_day');
+  const [stampDrawerTab, setStampDrawerTab] = useState<StampDrawerTab>(() =>
+    getActivePartnerId() === 'partnerB' ? 'partnerB_shift' : 'partnerA_shift'
+  );
+  const [selectedStampId, setSelectedStampId] = useState<string | null>(() =>
+    getActivePartnerId() === 'partnerB' ? 'shift_b_day' : 'shift_a_day'
+  );
 
   // 各種モーダル開閉状態
   const [dayDetailOpen, setDayDetailOpen] = useState<boolean>(false);
@@ -1411,13 +1415,12 @@ export const App: React.FC = () => {
     );
   }
 
-  const currentDrawerPartner: PartnerId =
-    stampDrawerTab === 'partnerB_shift' ? 'partnerB' : 'partnerA';
+  const currentDrawerPartner: PartnerId = activePartner;
   const currentShiftOnSelectedDate = store.shifts[
-    `${selectedDate}_${currentDrawerPartner}`
+    `${selectedDate}_${activePartner}`
   ]?.deletedAt
     ? undefined
-    : store.shifts[`${selectedDate}_${currentDrawerPartner}`];
+    : store.shifts[`${selectedDate}_${activePartner}`];
 
   return (
     <div className="min-h-screen bg-[#FFFBF7] text-stone-700 flex flex-col">
