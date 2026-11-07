@@ -206,6 +206,51 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
     }
     ctx.fillText(targetLabel, width - 24, 45);
 
+    // 写真ヘッダーに対象者の月間残業サマリー（確定と仮残業を明確に区別して記載）
+    const todayIsoStr = new Date().toISOString().split('T')[0];
+    if (exportMode === 'partnerA' || exportMode === 'partnerB') {
+      const pId = exportMode;
+      let confMin = 0;
+      let tentMin = 0;
+      const ym = `${viewYear}-${String(viewMonth).padStart(2, '0')}`;
+
+      for (const [key, s] of Object.entries(store.shifts || {})) {
+        if (!s || s.deletedAt || s.partnerId !== pId) continue;
+        if (!s.date.startsWith(ym)) continue;
+
+        let ot = getShiftOvertimeMinutes(s);
+        let hw = getShiftHolidayWorkMinutes(s);
+        if (hw > 0 && ot > 0 && (s.isHolidayWork || s.stampId === 'shift_hol_work' || ot === hw)) {
+          ot = 0;
+        }
+
+        const isTent = Boolean(
+          (ot > 0 && (s.isTentativeOvertime || s.date > todayIsoStr)) ||
+          (hw > 0 && (s.isTentativeHolidayWork || s.date > todayIsoStr)) ||
+          s.overtimeStatus === 'tentative' ||
+          s.holidayWorkStatus === 'tentative'
+        );
+
+        if (isTent) {
+          tentMin += (ot + hw);
+        } else {
+          confMin += (ot + hw);
+        }
+      }
+
+      if (confMin > 0 || tentMin > 0) {
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.font = '800 14px "Zen Maru Gothic", "M PLUS Rounded 1c", sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        let sumStr = `確定残業: ${confMin}分`;
+        if (tentMin > 0) {
+          sumStr += ` (+仮残業: ${tentMin}分)`;
+        }
+        ctx.fillText(sumStr, width - 24, 76);
+      }
+    }
+
     // 3. 曜日ヘッダー行（日 月 火 水 木 金 土）
     const weekBgY = headerHeight;
     ctx.fillStyle = '#82C0E8';
@@ -329,7 +374,7 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
 
           // 勤務の「下」のエリア（y + 118）に夜勤バイト（夜バ）と残業・休日出勤を大きく記載
           const extraY = y + 120;
-          const badges: { text: string; bg: string; color: string; width: number }[] = [];
+          const badges: { text: string; bg: string; color: string; width: number; isTentative?: boolean }[] = [];
 
           if (hasSub) {
             badges.push({
@@ -337,25 +382,63 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
               bg: '#FFC107', // アンバー
               color: '#212121',
               width: 56,
+              isTentative: false,
             });
           }
 
+          // 💡 仮・見込み判定（未確定フラグ または 未来日）
+          const isFuture = cell.dateStr > todayIsoStr;
+          const isTentativeHw = Boolean(
+            shift?.isTentativeHolidayWork ||
+            shift?.holidayWorkStatus === 'tentative' ||
+            (hwMin > 0 && isFuture)
+          );
+          const isTentativeOt = Boolean(
+            shift?.isTentativeOvertime ||
+            shift?.overtimeStatus === 'tentative' ||
+            (otMin > 0 && isFuture)
+          );
+
           if (hwMin > 0) {
-            // 休日出勤（オレンジ赤バッジではっきりと区別）
-            badges.push({
-              text: `休出${formatMinutesShort(hwMin)}`,
-              bg: '#E65100', // 濃いオレンジ
-              color: '#FFFFFF',
-              width: 66,
-            });
+            if (isTentativeHw) {
+              // 仮・見込みの休日出勤（アンバー色、仮休バッジ）
+              badges.push({
+                text: `仮休${formatMinutesShort(hwMin)}`,
+                bg: '#FF9800',
+                color: '#FFFFFF',
+                width: 72,
+                isTentative: true,
+              });
+            } else {
+              // 確定した休日出勤（濃いオレンジ）
+              badges.push({
+                text: `休出${formatMinutesShort(hwMin)}`,
+                bg: '#E65100',
+                color: '#FFFFFF',
+                width: 66,
+                isTentative: false,
+              });
+            }
           } else if (otMin > 0) {
-            // 通常残業（鮮やかな赤バッジ）
-            badges.push({
-              text: `残+${formatMinutesShort(otMin)}`,
-              bg: '#D32F2F', // 赤
-              color: '#FFFFFF',
-              width: 66,
-            });
+            if (isTentativeOt) {
+              // 仮・見込みの通常残業（アンバー色、仮残バッジ）
+              badges.push({
+                text: `仮残${formatMinutesShort(otMin)}`,
+                bg: '#FF9800',
+                color: '#FFFFFF',
+                width: 72,
+                isTentative: true,
+              });
+            } else {
+              // 確定した通常残業（鮮やかな赤）
+              badges.push({
+                text: `残+${formatMinutesShort(otMin)}`,
+                bg: '#D32F2F',
+                color: '#FFFFFF',
+                width: 66,
+                isTentative: false,
+              });
+            }
           }
 
           if (badges.length === 1) {
@@ -370,6 +453,13 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
             ctx.beginPath();
             ctx.roundRect ? ctx.roundRect(bx, by, badgeW, badgeH, 6) : ctx.rect(bx, by, badgeW, badgeH);
             ctx.fill();
+
+            // 仮予定の場合は枠線で明示
+            if (b.isTentative) {
+              ctx.strokeStyle = '#FFE082';
+              ctx.lineWidth = 2;
+              ctx.stroke();
+            }
 
             ctx.fillStyle = b.color;
             ctx.font = '900 16px "Zen Maru Gothic", sans-serif';
@@ -391,6 +481,13 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
               ctx.beginPath();
               ctx.roundRect ? ctx.roundRect(bx, by, b.width, badgeH, 5) : ctx.rect(bx, by, b.width, badgeH);
               ctx.fill();
+
+              // 仮予定の場合は枠線で明示
+              if (b.isTentative) {
+                ctx.strokeStyle = '#FFE082';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+              }
 
               ctx.fillStyle = b.color;
               ctx.font = '900 14px "Zen Maru Gothic", sans-serif';
@@ -442,10 +539,34 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
 
           if (subA || otMinA > 0 || hwMinA > 0) {
             const subYA = yA + 23;
-            const badges: { text: string; bg: string; color: string; width: number }[] = [];
-            if (subA) badges.push({ text: '夜バ', bg: '#FFC107', color: '#212121', width: 38 });
-            if (hwMinA > 0) badges.push({ text: `休出${formatMinutesShort(hwMinA)}`, bg: '#E65100', color: '#FFFFFF', width: 48 });
-            else if (otMinA > 0) badges.push({ text: `残+${formatMinutesShort(otMinA)}`, bg: '#D32F2F', color: '#FFFFFF', width: 48 });
+            const badges: { text: string; bg: string; color: string; width: number; isTentative?: boolean }[] = [];
+            if (subA) badges.push({ text: '夜バ', bg: '#FFC107', color: '#212121', width: 38, isTentative: false });
+
+            // 💡 仮・見込み判定（夫：未確定フラグ または 未来日）
+            const isTentativeHwA = Boolean(
+              actA?.isTentativeHolidayWork ||
+              actA?.holidayWorkStatus === 'tentative' ||
+              (hwMinA > 0 && cell.dateStr > todayIsoStr)
+            );
+            const isTentativeOtA = Boolean(
+              actA?.isTentativeOvertime ||
+              actA?.overtimeStatus === 'tentative' ||
+              (otMinA > 0 && cell.dateStr > todayIsoStr)
+            );
+
+            if (hwMinA > 0) {
+              if (isTentativeHwA) {
+                badges.push({ text: `仮休${formatMinutesShort(hwMinA)}`, bg: '#FF9800', color: '#FFFFFF', width: 54, isTentative: true });
+              } else {
+                badges.push({ text: `休出${formatMinutesShort(hwMinA)}`, bg: '#E65100', color: '#FFFFFF', width: 48, isTentative: false });
+              }
+            } else if (otMinA > 0) {
+              if (isTentativeOtA) {
+                badges.push({ text: `仮残${formatMinutesShort(otMinA)}`, bg: '#FF9800', color: '#FFFFFF', width: 54, isTentative: true });
+              } else {
+                badges.push({ text: `残+${formatMinutesShort(otMinA)}`, bg: '#D32F2F', color: '#FFFFFF', width: 48, isTentative: false });
+              }
+            }
 
             const gap = 4;
             const totalW = badges.reduce((acc, b) => acc + b.width, 0) + (badges.length - 1) * gap;
@@ -460,6 +581,13 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
               ctx.beginPath();
               ctx.roundRect ? ctx.roundRect(bx, by, b.width, bHeight, 4) : ctx.rect(bx, by, b.width, bHeight);
               ctx.fill();
+
+              // 仮予定の場合は枠線で明示
+              if (b.isTentative) {
+                ctx.strokeStyle = '#FFE082';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+              }
 
               ctx.fillStyle = b.color;
               ctx.font = '900 12px "Zen Maru Gothic", sans-serif';
@@ -493,10 +621,34 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
 
           if (subB || otMinB > 0 || hwMinB > 0) {
             const subYB = yB + 23;
-            const badges: { text: string; bg: string; color: string; width: number }[] = [];
-            if (subB) badges.push({ text: '夜バ', bg: '#FFC107', color: '#212121', width: 38 });
-            if (hwMinB > 0) badges.push({ text: `休出${formatMinutesShort(hwMinB)}`, bg: '#E65100', color: '#FFFFFF', width: 48 });
-            else if (otMinB > 0) badges.push({ text: `残+${formatMinutesShort(otMinB)}`, bg: '#D32F2F', color: '#FFFFFF', width: 48 });
+            const badges: { text: string; bg: string; color: string; width: number; isTentative?: boolean }[] = [];
+            if (subB) badges.push({ text: '夜バ', bg: '#FFC107', color: '#212121', width: 38, isTentative: false });
+
+            // 💡 仮・見込み判定（妻：未確定フラグ または 未来日）
+            const isTentativeHwB = Boolean(
+              actB?.isTentativeHolidayWork ||
+              actB?.holidayWorkStatus === 'tentative' ||
+              (hwMinB > 0 && cell.dateStr > todayIsoStr)
+            );
+            const isTentativeOtB = Boolean(
+              actB?.isTentativeOvertime ||
+              actB?.overtimeStatus === 'tentative' ||
+              (otMinB > 0 && cell.dateStr > todayIsoStr)
+            );
+
+            if (hwMinB > 0) {
+              if (isTentativeHwB) {
+                badges.push({ text: `仮休${formatMinutesShort(hwMinB)}`, bg: '#FF9800', color: '#FFFFFF', width: 54, isTentative: true });
+              } else {
+                badges.push({ text: `休出${formatMinutesShort(hwMinB)}`, bg: '#E65100', color: '#FFFFFF', width: 48, isTentative: false });
+              }
+            } else if (otMinB > 0) {
+              if (isTentativeOtB) {
+                badges.push({ text: `仮残${formatMinutesShort(otMinB)}`, bg: '#FF9800', color: '#FFFFFF', width: 54, isTentative: true });
+              } else {
+                badges.push({ text: `残+${formatMinutesShort(otMinB)}`, bg: '#D32F2F', color: '#FFFFFF', width: 48, isTentative: false });
+              }
+            }
 
             const gap = 4;
             const totalW = badges.reduce((acc, b) => acc + b.width, 0) + (badges.length - 1) * gap;
@@ -511,6 +663,13 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
               ctx.beginPath();
               ctx.roundRect ? ctx.roundRect(bx, by, b.width, bHeight, 4) : ctx.rect(bx, by, b.width, bHeight);
               ctx.fill();
+
+              // 仮予定の場合は枠線で明示
+              if (b.isTentative) {
+                ctx.strokeStyle = '#FFE082';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+              }
 
               ctx.fillStyle = b.color;
               ctx.font = '900 12px "Zen Maru Gothic", sans-serif';
