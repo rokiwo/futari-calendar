@@ -157,6 +157,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     }
 
     lastTapRef.current = { dateStr, time: nowMs };
+    if (previewPosition === 'hidden') {
+      handleSetPreviewPosition('top');
+    }
     onCellSingleTap(dateStr);
   };
 
@@ -236,20 +239,20 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   // スマホ用のカレンダー表示スタイル切替（'grid' = 7列マス目 / 'list' = 縦1列くっきりリスト）
   const [mobileLayout, setMobileLayout] = useState<'grid' | 'list'>('grid');
 
-  // 詳細プレビューバーの表示（'bottom' = カレンダー下部に表示 / 'hidden' = 非表示）
-  const [previewPosition, setPreviewPosition] = useState<'bottom' | 'hidden'>(() => {
+  // 詳細プレビューバーの表示（'top' = カレンダー上部にすべての詳細を表示 / 'hidden' = 非表示）
+  const [previewPosition, setPreviewPosition] = useState<'top' | 'hidden'>(() => {
     try {
       const saved =
         localStorage.getItem('paircal_preview_position') ||
         localStorage.getItem('futarical_preview_position');
-      if (saved === 'bottom' || saved === 'hidden') return saved;
+      if (saved === 'top' || saved === 'hidden') return saved;
     } catch {
       // ignore
     }
-    return 'bottom'; // カレンダーを上部に最大化するためデフォルトは下部に配置
+    return 'top';
   });
 
-  const handleSetPreviewPosition = (pos: 'bottom' | 'hidden') => {
+  const handleSetPreviewPosition = (pos: 'top' | 'hidden') => {
     setPreviewPosition(pos);
     try {
       localStorage.setItem('paircal_preview_position', pos);
@@ -377,22 +380,25 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   const selStampB = activeSelShiftB ? stampMap.get(activeSelShiftB.stampId) : undefined;
   const selEvents = eventsByDate.get(selectedDate) || [];
 
-  // 選択日の大文字プレビューカード（カレンダーの下部に配置・親指で押しやすい設計）
+  // 選択日のすべての詳細カード（カレンダー上部に配置・タップで詳細表示＆編集）
   const renderSelectedDatePreviewCard = () => {
     if (!selectedCell || previewPosition === 'hidden') return null;
+
+    const selDaySupports = store.daySupports?.[selectedDate]?.badges || [];
+    const selMonthNum = Number(selectedDate.split('-')[1]);
 
     return (
       <div
         onClick={() => onCellDoubleTap(selectedDate)}
-        className="mt-2 mx-0.5 sm:mx-0 p-2.5 sm:p-3 rounded-2xl bg-white border border-[#FF8FAB]/60 shadow-sm cursor-pointer hover:bg-[#FFF9FB] transition-all animate-pop"
+        className="mb-2 mx-0.5 sm:mx-0 p-2.5 sm:p-3 rounded-2xl bg-white border border-[#FF8FAB]/60 shadow-sm cursor-pointer hover:bg-[#FFF9FB] transition-all animate-pop"
       >
         <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
-          <div className="font-extrabold text-xs sm:text-sm text-stone-800 flex items-center gap-1.5">
+          <div className="font-extrabold text-xs sm:text-sm text-stone-800 flex items-center gap-1.5 flex-wrap">
             <span className="px-2 py-0.5 rounded-lg bg-[#FFE5EC] text-[#9E2A47] text-[10px] sm:text-xs font-black">
               選択中
             </span>
             <span>
-              {month}月{selectedCell.dayNumber}日(
+              {selMonthNum}月{selectedCell.dayNumber}日(
               {['日', '月', '火', '水', '木', '金', '土'][selectedCell.dayOfWeek]})
             </span>
             {selectedCell.holidayName && (
@@ -404,6 +410,17 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           </div>
 
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCellDoubleTap(selectedDate);
+              }}
+              className="px-2 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] font-extrabold active:scale-95"
+            >
+              ✏️ 編集
+            </button>
+
             <button
               type="button"
               onClick={(e) => {
@@ -422,7 +439,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 handleSetPreviewPosition('hidden');
               }}
               className="p-1 rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100"
-              title="プレビューを非表示にする"
+              title="詳細を閉じる"
             >
               <X className="w-4 h-4" />
             </button>
@@ -523,49 +540,97 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           </div>
         </div>
 
+        {selDaySupports.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1.5">
+            {selDaySupports.map((b) => (
+              <span
+                key={b}
+                className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-extrabold"
+              >
+                {b}
+              </span>
+            ))}
+          </div>
+        )}
+
         {selEvents.length > 0 ? (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {selEvents.map((ev) => {
               const cat = resolveCategoryInfo(ev.categoryId, store.categories, store.metadata);
               return (
                 <div
                   key={ev.id}
-                  style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
-                  className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center justify-between gap-1.5 ${
+                  style={{
+                    backgroundColor: cat.bgColor,
+                    color: cat.textColor,
+                    borderLeftColor: ev.color || cat.accentColor,
+                  }}
+                  className={`px-2.5 py-2 rounded-xl border-l-4 text-xs font-extrabold space-y-1 ${
                     ev.isTask && ev.isCompleted ? 'opacity-65 line-through' : ''
                   } ${isNewFromPartner(ev.updatedAt, ev.createdBy) ? 'ring-2 ring-rose-400 shadow-xs' : ''}`}
                 >
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                    <span className="shrink-0">
-                      {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
-                    </span>
-                    {ev.privateFor && (
-                      <span className="px-1.5 py-0.2 rounded-md bg-purple-600 text-white text-[9px] font-black shrink-0">
-                        🔒限定
+                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="shrink-0">
+                        {ev.isTask ? (ev.isCompleted ? '✅' : '⬜') : `${cat.icon}${cat.shortLabel}`}
                       </span>
-                    )}
-                    {isNewFromPartner(ev.updatedAt, ev.createdBy) && (
-                      <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black shrink-0 animate-pulse">
-                        🆕 新着
+                      {ev.privateFor && (
+                        <span className="px-1.5 py-0.2 rounded-md bg-purple-600 text-white text-[9px] font-black shrink-0">
+                          🔒限定
+                        </span>
+                      )}
+                      {isNewFromPartner(ev.updatedAt, ev.createdBy) && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black shrink-0 animate-pulse">
+                          🆕 新着
+                        </span>
+                      )}
+                      {(ev.syncedFromGoogle || ev.googleCalSynced) && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-black shrink-0">
+                          {ev.syncedFromGoogle ? '✨ Gemini/Google' : '🔄 Google同期'}
+                        </span>
+                      )}
+                      <span className="text-stone-700 font-black">
+                        {ev.isAllDay
+                          ? '終日'
+                          : `${ev.startTime || ''}${ev.endTime ? `〜${ev.endTime}` : ''}`}
                       </span>
-                    )}
-                    {!ev.isAllDay && ev.startTime && <span className="shrink-0 text-stone-700">{ev.startTime}</span>}
-                    <span className="truncate whitespace-nowrap overflow-hidden flex-1">{ev.title}</span>
-                  </div>
+                    </div>
 
-                  <div className="flex items-center gap-1 shrink-0 text-[10px] font-bold opacity-85">
-                    <span>
+                    <div className="text-[10px] font-bold opacity-85 shrink-0">
                       {(ev.createdBy === 'partnerB' ? partnerB : partnerA).avatar}
                       {(ev.createdBy === 'partnerB' ? partnerB : partnerA).name}が登録
-                    </span>
+                    </div>
                   </div>
+
+                  <div className="text-xs sm:text-sm font-black whitespace-pre-wrap break-words leading-snug">
+                    {ev.title}
+                  </div>
+
+                  {ev.memo && (
+                    <div className="text-[11px] font-semibold text-stone-700 bg-white/75 rounded-lg px-2 py-1 whitespace-pre-wrap break-words">
+                      📝 {ev.memo}
+                    </div>
+                  )}
+
+                  {ev.supportBadges && ev.supportBadges.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {ev.supportBadges.map((b) => (
+                        <span
+                          key={b}
+                          className="px-1.5 py-0.5 rounded-full bg-white/80 text-stone-700 text-[10px] font-bold"
+                        >
+                          {b}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         ) : (
           <div className="text-xs text-stone-400 font-bold">
-            この日の予定はまだありません（ダブルタップで詳細、右下の「＋」で予定追加）
+            この日の予定はまだありません（タップで詳細・右上の「＋ 予定追加」で登録）
           </div>
         )}
       </div>
@@ -632,6 +697,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           </button>
         </div>
       </div>
+
+      {/* 上部配置の選択日すべての詳細カード */}
+      {previewPosition === 'top' && renderSelectedDatePreviewCard()}
 
       {/* 📋 スマホ縦1列リストモード（スマホの縦長画面で1日1行・大文字で全部読めるモード） */}
       {mobileLayout === 'list' && (
@@ -1046,8 +1114,6 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
           })}
         </div>
 
-        {/* 下部配置の場合の選択日プレビューカード */}
-        {previewPosition === 'bottom' && renderSelectedDatePreviewCard()}
       </div>
     </div>
   );
