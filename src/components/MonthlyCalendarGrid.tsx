@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Edit3, Plus, Trash2, X } from 'lucide-react';
 import {
   CalendarDataStore,
   FilterCategoryId,
@@ -29,6 +29,7 @@ interface MonthlyCalendarGridProps {
   onCellSingleTap: (dateStr: string) => void;
   onCellDoubleTap: (dateStr: string) => void;
   onQuickAddForSelectedDate: () => void;
+  onDeleteEvent?: (eventId: string) => void;
   onSwipePrevMonth?: () => void;
   onSwipeNextMonth?: () => void;
 }
@@ -119,6 +120,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   onCellSingleTap,
   onCellDoubleTap,
   onQuickAddForSelectedDate,
+  onDeleteEvent,
   onSwipePrevMonth,
   onSwipeNextMonth,
 }) => {
@@ -138,9 +140,10 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     onCellDoubleTap(dateStr);
   };
 
-  // シングルタップ＝その日に移動、ダブルタップ＝その日のすべての予定一覧（DayDetailModal）を表示
+  // シングルタップ＝その日に移動＆上部詳細カード表示、ダブルタップ＝DayDetailModalを表示
   const handleDateCellTap = (dateStr: string) => {
     if (!dateStr) return;
+    setPreviewPosition('top');
     if (stampModeActive) {
       onCellSingleTap(dateStr);
       return;
@@ -157,9 +160,6 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     }
 
     lastTapRef.current = { dateStr, time: nowMs };
-    if (previewPosition === 'hidden') {
-      handleSetPreviewPosition('top');
-    }
     onCellSingleTap(dateStr);
   };
 
@@ -239,26 +239,11 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   // スマホ用のカレンダー表示スタイル切替（'grid' = 7列マス目 / 'list' = 縦1列くっきりリスト）
   const [mobileLayout, setMobileLayout] = useState<'grid' | 'list'>('grid');
 
-  // 詳細プレビューバーの表示（'top' = カレンダー上部にすべての詳細を表示 / 'hidden' = 非表示）
-  const [previewPosition, setPreviewPosition] = useState<'top' | 'hidden'>(() => {
-    try {
-      const saved =
-        localStorage.getItem('paircal_preview_position') ||
-        localStorage.getItem('futarical_preview_position');
-      if (saved === 'top' || saved === 'hidden') return saved;
-    } catch {
-      // ignore
-    }
-    return 'top';
-  });
+  // 詳細プレビューバーの表示（常にデフォルトで 'top'＝カレンダー上部にすべての詳細を表示）
+  const [previewPosition, setPreviewPosition] = useState<'top' | 'hidden'>('top');
 
   const handleSetPreviewPosition = (pos: 'top' | 'hidden') => {
     setPreviewPosition(pos);
-    try {
-      localStorage.setItem('paircal_preview_position', pos);
-    } catch {
-      // ignore
-    }
   };
 
   // 各パートナーのシフト枠（三段表示：1段目メインシフト ＋ 2段目「夜バ」 ＋ 3段目残業時間バッジ）を描画
@@ -463,7 +448,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 : 'bg-stone-100 text-stone-400'
             }`}
           >
-            {/* 1段目：メインシフト */}
+            {/* 1段目：メインシフト＋勤務時間 */}
             <div className="flex items-center gap-1 flex-wrap">
               <span>{partnerA.avatar}{partnerA.name}:</span>
               <span>
@@ -471,12 +456,23 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                   ? `${selStampA.icon || ''}${activeSelShiftA?.customLabel || selStampA.label}`
                   : 'シフト未定'}
               </span>
+              {selStampA && (activeSelShiftA?.startTime || selStampA.startTime) && (
+                <span className="text-[10px] font-bold opacity-90">
+                  ({activeSelShiftA?.startTime || selStampA.startTime}
+                  {(activeSelShiftA?.endTime || selStampA.endTime)
+                    ? `〜${activeSelShiftA?.endTime || selStampA.endTime}`
+                    : ''})
+                </span>
+              )}
             </div>
 
             {/* 2段目：夜勤バイト（勤務の下に配置） */}
             {activeSelShiftA?.subCustomLabel && (
               <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
-                夜バ
+                🌙 {activeSelShiftA.subCustomLabel}
+                {activeSelShiftA.subStartTime
+                  ? ` (${activeSelShiftA.subStartTime}${activeSelShiftA.subEndTime ? `〜${activeSelShiftA.subEndTime}` : ''})`
+                  : ''}
               </span>
             )}
 
@@ -491,6 +487,12 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 </span>
               );
             })()}
+
+            {activeSelShiftA?.memo && (
+              <span className="text-[10px] font-bold opacity-90 break-words">
+                📝 {activeSelShiftA.memo}
+              </span>
+            )}
           </div>
 
           <div
@@ -509,7 +511,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 : 'bg-stone-100 text-stone-400'
             }`}
           >
-            {/* 1段目：メインシフト */}
+            {/* 1段目：メインシフト＋勤務時間 */}
             <div className="flex items-center gap-1 flex-wrap">
               <span>{partnerB.avatar}{partnerB.name}:</span>
               <span>
@@ -517,12 +519,23 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                   ? `${selStampB.icon || ''}${activeSelShiftB?.customLabel || selStampB.label}`
                   : 'シフト未定'}
               </span>
+              {selStampB && (activeSelShiftB?.startTime || selStampB.startTime) && (
+                <span className="text-[10px] font-bold opacity-90">
+                  ({activeSelShiftB?.startTime || selStampB.startTime}
+                  {(activeSelShiftB?.endTime || selStampB.endTime)
+                    ? `〜${activeSelShiftB?.endTime || selStampB.endTime}`
+                    : ''})
+                </span>
+              )}
             </div>
 
             {/* 2段目：夜勤バイト（勤務の下に配置） */}
             {activeSelShiftB?.subCustomLabel && (
               <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
-                夜バ
+                🌙 {activeSelShiftB.subCustomLabel}
+                {activeSelShiftB.subStartTime
+                  ? ` (${activeSelShiftB.subStartTime}${activeSelShiftB.subEndTime ? `〜${activeSelShiftB.subEndTime}` : ''})`
+                  : ''}
               </span>
             )}
 
@@ -537,6 +550,12 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 </span>
               );
             })()}
+
+            {activeSelShiftB?.memo && (
+              <span className="text-[10px] font-bold opacity-90 break-words">
+                📝 {activeSelShiftB.memo}
+              </span>
+            )}
           </div>
         </div>
 
@@ -596,9 +615,35 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                       </span>
                     </div>
 
-                    <div className="text-[10px] font-bold opacity-85 shrink-0">
-                      {(ev.createdBy === 'partnerB' ? partnerB : partnerA).avatar}
-                      {(ev.createdBy === 'partnerB' ? partnerB : partnerA).name}が登録
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] font-bold opacity-85">
+                        {(ev.createdBy === 'partnerB' ? partnerB : partnerA).avatar}
+                        {(ev.createdBy === 'partnerB' ? partnerB : partnerA).name}が登録
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCellDoubleTap(selectedDate);
+                        }}
+                        className="p-1 rounded-lg bg-white/80 hover:bg-white text-stone-600 shadow-2xs"
+                        title="予定を編集"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      {onDeleteEvent && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteEvent(ev.id);
+                          }}
+                          className="p-1 rounded-lg bg-white/80 hover:bg-rose-50 text-rose-500 shadow-2xs"
+                          title="予定を削除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 

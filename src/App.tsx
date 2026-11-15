@@ -1325,11 +1325,15 @@ export const App: React.FC = () => {
     [commitStore, showToast, store]
   );
 
-  // 予定の論理削除
+  // 予定の論理削除（誤操作防止の確認ダイアログ付き）
   const handleDeleteEvent = useCallback(
     (eventId: string) => {
       const existing = store.events[eventId];
       if (!existing) return;
+      const itemLabel = existing.isTask ? 'タスク' : '予定';
+      if (!window.confirm(`「${existing.title}」の${itemLabel}を消しますか？`)) {
+        return;
+      }
       const nowIso = new Date().toISOString();
       const nextStore: CalendarDataStore = {
         ...store,
@@ -1990,6 +1994,7 @@ export const App: React.FC = () => {
               onCellSingleTap={handleCellSingleTap}
               onCellDoubleTap={(dateStr) => openDayDetailModal(dateStr, false)}
               onQuickAddForSelectedDate={() => handleQuickAddForDate(selectedDate)}
+              onDeleteEvent={handleDeleteEvent}
               onSwipePrevMonth={handlePrevMonth}
               onSwipeNextMonth={handleNextMonth}
             />
