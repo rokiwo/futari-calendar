@@ -783,13 +783,17 @@ function shouldSyncEventToTarget(
   targetKey: 'partnerA' | 'partnerB' | 'shared',
   hasSharedCalendar: boolean
 ): boolean {
-  // タスクはペアカレ内の個人タスクカレンダーだけで管理し、Googleカレンダー（ファミリー共有含む）には書き出さない
+  const priv = getEffectivePrivateFor(ev);
+
+  // タスクの場合：
+  // ・ペアカレ上で直接作成したタスクはペアカレ内だけで管理し、Googleカレンダーには書き出さない
+  // ・Gemini（Googleカレンダー）から取り込んだタスクのみ、日付変更や編集が本人のGoogleカレンダーにも連動するようにする
   if (ev.isTask) {
-    return false;
+    if (!ev.syncedFromGoogle) return false;
+    return priv === targetKey;
   }
 
   // プライベート予定は本人のカレンダーのみに同期し、相手や共有カレンダーには出さない
-  const priv = getEffectivePrivateFor(ev);
   if (priv) {
     return priv === targetKey;
   }
