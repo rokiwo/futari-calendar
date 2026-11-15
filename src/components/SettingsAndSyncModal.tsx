@@ -115,14 +115,20 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   const [gcalBusy, setGcalBusy] = useState<boolean>(false);
 
   const buildCurrentGcalConfig = (): GoogleCalendarSyncConfig => {
-    const hasAnyUrl = Boolean(partnerAGasUrl.trim() || partnerBGasUrl.trim());
+    const rawGasB = partnerBGasUrl.trim();
+    const rawCalB = partnerBCalendarId.trim();
+    const isGasBEmail = Boolean(rawGasB && !rawGasB.startsWith('http') && rawGasB.includes('@'));
+    const effectiveGasB = isGasBEmail ? '' : rawGasB;
+    const effectiveCalB = isGasBEmail ? rawGasB : rawCalB || 'primary';
+
+    const hasAnyUrl = Boolean(partnerAGasUrl.trim() || effectiveGasB);
     return {
       enabled: gcalEnabled && hasAnyUrl,
       autoSync: gcalAutoSync,
       partnerAGasUrl: partnerAGasUrl.trim(),
       partnerACalendarId: partnerACalendarId.trim() || 'primary',
-      partnerBGasUrl: partnerBGasUrl.trim(),
-      partnerBCalendarId: partnerBCalendarId.trim() || 'primary',
+      partnerBGasUrl: effectiveGasB,
+      partnerBCalendarId: effectiveCalB,
       sharedCalendarId: sharedCalendarId.trim(),
       syncRangePastDays: gcalSyncConfig.syncRangePastDays || 60,
       syncRangeFutureDays: gcalSyncConfig.syncRangeFutureDays || 180,
@@ -151,8 +157,12 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
   const handleTestGcalConnection = async (target: 'partnerA' | 'partnerB') => {
     setStatusMsg(null);
-    const url = target === 'partnerA' ? partnerAGasUrl.trim() : (partnerBGasUrl.trim() || partnerAGasUrl.trim());
-    const calId = target === 'partnerA' ? (partnerACalendarId.trim() || 'primary') : (partnerBCalendarId.trim() || 'primary');
+    const cfg = buildCurrentGcalConfig();
+    if (cfg.partnerBGasUrl !== partnerBGasUrl) setPartnerBGasUrl(cfg.partnerBGasUrl || '');
+    if (cfg.partnerBCalendarId !== partnerBCalendarId) setPartnerBCalendarId(cfg.partnerBCalendarId || 'primary');
+
+    const url = target === 'partnerA' ? cfg.partnerAGasUrl : (cfg.partnerBGasUrl || cfg.partnerAGasUrl);
+    const calId = target === 'partnerA' ? (cfg.partnerACalendarId || 'primary') : (cfg.partnerBCalendarId || 'primary');
     if (!url) {
       setStatusMsg({
         type: 'err',
@@ -167,7 +177,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
         type: res.ok ? 'ok' : 'err',
         text: res.ok
           ? `✅ Googleカレンダー「${res.calendarName || calId}」への接続に成功しました！✨`
-          : `❌ 接続エラー: ${res.error || 'URLまたはデプロイ権限（全員）をご確認ください'}`,
+          : `❌ 接続エラー: ${res.error || 'カレンダーの共有設定をご確認ください'}`,
       });
     } finally {
       setGcalBusy(false);
@@ -1263,25 +1273,25 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label className="block text-[10px] font-bold text-stone-500 mb-0.5">
-                        {store.metadata.partners.partnerB.name}用 GAS URL（空欄なら上のGASを使用）
-                      </label>
-                      <input
-                        type="url"
-                        value={partnerBGasUrl}
-                        onChange={(e) => setPartnerBGasUrl(e.target.value)}
-                        placeholder="https://script.google.com/macros/s/.../exec（任意）"
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white font-mono text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-stone-500 mb-0.5">
-                        {store.metadata.partners.partnerB.name}のカレンダーID（メールアドレス等）
+                        {store.metadata.partners.partnerB.name}のカレンダーID（Gmailアドレス）
                       </label>
                       <input
                         type="text"
                         value={partnerBCalendarId}
                         onChange={(e) => setPartnerBCalendarId(e.target.value)}
-                        placeholder="primary または パートナーのGmailアドレス"
+                        placeholder="パートナーのGmailアドレス（例: xxx@gmail.com）"
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-stone-500 mb-0.5">
+                        {store.metadata.partners.partnerB.name}用 GAS URL（空欄のままでOK・上のGASを共用）
+                      </label>
+                      <input
+                        type="url"
+                        value={partnerBGasUrl}
+                        onChange={(e) => setPartnerBGasUrl(e.target.value)}
+                        placeholder="空欄のままでOK（任意）"
                         className="w-full px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white font-mono text-xs"
                       />
                     </div>

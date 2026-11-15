@@ -374,18 +374,46 @@ export async function openOrShareIcsOnDevice(
 const LS_GCAL_SYNC_CONFIG_KEY = 'futarical_gcal_sync_config_v1';
 export const DEFAULT_PARTNER_A_GAS_URL =
   'https://script.google.com/macros/s/AKfycbwx2LGNbsmqB1vJrCfvWXTj8CC4DAkioE4w9G19ccib7Xz9ss6QaSlCIt5gjJXX1Ohl/exec';
+export const DEFAULT_PARTNER_B_CALENDAR_ID = 'kobayansaya1229@gmail.com';
+
+function normalizePartnerBFields(rawGasUrl?: string, rawCalId?: string): {
+  partnerBGasUrl: string;
+  partnerBCalendarId: string;
+} {
+  const trimmedGas = (rawGasUrl || '').trim();
+  const trimmedCal = (rawCalId || '').trim();
+
+  // もし GAS URL 欄にメールアドレス（@を含み https:// で始まらない文字列）が入力されていたら自動的にカレンダーID欄へ振り替える
+  if (trimmedGas && !trimmedGas.startsWith('http') && trimmedGas.includes('@')) {
+    return {
+      partnerBGasUrl: '',
+      partnerBCalendarId: trimmedGas,
+    };
+  }
+
+  return {
+    partnerBGasUrl: trimmedGas.startsWith('http') ? trimmedGas : '',
+    partnerBCalendarId:
+      trimmedCal && trimmedCal !== 'primary'
+        ? trimmedCal
+        : trimmedGas.startsWith('http')
+        ? trimmedCal || 'primary'
+        : DEFAULT_PARTNER_B_CALENDAR_ID,
+  };
+}
 
 export function loadGoogleCalendarSyncConfig(
   storeConfig?: GoogleCalendarSyncConfig
 ): GoogleCalendarSyncConfig {
-  if (storeConfig && (storeConfig.partnerAGasUrl || storeConfig.partnerBGasUrl)) {
+  if (storeConfig && (storeConfig.partnerAGasUrl || storeConfig.partnerBGasUrl || storeConfig.partnerBCalendarId)) {
+    const normB = normalizePartnerBFields(storeConfig.partnerBGasUrl, storeConfig.partnerBCalendarId);
     return {
       enabled: storeConfig.enabled ?? true,
       autoSync: storeConfig.autoSync ?? true,
       partnerAGasUrl: storeConfig.partnerAGasUrl || DEFAULT_PARTNER_A_GAS_URL,
       partnerACalendarId: storeConfig.partnerACalendarId || 'primary',
-      partnerBGasUrl: storeConfig.partnerBGasUrl || '',
-      partnerBCalendarId: storeConfig.partnerBCalendarId || 'primary',
+      partnerBGasUrl: normB.partnerBGasUrl,
+      partnerBCalendarId: normB.partnerBCalendarId,
       sharedCalendarId: storeConfig.sharedCalendarId || '',
       syncRangePastDays: storeConfig.syncRangePastDays ?? 30,
       syncRangeFutureDays: storeConfig.syncRangeFutureDays ?? 120,
@@ -399,13 +427,14 @@ export function loadGoogleCalendarSyncConfig(
       const parsed = JSON.parse(raw) as GoogleCalendarSyncConfig;
       const hadCustomUrl = Boolean(parsed.partnerAGasUrl || parsed.partnerBGasUrl);
       const partnerAGasUrl = parsed.partnerAGasUrl || DEFAULT_PARTNER_A_GAS_URL;
+      const normB = normalizePartnerBFields(parsed.partnerBGasUrl, parsed.partnerBCalendarId);
       return {
         enabled: hadCustomUrl ? (parsed.enabled ?? true) : true,
         autoSync: parsed.autoSync ?? true,
         partnerAGasUrl,
         partnerACalendarId: parsed.partnerACalendarId || 'primary',
-        partnerBGasUrl: parsed.partnerBGasUrl || '',
-        partnerBCalendarId: parsed.partnerBCalendarId || 'primary',
+        partnerBGasUrl: normB.partnerBGasUrl,
+        partnerBCalendarId: normB.partnerBCalendarId,
         sharedCalendarId: parsed.sharedCalendarId || '',
         syncRangePastDays: parsed.syncRangePastDays ?? 30,
         syncRangeFutureDays: parsed.syncRangeFutureDays ?? 120,
@@ -422,7 +451,7 @@ export function loadGoogleCalendarSyncConfig(
     partnerAGasUrl: DEFAULT_PARTNER_A_GAS_URL,
     partnerACalendarId: 'primary',
     partnerBGasUrl: '',
-    partnerBCalendarId: 'primary',
+    partnerBCalendarId: DEFAULT_PARTNER_B_CALENDAR_ID,
     sharedCalendarId: '',
     syncRangePastDays: 30,
     syncRangeFutureDays: 120,
@@ -848,7 +877,9 @@ export async function syncWithGoogleCalendar(
   }
 
   const urlA = config.partnerAGasUrl?.trim() || '';
-  const urlB = config.partnerBGasUrl?.trim() || '';
+  const normB = normalizePartnerBFields(config.partnerBGasUrl, config.partnerBCalendarId);
+  const urlB = normB.partnerBGasUrl;
+  const calBId = normB.partnerBCalendarId;
   if (!urlA && !urlB) {
     throw new Error('Googleカレンダー同期用のGAS WebアプリURLが設定されていません。');
   }
@@ -886,7 +917,7 @@ export async function syncWithGoogleCalendar(
   if (urlB) {
     // もしゆうとと全く同じURL＆同じカレンダーID('primary')の場合は重複実行を避ける
     const calA = config.partnerACalendarId?.trim() || 'primary';
-    const calB = config.partnerBCalendarId?.trim() || 'primary';
+    const calB = calBId || 'primary';
     if (!(urlA === urlB && calA === calB)) {
       targets.push({
         key: 'partnerB',
@@ -896,12 +927,12 @@ export async function syncWithGoogleCalendar(
         defaultCreator: 'partnerB',
       });
     }
-  } else if (urlA && config.partnerBCalendarId?.trim() && config.partnerBCalendarId.trim() !== 'primary') {
+  } else if (urlA && calBId && calBId !== 'primary') {
     // 1つのGAS URLでさやの共有カレンダーIDも指定されている場合
     targets.push({
       key: 'partnerB',
       gasUrl: urlA,
-      calendarId: config.partnerBCalendarId.trim(),
+      calendarId: calBId,
       defaultCategory: 'partnerB',
       defaultCreator: 'partnerB',
     });
@@ -986,10 +1017,12 @@ export async function syncWithGoogleCalendar(
         }),
       });
       if (!preRes.ok) {
+        if (target.key !== 'partnerA') continue;
         throw new Error(`Googleカレンダー通信エラー (${preRes.status})`);
       }
       const preData = (await preRes.json()) as GasSyncResponse;
       if (!preData.ok) {
+        if (target.key !== 'partnerA') continue;
         throw new Error(preData.error || 'Googleカレンダー同期中にエラーが発生しました');
       }
       const preRemote = preData.remoteEvents || preData.events || [];
@@ -1036,11 +1069,13 @@ export async function syncWithGoogleCalendar(
       });
 
       if (!res.ok) {
+        if (target.key !== 'partnerA') continue;
         throw new Error(`Googleカレンダー通信エラー (${res.status})`);
       }
 
       data = (await res.json()) as GasSyncResponse;
       if (!data.ok) {
+        if (target.key !== 'partnerA') continue;
         throw new Error(data.error || 'Googleカレンダー同期中にエラーが発生しました');
       }
     }
