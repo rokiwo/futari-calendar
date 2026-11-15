@@ -612,18 +612,6 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
               <div className="flex flex-wrap items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenVoiceModal();
-                  }}
-                  className="px-2 py-1.5 rounded-2xl bg-[#B388EB] hover:bg-[#8C5EC7] text-white text-[11px] font-extrabold shadow-xs flex items-center gap-1"
-                >
-                  <Mic className="w-3 h-3" />
-                  <span>声で追加</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => handleOpenNewForm(activePartner, 'task')}
                   className="px-2.5 py-1.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-extrabold shadow-xs flex items-center gap-1"
                 >

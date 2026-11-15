@@ -126,7 +126,7 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   if (!isOpen) {
     return (
       <nav className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#FFE5EC] shadow-[0_-4px_20px_rgba(255,143,171,0.15)] pb-[env(safe-area-inset-bottom)]">
-        <div className="max-w-lg mx-auto px-2 py-1.5 grid grid-cols-5 gap-1">
+        <div className="max-w-lg mx-auto px-2 py-1.5 grid grid-cols-4 gap-1.5">
           <button
             type="button"
             onClick={() => onToggleOpen(true)}
@@ -136,17 +136,6 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             <Stamp className="w-5 h-5 text-[#FF8FAB]" />
             <span className="text-[10px] font-extrabold mt-0.5 leading-tight">
               シフト・残業
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenVoiceModal}
-            className="flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl bg-[#F3EAFF]/80 text-[#59318F] active:scale-95 transition-all"
-          >
-            <Mic className="w-5 h-5 text-[#B388EB]" />
-            <span className="text-[10px] font-extrabold mt-0.5 leading-tight">
-              声で予定
             </span>
           </button>
 

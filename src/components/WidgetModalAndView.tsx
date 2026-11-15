@@ -558,9 +558,9 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
         <span className="text-xs">予定・タスク追加</span>
       </button>
 
-      {/* 下部固定スマホドック（ウィジェット画面からカレンダー・スタンプ・音声・カメラへ即アクセス） */}
+      {/* 下部固定スマホドック（ウィジェット画面からカレンダー・スタンプ・カメラへ即アクセス） */}
       <div className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#FFE5EC] shadow-lg">
-        <div className="max-w-xl mx-auto px-2 py-2 grid grid-cols-5 gap-1.5">
+        <div className="max-w-xl mx-auto px-2 py-2 grid grid-cols-4 gap-1.5">
           <button
             type="button"
             onClick={onExitWidgetMode}
@@ -577,15 +577,6 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
           >
             <Stamp className="w-4 h-4 text-[#FF8FAB]" />
             <span>シフト連続入力</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onOpenVoiceModal(todayStr)}
-            className="py-2 px-1 rounded-2xl bg-[#F3EAFF] text-[#59318F] border border-[#DEC9FC] font-extrabold text-[11px] flex flex-col items-center justify-center gap-0.5 active:scale-95"
-          >
-            <Mic className="w-4 h-4 text-[#B388EB]" />
-            <span>声で予定追加</span>
           </button>
 
           <button
