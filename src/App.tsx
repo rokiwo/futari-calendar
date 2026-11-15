@@ -782,8 +782,9 @@ export const App: React.FC = () => {
       await saveLocalStore(stamped, sessionPassword || undefined);
 
       // 1. Googleカレンダー自動双方向同期がONなら、まずGoogleカレンダーへ即座に反映＆Gemini予定を取得
-      const currentGcalCfg =
-        stamped.metadata?.googleCalendarSyncConfig || gcalSyncConfig;
+      const currentGcalCfg = loadGoogleCalendarSyncConfig(
+        stamped.metadata?.googleCalendarSyncConfig || gcalSyncConfig
+      );
       if (
         triggerAutoCloud &&
         currentGcalCfg?.enabled &&
@@ -1611,10 +1612,11 @@ export const App: React.FC = () => {
 
   const handleTriggerGoogleCalendarSync = useCallback(
     async (configOverride?: GoogleCalendarSyncConfig): Promise<string> => {
-      const cfg =
-        configOverride ||
-        store.metadata?.googleCalendarSyncConfig ||
-        gcalSyncConfig;
+      const cfg = configOverride
+        ? configOverride
+        : loadGoogleCalendarSyncConfig(
+            store.metadata?.googleCalendarSyncConfig || gcalSyncConfig
+          );
       setIsSyncing(true);
       try {
         const gcalRes = await syncWithGoogleCalendar(store, cfg, activePartner);
@@ -1675,8 +1677,9 @@ export const App: React.FC = () => {
       try {
         let workingStore = store;
         let gcalMsg = '';
-        const currentGcalCfg =
-          workingStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig;
+        const currentGcalCfg = loadGoogleCalendarSyncConfig(
+          workingStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig
+        );
 
         // Googleカレンダー双方向同期がONなら同時に双方向同期
         if (
@@ -1745,8 +1748,9 @@ export const App: React.FC = () => {
 
     const runBackgroundSync = async () => {
       let currentStore = store;
-      const activeGcalCfg =
-        currentStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig;
+      const activeGcalCfg = loadGoogleCalendarSyncConfig(
+        currentStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig
+      );
       let gcalChanged = false;
 
       if (
@@ -2167,9 +2171,9 @@ export const App: React.FC = () => {
           store={store}
           activePartner={activePartner}
           syncConfig={syncConfig}
-          gcalSyncConfig={
+          gcalSyncConfig={loadGoogleCalendarSyncConfig(
             store.metadata?.googleCalendarSyncConfig || gcalSyncConfig
-          }
+          )}
           currentPassword={sessionPassword}
           onClose={() => closeNavLayer(() => setSettingsOpen(false))}
           onUpdateSyncConfig={(nextCfg) => {

@@ -396,9 +396,10 @@ export function loadGoogleCalendarSyncConfig(
     const raw = localStorage.getItem(LS_GCAL_SYNC_CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as GoogleCalendarSyncConfig;
+      const hadCustomUrl = Boolean(parsed.partnerAGasUrl || parsed.partnerBGasUrl);
       const partnerAGasUrl = parsed.partnerAGasUrl || DEFAULT_PARTNER_A_GAS_URL;
       return {
-        enabled: parsed.enabled ?? Boolean(partnerAGasUrl || parsed.partnerBGasUrl),
+        enabled: hadCustomUrl ? (parsed.enabled ?? true) : true,
         autoSync: parsed.autoSync ?? true,
         partnerAGasUrl,
         partnerACalendarId: parsed.partnerACalendarId || 'primary',
@@ -930,7 +931,7 @@ export async function syncWithGoogleCalendar(
       }));
 
     // 1b. このターゲットに送信（追加・更新）すべきペアカレ予定を抽出
-    const upserts = Object.values(nextEvents)
+    let upserts = Object.values(nextEvents)
       .filter((ev) => {
         if (!ev || !ev.date || ev.deletedAt) return false;
         const inRange = ev.date >= minDateStr && ev.date <= maxDateStr;
@@ -956,28 +957,81 @@ export async function syncWithGoogleCalendar(
         deletedAt: null,
       }));
 
-    const res = await fetch(target.gasUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify({
-        action: 'sync',
-        calendarId: target.calendarId,
-        pastDays,
-        futureDays,
-        upserts,
-        deletions,
-      }),
-    });
+    // 未紐付けのローカル予定がある場合、先にGoogleカレンダー側の最新予定を取得して
+    // Google側で既に移動・更新された予定を古いローカルデータで上書きしないようにする
+    let data: GasSyncResponse | null = null;
+    const hasUnlinkedUpserts = upserts.some((u) => !u.googleEventId);
+    if (hasUnlinkedUpserts) {
+      const preRes = await fetch(target.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'sync',
+          calendarId: target.calendarId,
+          pastDays,
+          futureDays,
+          upserts: [],
+          deletions: [],
+        }),
+      });
+      if (!preRes.ok) {
+        throw new Error(`Googleカレンダー通信エラー (${preRes.status})`);
+      }
+      const preData = (await preRes.json()) as GasSyncResponse;
+      if (!preData.ok) {
+        throw new Error(preData.error || 'Googleカレンダー同期中にエラーが発生しました');
+      }
+      const preRemote = preData.remoteEvents || preData.events || [];
+      const remoteByPairCalId = new Map<string, GasRemoteEventItem>();
+      for (const r of preRemote) {
+        if (r.paircalId) remoteByPairCalId.set(r.paircalId, r);
+      }
 
-    if (!res.ok) {
-      throw new Error(`Googleカレンダー通信エラー (${res.status})`);
+      upserts = upserts.filter((u) => {
+        if (u.googleEventId) return true;
+        const matchedRem = remoteByPairCalId.get(u.id);
+        if (!matchedRem) return true;
+        const localEv = nextEvents[u.id];
+        const remTimeMs = Date.parse(matchedRem.updatedAt || '') || 0;
+        const locTimeMs = Date.parse(localEv?.updatedAt || '') || 0;
+        // Google側が新しい場合はプッシュをスキップし、後続の取込処理でペアカレ側を更新する
+        if (remTimeMs > locTimeMs + 2000) {
+          return false;
+        }
+        // ローカルが新しい場合はGoogleEventIdを紐付けて上書き更新する
+        u.googleEventId = matchedRem.googleEventId;
+        return true;
+      });
+
+      if (upserts.length === 0 && deletions.length === 0) {
+        data = preData;
+      }
     }
 
-    const data = (await res.json()) as GasSyncResponse;
-    if (!data.ok) {
-      throw new Error(data.error || 'Googleカレンダー同期中にエラーが発生しました');
+    if (!data) {
+      const res = await fetch(target.gasUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify({
+          action: 'sync',
+          calendarId: target.calendarId,
+          pastDays,
+          futureDays,
+          upserts,
+          deletions,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Googleカレンダー通信エラー (${res.status})`);
+      }
+
+      data = (await res.json()) as GasSyncResponse;
+      if (!data.ok) {
+        throw new Error(data.error || 'Googleカレンダー同期中にエラーが発生しました');
+      }
     }
 
     // 2. Googleカレンダー側で採番された googleEventId をペアカレ側のイベントに記録
