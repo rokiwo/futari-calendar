@@ -911,31 +911,49 @@ export async function syncWithGoogleCalendar(
   let totalPushed = 0;
   const categories = store.categories && store.categories.length > 0 ? store.categories : DEFAULT_CATEGORIES;
 
+  const lastSyncedMs = config.lastGoogleSyncedAt ? Date.parse(config.lastGoogleSyncedAt) || 0 : 0;
+
   for (const target of targets) {
-    // 1. このターゲットに送信すべきペアカレ予定を抽出（期間内 または 既にGoogleEventIdを持つ削除済みイベント）
+    // 1a. Googleカレンダーから削除すべき予定（ローカルで削除済み かつ GoogleEventId を持つもの）
+    const deletions = Object.values(nextEvents)
+      .filter((ev) => {
+        if (!ev || !ev.date || !ev.deletedAt) return false;
+        const existingGId = ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined);
+        return Boolean(existingGId);
+      })
+      .map((ev) => ({
+        id: ev.id,
+        paircalId: ev.id,
+        googleEventId: ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined),
+        date: ev.date,
+        deletedAt: ev.deletedAt,
+      }));
+
+    // 1b. このターゲットに送信（追加・更新）すべきペアカレ予定を抽出
     const upserts = Object.values(nextEvents)
       .filter((ev) => {
-        if (!ev || !ev.date) return false;
+        if (!ev || !ev.date || ev.deletedAt) return false;
         const inRange = ev.date >= minDateStr && ev.date <= maxDateStr;
+        if (!inRange || !shouldSyncEventToTarget(ev, target.key, hasSharedCal)) return false;
         const existingGId = ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined);
-        if (ev.deletedAt) {
-          return Boolean(existingGId);
-        }
-        return inRange && shouldSyncEventToTarget(ev, target.key, hasSharedCal);
+        if (!existingGId || !ev.googleCalSynced) return true;
+        const evUpdatedMs = Date.parse(ev.updatedAt || '') || 0;
+        return evUpdatedMs > lastSyncedMs - 5000;
       })
       .map((ev) => ({
         id: ev.id,
         googleEventId: ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined),
         date: ev.date,
-        title: ev.title,
+        title: (ev.isTask ? '✅ ' : '') + ev.title,
         isAllDay: ev.isAllDay,
         startTime: ev.startTime,
         endTime: ev.endTime,
         memo: ev.memo,
+        categoryId: ev.categoryId,
         supportBadges: ev.supportBadges,
         isTask: ev.isTask,
         reminderMinutes: ev.reminderMinutes,
-        deletedAt: ev.deletedAt || null,
+        deletedAt: null,
       }));
 
     const res = await fetch(target.gasUrl, {
@@ -949,6 +967,7 @@ export async function syncWithGoogleCalendar(
         pastDays,
         futureDays,
         upserts,
+        deletions,
       }),
     });
 
@@ -964,6 +983,19 @@ export async function syncWithGoogleCalendar(
     // 2. Googleカレンダー側で採番された googleEventId をペアカレ側のイベントに記録
     const mapping = data.pushedMapping || data.idMap || {};
     const seenGoogleIdsInRemote = new Set<string>();
+
+    for (const delItem of deletions) {
+      const localDel = nextEvents[delItem.id];
+      if (localDel && localDel.deletedAt) {
+        const nextGIds = { ...(localDel.googleEventIds || {}) };
+        delete nextGIds[target.key];
+        nextEvents[delItem.id] = {
+          ...localDel,
+          googleEventId: target.key === 'partnerA' ? undefined : localDel.googleEventId,
+          googleEventIds: nextGIds,
+        };
+      }
+    }
 
     for (const [paircalId, gEventId] of Object.entries(mapping)) {
       const localEv = nextEvents[paircalId];
@@ -990,8 +1022,11 @@ export async function syncWithGoogleCalendar(
       if (!rem.googleEventId || !rem.date) continue;
       seenGoogleIdsInRemote.add(rem.googleEventId);
 
-      // すでにペアカレが作成したシフト出力用イベント（futarical-shift-...等）はスキップ
+      // すでにペアカレが作成したシフト出力用イベント（futarical-shift-...等）および旧nscale勤務シフトはスキップ
       if (rem.title && /^([🐻🐰🐱🐶🦊🐼🐨🦁🐥🐧🧑👩🤵👰].*?:|🔔 ペアカレ通知連携テスト)/.test(rem.title)) {
+        continue;
+      }
+      if (rem.memo && rem.memo.trim() === '*nscale*') {
         continue;
       }
 
