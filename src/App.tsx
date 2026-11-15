@@ -24,6 +24,8 @@ import {
   formatMinutesToJa,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
+  getEffectivePrivateFor,
+  isEventVisibleToPartner,
   LEGACY_DEFAULT_STAMP_IDS,
 } from './utils/presets';
 import { hashPasscode } from './utils/crypto';
@@ -1584,6 +1586,8 @@ export const App: React.FC = () => {
     }
     for (const ev of Object.values(store.events)) {
       if (ev.deletedAt) continue;
+      // 🔒 個人限定予定・タスクは相手に見えないため相手の未確認件数に含めない
+      if (getEffectivePrivateFor(ev)) continue;
       if (ev.createdBy === activePartner && (Date.parse(ev.updatedAt) || 0) > otherSeenMs) {
         count++;
       }
@@ -1599,8 +1603,8 @@ export const App: React.FC = () => {
 
     for (const ev of Object.values(store.events || {})) {
       if (!ev || ev.deletedAt) continue;
-      // 🔒 操作者限定プライベート予定：他人の秘密予定は新着カウントにも含めない
-      if (ev.privateFor && ev.privateFor !== activePartner) continue;
+      // 🔒 操作者限定プライベート予定＆個人タスク：他人の秘密予定・タスクは新着カウントにも含めない
+      if (!isEventVisibleToPartner(ev, activePartner)) continue;
       if (ev.createdBy === otherId && (Date.parse(ev.updatedAt || ev.createdAt) || 0) > mySeenMs) {
         count++;
       }

@@ -5,6 +5,7 @@ import {
   CalendarDataStore,
   CoupleMetadata,
   PartnerId,
+  ScheduleEvent,
   ShiftEntry,
   StampPreset,
 } from '../types/calendar';
@@ -756,5 +757,25 @@ export function calculateMinutesBetween(startTime: string, endTime: string): num
 
   return Math.max(0, endTotal - startTotal);
 }
+
+/**
+ * タスク（isTask === true）は常に個人のカレンダー（相手には見えない専用予定）として扱う。
+ * 通常の予定は privateFor が設定されている場合のみ個人限定とする。
+ */
+export function getEffectivePrivateFor(ev: ScheduleEvent): PartnerId | undefined {
+  if (ev.privateFor) return ev.privateFor;
+  if (ev.isTask) {
+    if (ev.categoryId === 'partnerA' || ev.notifyTarget === 'partnerA') return 'partnerA';
+    if (ev.categoryId === 'partnerB' || ev.notifyTarget === 'partnerB') return 'partnerB';
+    return ev.createdBy || 'partnerA';
+  }
+  return undefined;
+}
+
+export function isEventVisibleToPartner(ev: ScheduleEvent, activePartner: PartnerId): boolean {
+  const priv = getEffectivePrivateFor(ev);
+  return !priv || priv === activePartner;
+}
+
 
 

@@ -25,9 +25,11 @@ import {
 import {
   formatMinutesShort,
   formatMinutesToJa,
+  getEffectivePrivateFor,
   getJapaneseHoliday,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
+  isEventVisibleToPartner,
   resolveCategoryInfo,
 } from '../utils/presets';
 import { MonthlyOvertimeSummary, formatLastSeen } from './TopHeader';
@@ -255,7 +257,7 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
           const isBothHoliday = matchedHolidays.includes(day.dateStr);
 
           const events = Object.values(store.events)
-            .filter((e) => !e.deletedAt && e.date === day.dateStr && (!e.privateFor || e.privateFor === activePartner))
+            .filter((e) => !e.deletedAt && e.date === day.dateStr && isEventVisibleToPartner(e, activePartner))
             .sort((a, b) => {
               if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1;
               return (a.startTime || '00:00').localeCompare(b.startTime || '00:00');
@@ -640,7 +642,7 @@ export const WidgetGuideModal: React.FC<WidgetGuideModalProps> = ({
       const stA = sA && !sA.deletedAt ? stampMap.get(sA.stampId) : undefined;
       const stB = sB && !sB.deletedAt ? stampMap.get(sB.stampId) : undefined;
       const evs = Object.values(store.events)
-        .filter((e) => !e.deletedAt && e.date === d.dateStr && !e.privateFor)
+        .filter((e) => !e.deletedAt && e.date === d.dateStr && !getEffectivePrivateFor(e))
         .map((e) => e.title)
         .join(' / ');
       return {

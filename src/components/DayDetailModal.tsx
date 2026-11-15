@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   X,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Plus,
@@ -31,9 +32,11 @@ import {
   EVENT_PATTERN_CATEGORIES,
   formatMinutesShort,
   formatMinutesToJa,
+  getEffectivePrivateFor,
   getJapaneseHoliday,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
+  isEventVisibleToPartner,
   resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
@@ -366,7 +369,9 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const isBothHoliday = isHolidayShift(shiftA) && isHolidayShift(shiftB);
 
   const dayEvents = Object.values(store.events || {})
-    .filter((e): e is ScheduleEvent => Boolean(e && !e.deletedAt && e.date === dateStr && (!e.privateFor || e.privateFor === activePartner)))
+    .filter((e): e is ScheduleEvent =>
+      Boolean(e && !e.deletedAt && e.date === dateStr && isEventVisibleToPartner(e, activePartner))
+    )
     .sort((a, b) => {
       if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1;
       return (a.startTime || '00:00').localeCompare(b.startTime || '00:00');
@@ -495,16 +500,19 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     const existing = editingEventId ? store.events[editingEventId] : undefined;
     const finalDate = (eventDate || dateStr).trim();
 
-    const effectivePrivateFor: PartnerId | undefined = isPrivate
-      ? (existing?.privateFor || activePartner)
-      : undefined;
+    const effectivePrivateFor: PartnerId | undefined =
+      isTask || isPrivate
+        ? (existing ? getEffectivePrivateFor(existing) || activePartner : activePartner)
+        : undefined;
+    const effectiveCategoryId: CalendarCategoryId = isTask ? activePartner : categoryId;
+    const finalCat = resolveCategoryInfo(effectiveCategoryId, store.categories, store.metadata);
 
     const newEvent: ScheduleEvent = {
       id: editingEventId || `ev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       date: finalDate,
       title: title.trim(),
-      categoryId,
-      color: cat.accentColor,
+      categoryId: effectiveCategoryId,
+      color: finalCat.accentColor,
       isAllDay,
       startTime: isAllDay ? undefined : startTime,
       endTime: isAllDay ? undefined : endTime,
@@ -586,9 +594,10 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-600"
+            className="px-3 py-2 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-black flex items-center justify-center active:scale-95"
+            title="最小化・閉じる"
           >
-            <X className="w-5 h-5" />
+            <ChevronDown className="w-5 h-5 stroke-[2.75]" />
           </button>
         </div>
 

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Edit3, Plus, Trash2, X } from 'lucide-react';
+import { ChevronDown, Edit3, Plus, Trash2 } from 'lucide-react';
 import {
   CalendarDataStore,
   FilterCategoryId,
@@ -10,9 +10,11 @@ import {
 } from '../types/calendar';
 import {
   formatMinutesShort,
+  getEffectivePrivateFor,
   getJapaneseHoliday,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
+  isEventVisibleToPartner,
   resolveCategoryInfo,
 } from '../utils/presets';
 
@@ -181,13 +183,13 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   for (const ev of Object.values(store.events || {})) {
     if (!ev || ev.deletedAt) continue;
 
-    // 🔒 操作者限定プライベート予定：他人の秘密予定は完全に除外！
-    if (ev.privateFor && ev.privateFor !== activePartner) continue;
+    // 🔒 操作者限定プライベート予定＆個人タスク：他人の秘密予定・タスクは完全に除外！
+    if (!isEventVisibleToPartner(ev, activePartner)) continue;
 
     // フィルター判定
     if (filterCategory === 'private') {
-      // 🔒「じぶん限定」フィルター選択時は、自分のプライベート予定のみを表示
-      if (ev.privateFor !== activePartner) continue;
+      // 🔒「じぶん限定」フィルター選択時は、自分のプライベート予定・タスクのみを表示
+      if (getEffectivePrivateFor(ev) !== activePartner) continue;
     } else if (filterCategory !== 'all' && ev.categoryId !== filterCategory) {
       continue;
     }
@@ -423,10 +425,10 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                 e.stopPropagation();
                 handleSetPreviewPosition('hidden');
               }}
-              className="p-1 rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100"
-              title="詳細を閉じる"
+              className="px-2.5 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-black flex items-center justify-center active:scale-95"
+              title="詳細を最小化"
             >
-              <X className="w-4 h-4" />
+              <ChevronDown className="w-4 h-4 stroke-[2.75]" />
             </button>
           </div>
         </div>

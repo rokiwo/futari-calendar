@@ -18,7 +18,7 @@ import {
   ShiftEntry,
   StampPreset,
 } from '../types/calendar';
-import { resolveCategoryInfo } from '../utils/presets';
+import { isEventVisibleToPartner, resolveCategoryInfo } from '../utils/presets';
 
 interface PartnerEventsModalProps {
   isOpen: boolean;
@@ -73,8 +73,8 @@ export const PartnerEventsModal: React.FC<PartnerEventsModalProps> = ({
 
     for (const ev of Object.values(store.events || {})) {
       if (!ev || ev.deletedAt) continue;
-      // 🔒 操作者限定プライベート予定：相手の秘密予定は相手の予定一覧にも絶対に表示しない
-      if (ev.privateFor && ev.privateFor !== activePartner) continue;
+      // 🔒 操作者限定プライベート予定＆個人タスク：相手の秘密予定・タスクは相手の予定一覧にも絶対に表示しない
+      if (!isEventVisibleToPartner(ev, activePartner)) continue;
       // 相手が作成した予定、もしくは相手専用カテゴリの予定
       if (ev.createdBy === otherPartnerId) {
         const updatedMs = Date.parse(ev.updatedAt || ev.createdAt) || 0;

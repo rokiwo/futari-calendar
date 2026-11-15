@@ -10,6 +10,7 @@ import {
 import {
   DEFAULT_CATEGORIES,
   formatMinutesShort,
+  getEffectivePrivateFor,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
   resolveCategoryInfo,
@@ -782,9 +783,10 @@ function shouldSyncEventToTarget(
   targetKey: 'partnerA' | 'partnerB' | 'shared',
   hasSharedCalendar: boolean
 ): boolean {
-  // プライベート予定は本人のカレンダーのみに同期し、相手や共有カレンダーには出さない
-  if (ev.privateFor) {
-    return ev.privateFor === targetKey;
+  // プライベート予定およびタスク（常に個人専用）は本人のカレンダーのみに同期し、相手や共有カレンダーには出さない
+  const priv = getEffectivePrivateFor(ev);
+  if (priv) {
+    return priv === targetKey;
   }
 
   if (targetKey === 'shared') {
@@ -1096,8 +1098,16 @@ export async function syncWithGoogleCalendar(
         );
       }
 
-      const cleanTitle = rem.title.replace(/^✅\s*【?タスク】?\s*/, '').trim() || '(無題の予定)';
-      const isTaskDetected = /^✅/.test(rem.title.trim());
+      const rawTrimmed = (rem.title || '').trim();
+      const isTaskDetected =
+        /^(✅|⬜|☑️|【?タスク】?|\[タスク\]|タスク[:：\s・]|TODO[:：\s・]|ToDo[:：\s・]|やること[:：\s・])/i.test(rawTrimmed) ||
+        /([（(【\[](タスク|TODO|ToDo|やること)[）)】\]])\s*$/i.test(rawTrimmed);
+      const cleanTitle =
+        rawTrimmed
+          .replace(/^(✅|⬜|☑️)\s*/, '')
+          .replace(/^(【?タスク】?|\[タスク\]|タスク|TODO|ToDo|やること)[:：\s・]*/i, '')
+          .replace(/\s*([（(【\[](タスク|TODO|ToDo|やること)[）)】\]])\s*$/i, '')
+          .trim() || rawTrimmed || '(無題の予定)';
 
       if (matchedLocal) {
         // もしローカルで削除済みの場合は復活させない
@@ -1144,9 +1154,11 @@ export async function syncWithGoogleCalendar(
         }
       } else {
         // 新規にGoogleカレンダー（またはスマホのGemini等）から作成された予定をペアカレに自動インポート！
-        // タイトルに「二人」「ふたり」「デート」「家族」などが含まれていれば自動で共有カテゴリに判定
+        // タスクの場合は常に個人のカレンダー（相手には非表示）として取り込む
         let inferredCat: CalendarCategoryId = target.defaultCategory;
-        if (/二人|ふたり|デート|旅行|記念日|外食|結婚/.test(cleanTitle)) {
+        if (isTaskDetected) {
+          inferredCat = target.defaultCreator;
+        } else if (/二人|ふたり|デート|旅行|記念日|外食|結婚/.test(cleanTitle)) {
           inferredCat = 'shared';
         } else if (store.metadata.partners.partnerA.name && cleanTitle.includes(store.metadata.partners.partnerA.name)) {
           inferredCat = 'partnerA';
@@ -1162,12 +1174,13 @@ export async function syncWithGoogleCalendar(
         if (nextEvents[newId]?.deletedAt) continue;
 
         const nowIso = new Date().toISOString();
-        const notifyTarget: NotifyTarget =
-          inferredCat === 'partnerA'
-            ? 'partnerA'
-            : inferredCat === 'partnerB'
-            ? 'partnerB'
-            : 'both';
+        const notifyTarget: NotifyTarget = isTaskDetected
+          ? target.defaultCreator
+          : inferredCat === 'partnerA'
+          ? 'partnerA'
+          : inferredCat === 'partnerB'
+          ? 'partnerB'
+          : 'both';
 
         nextEvents[newId] = {
           id: newId,
@@ -1182,6 +1195,7 @@ export async function syncWithGoogleCalendar(
           isTask: isTaskDetected,
           isCompleted: false,
           notifyTarget,
+          privateFor: isTaskDetected ? target.defaultCreator : undefined,
           googleCalSynced: true,
           syncedFromGoogle: true,
           googleEventId: target.key === 'partnerA' ? rem.googleEventId : undefined,
