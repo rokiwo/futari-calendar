@@ -22,22 +22,31 @@ import {
   CalendarDataStore,
   CloudSyncConfig,
   EncryptedPayload,
+  GoogleCalendarSyncConfig,
   PartnerId,
   ScheduleEvent,
   WelcomeImageConfig,
 } from '../types/calendar';
 import { decryptCalendarStore, encryptCalendarStore } from '../utils/crypto';
 import { exportToIcs, IcsExportTarget, parseIcsEvents } from '../utils/ical';
-import { generatePartnerNotificationIcs, openOrShareIcsOnDevice } from '../utils/googleCalendar';
+import {
+  generatePartnerNotificationIcs,
+  getGoogleAppsScriptTemplateCode,
+  openOrShareIcsOnDevice,
+  testGoogleCalendarGasConnection,
+} from '../utils/googleCalendar';
 import { createNewSecretGist } from '../utils/storage';
 
 interface SettingsAndSyncModalProps {
   store: CalendarDataStore;
   activePartner: PartnerId;
   syncConfig: CloudSyncConfig;
+  gcalSyncConfig: GoogleCalendarSyncConfig;
   currentPassword: string;
   onClose: () => void;
   onUpdateSyncConfig: (config: CloudSyncConfig) => void;
+  onUpdateGcalSyncConfig: (config: GoogleCalendarSyncConfig) => void;
+  onTriggerGoogleCalendarSync: (configOverride?: GoogleCalendarSyncConfig) => Promise<string>;
   onUpdatePassword: (newPassword: string) => Promise<void>;
   onTriggerCloudSync: (configOverride?: CloudSyncConfig, passwordOverride?: string) => Promise<void>;
   onMergeRemoteStore: (remoteStore: CalendarDataStore, message: string) => void;
@@ -66,9 +75,12 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   store,
   activePartner,
   syncConfig,
+  gcalSyncConfig,
   currentPassword,
   onClose,
   onUpdateSyncConfig,
+  onUpdateGcalSyncConfig,
+  onTriggerGoogleCalendarSync,
   onUpdatePassword,
   onTriggerCloudSync,
   onMergeRemoteStore,
@@ -83,7 +95,121 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   onOpenSharedKeywordModal,
   onUnshareCalendar,
 }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('sync');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('ical_backup');
+
+  // Googleカレンダー双方向・Gemini自動同期フォーム状態
+  const [gcalEnabled, setGcalEnabled] = useState<boolean>(gcalSyncConfig.enabled ?? false);
+  const [gcalAutoSync, setGcalAutoSync] = useState<boolean>(gcalSyncConfig.autoSync ?? true);
+  const [partnerAGasUrl, setPartnerAGasUrl] = useState<string>(gcalSyncConfig.partnerAGasUrl || '');
+  const [partnerACalendarId, setPartnerACalendarId] = useState<string>(
+    gcalSyncConfig.partnerACalendarId || 'primary'
+  );
+  const [partnerBGasUrl, setPartnerBGasUrl] = useState<string>(gcalSyncConfig.partnerBGasUrl || '');
+  const [partnerBCalendarId, setPartnerBCalendarId] = useState<string>(
+    gcalSyncConfig.partnerBCalendarId || 'primary'
+  );
+  const [sharedCalendarId, setSharedCalendarId] = useState<string>(
+    gcalSyncConfig.sharedCalendarId || ''
+  );
+  const [copiedGasCode, setCopiedGasCode] = useState<boolean>(false);
+  const [gcalBusy, setGcalBusy] = useState<boolean>(false);
+
+  const buildCurrentGcalConfig = (): GoogleCalendarSyncConfig => {
+    const hasAnyUrl = Boolean(partnerAGasUrl.trim() || partnerBGasUrl.trim());
+    return {
+      enabled: gcalEnabled && hasAnyUrl,
+      autoSync: gcalAutoSync,
+      partnerAGasUrl: partnerAGasUrl.trim(),
+      partnerACalendarId: partnerACalendarId.trim() || 'primary',
+      partnerBGasUrl: partnerBGasUrl.trim(),
+      partnerBCalendarId: partnerBCalendarId.trim() || 'primary',
+      sharedCalendarId: sharedCalendarId.trim(),
+      syncRangePastDays: gcalSyncConfig.syncRangePastDays || 60,
+      syncRangeFutureDays: gcalSyncConfig.syncRangeFutureDays || 180,
+      lastGoogleSyncedAt: gcalSyncConfig.lastGoogleSyncedAt,
+      updatedAt: new Date().toISOString(),
+    };
+  };
+
+  const handleCopyGasScript = async () => {
+    try {
+      const code = getGoogleAppsScriptTemplateCode();
+      await navigator.clipboard.writeText(code);
+      setCopiedGasCode(true);
+      setTimeout(() => setCopiedGasCode(false), 3000);
+      setStatusMsg({
+        type: 'ok',
+        text: '📋 Googleカレンダー＆Gemini双方向同期用のGASコードをコピーしました！script.google.com に貼り付けてデプロイしてください✨',
+      });
+    } catch {
+      setStatusMsg({
+        type: 'err',
+        text: 'クリップボードへのコピーに失敗しました。ブラウザの権限をご確認ください。',
+      });
+    }
+  };
+
+  const handleTestGcalConnection = async (target: 'partnerA' | 'partnerB') => {
+    setStatusMsg(null);
+    const url = target === 'partnerA' ? partnerAGasUrl.trim() : (partnerBGasUrl.trim() || partnerAGasUrl.trim());
+    const calId = target === 'partnerA' ? (partnerACalendarId.trim() || 'primary') : (partnerBCalendarId.trim() || 'primary');
+    if (!url) {
+      setStatusMsg({
+        type: 'err',
+        text: '先に GAS WebアプリURL（https://script.google.com/macros/s/.../exec）を入力してください',
+      });
+      return;
+    }
+    setGcalBusy(true);
+    try {
+      const res = await testGoogleCalendarGasConnection(url, calId);
+      setStatusMsg({
+        type: res.ok ? 'ok' : 'err',
+        text: res.ok
+          ? `✅ Googleカレンダー「${res.calendarName || calId}」への接続に成功しました！✨`
+          : `❌ 接続エラー: ${res.error || 'URLまたはデプロイ権限（全員）をご確認ください'}`,
+      });
+    } finally {
+      setGcalBusy(false);
+    }
+  };
+
+  const handleSaveAndSyncGcal = async () => {
+    setStatusMsg(null);
+    const hasAnyUrl = Boolean(partnerAGasUrl.trim() || partnerBGasUrl.trim());
+    const nextCfg: GoogleCalendarSyncConfig = {
+      ...buildCurrentGcalConfig(),
+      enabled: hasAnyUrl ? true : gcalEnabled,
+    };
+    if (hasAnyUrl && !gcalEnabled) {
+      setGcalEnabled(true);
+    }
+    onUpdateGcalSyncConfig(nextCfg);
+
+    if (!nextCfg.enabled || !hasAnyUrl) {
+      setStatusMsg({
+        type: 'ok',
+        text: 'Googleカレンダー連携設定を保存しました✨（自動同期を開始するにはGAS WebアプリURLを入力してください）',
+      });
+      return;
+    }
+
+    setGcalBusy(true);
+    try {
+      const msg = await onTriggerGoogleCalendarSync(nextCfg);
+      setStatusMsg({
+        type: 'ok',
+        text: msg,
+      });
+    } catch (err) {
+      setStatusMsg({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Googleカレンダー同期中にエラーが発生しました',
+      });
+    } finally {
+      setGcalBusy(false);
+    }
+  };
 
   // クラウド同期フォーム状態
   const [mode, setMode] = useState<'gist' | 'repo'>(syncConfig.mode || 'gist');
@@ -921,9 +1047,276 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
             );
           })()}
 
-          {/* タブ2：iCal (.ics) カレンダー連携 ＆ JSONバックアップ */}
+          {/* タブ2：Googleカレンダー・Gemini双方向自動同期 ＆ iCal連携 ＆ JSONバックアップ */}
           {activeTab === 'ical_backup' && (
             <div className="space-y-4">
+              {/* 🔄 Googleカレンダー ＆ Gemini 完全自動・双方向同期（APIキー不要・GAS Webアプリ方式） */}
+              <div className="bg-white rounded-3xl p-4 border-2 border-[#56CFE1] space-y-3.5 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🔄</span>
+                    <div>
+                      <h3 className="text-sm font-black text-stone-800 flex items-center gap-1.5">
+                        <span>Googleカレンダー ＆ Gemini 自動双方向同期</span>
+                      </h3>
+                      <p className="text-[11px] text-stone-500">
+                        ペアカレ ⇄ Googleカレンダーを双方向同期！スマホのGeminiに入れた予定も自動でペアカレに入ります✨
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded-full font-extrabold text-[10px] shrink-0 ${
+                      gcalEnabled && (partnerAGasUrl.trim() || partnerBGasUrl.trim())
+                        ? 'bg-[#E6F7EF] text-[#1E6645]'
+                        : 'bg-stone-100 text-stone-500'
+                    }`}
+                  >
+                    {gcalEnabled && (partnerAGasUrl.trim() || partnerBGasUrl.trim())
+                      ? '✅ 双方向自動同期 ON'
+                      : '⚪ 未設定（URLを入力してON）'}
+                  </span>
+                </div>
+
+                {/* Gemini → Googleカレンダー → ペアカレ の流れガイド */}
+                <div className="p-3 rounded-2xl bg-gradient-to-r from-[#E2F9FC]/70 via-[#FFF0F5]/70 to-[#F3EAFF]/70 border border-[#BCEBF5] space-y-1.5">
+                  <div className="font-extrabold text-[#136370] text-xs flex items-center gap-1.5">
+                    <span>✨</span>
+                    <span>スマホのGeminiから自動でペアカレに予定を入れる方法</span>
+                  </div>
+                  <p className="text-[11px] text-stone-700 leading-relaxed font-bold">
+                    ① スマホのGeminiアプリに<strong>「来週土曜18時から焼肉をGoogleカレンダーに入れて」</strong>と話す／入力する
+                    <br />
+                    ② Googleカレンダーに予定が入ると、<strong>ペアカレが自動で検知してカレンダーに取り込み＆パートナーのスマホにも自動共有</strong>されます！
+                    <br />
+                    ③ 逆に<strong>ペアカレで追加・変更・削除した予定やタスクも、自動でGoogleカレンダーへ双方向反映</strong>されます🔄
+                  </p>
+                </div>
+
+                {/* Step 1: GASコードのワンタップコピー＆設定手順 */}
+                <div className="p-3.5 rounded-2xl bg-[#FFFBF7] border border-stone-200/90 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-extrabold text-stone-800 text-xs">
+                      🛠️ 初回のみ（約1分）：APIキー不要！Google Apps Script (GAS) の準備
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyGasScript}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#126875] to-[#2EA8BA] hover:opacity-95 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs active:scale-95 transition-all"
+                    >
+                      {copiedGasCode ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      <span>
+                        {copiedGasCode
+                          ? '✅ GASスクリプトをコピーしました！'
+                          : '📋 ① GAS用スクリプトをワンタップでコピー'}
+                      </span>
+                    </button>
+                  </div>
+
+                  <details className="text-[11px] text-stone-600 bg-white rounded-xl p-2.5 border border-stone-200/70">
+                    <summary className="font-extrabold text-[#136370] cursor-pointer">
+                      📖 かんたん3ステップ設定手順を見る（クリックで開く）
+                    </summary>
+                    <ol className="list-decimal list-inside space-y-1.5 mt-2 pt-2 border-t border-stone-100 leading-relaxed">
+                      <li>
+                        上の<strong>「📋 ① GAS用スクリプトをワンタップでコピー」</strong>ボタンを押します。
+                      </li>
+                      <li>
+                        Google公式の{' '}
+                        <a
+                          href="https://script.google.com/home/start"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sky-600 underline font-extrabold"
+                        >
+                          Google Apps Script (script.google.com)
+                        </a>{' '}
+                        を開き、<strong>「新しいプロジェクト」</strong>を押して、最初から書いてあるコードを消して貼り付け、保存（💾）します。
+                      </li>
+                      <li>
+                        右上の<strong>「デプロイ」＞「新しいデプロイ」</strong>を押し、種類の選択（⚙️）で<strong>「ウェブアプリ」</strong>を選びます。
+                      </li>
+                      <li>
+                        次の設定にして<strong>「デプロイ」</strong>を押します：
+                        <ul className="list-disc list-inside ml-3 mt-1 text-stone-700 font-bold">
+                          <li>次のユーザーとして実行：<strong>「自分」</strong></li>
+                          <li>アクセスできるユーザー：<strong>「全員」</strong>（※ペアカレから通信するために必須）</li>
+                        </ul>
+                      </li>
+                      <li>
+                        発行された<strong>「ウェブアプリURL（https://script.google.com/macros/s/.../exec）」</strong>をコピーして、下の欄に貼り付ければ完了です🎉
+                      </li>
+                    </ol>
+                  </details>
+                </div>
+
+                {/* ON/OFF トグル */}
+                <div className="flex flex-wrap items-center gap-4 px-1">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={gcalEnabled}
+                      onChange={(e) => setGcalEnabled(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#126875] focus:ring-[#56CFE1]"
+                    />
+                    <span className="font-extrabold text-stone-800 text-xs">
+                      Googleカレンダー双方向同期を有効にする
+                    </span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={gcalAutoSync}
+                      onChange={(e) => setGcalAutoSync(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#126875] focus:ring-[#56CFE1]"
+                    />
+                    <span className="font-bold text-stone-600 text-xs">
+                      予定追加・起動時にバックグラウンドで自動同期する
+                    </span>
+                  </label>
+                </div>
+
+                {/* 🐻 パートナーA（ゆうと）のGoogleカレンダー設定 */}
+                <div className="p-3 rounded-2xl bg-[#E2F9FC]/45 border border-[#56CFE1]/50 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-extrabold text-[#136370] text-xs flex items-center gap-1">
+                      <span>{store.metadata.partners.partnerA.avatar}</span>
+                      <span>
+                        {store.metadata.partners.partnerA.name}のGoogleカレンダー連携（メインGAS）
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={gcalBusy}
+                      onClick={() => handleTestGcalConnection('partnerA')}
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-stone-50 text-[#136370] border border-[#56CFE1] font-extrabold text-[11px] shadow-2xs"
+                    >
+                      🔌 接続テスト
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-stone-600">
+                      GAS ウェブアプリURL（必須）
+                    </label>
+                    <input
+                      type="url"
+                      value={partnerAGasUrl}
+                      onChange={(e) => {
+                        setPartnerAGasUrl(e.target.value);
+                        if (e.target.value.trim() && !gcalEnabled) {
+                          setGcalEnabled(true);
+                        }
+                      }}
+                      placeholder="https://script.google.com/macros/s/xxxxxx/exec"
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-stone-500 mb-0.5">
+                        {store.metadata.partners.partnerA.name}のカレンダーID（通常は primary のまま）
+                      </label>
+                      <input
+                        type="text"
+                        value={partnerACalendarId}
+                        onChange={(e) => setPartnerACalendarId(e.target.value)}
+                        placeholder="primary または xxx@gmail.com"
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-stone-500 mb-0.5">
+                        💕 ふたり共有GoogleカレンダーID（任意・ある場合のみ）
+                      </label>
+                      <input
+                        type="text"
+                        value={sharedCalendarId}
+                        onChange={(e) => setSharedCalendarId(e.target.value)}
+                        placeholder="空欄なら各自のカレンダーに同期"
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🐰 パートナーB（さや）のGoogleカレンダー設定（任意） */}
+                <div className="p-3 rounded-2xl bg-[#F3EAFF]/45 border border-[#B388EB]/50 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-extrabold text-[#59318F] text-xs flex items-center gap-1">
+                      <span>{store.metadata.partners.partnerB.avatar}</span>
+                      <span>
+                        {store.metadata.partners.partnerB.name}のGoogleカレンダー連携（任意・2人分つなぐ場合）
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={gcalBusy}
+                      onClick={() => handleTestGcalConnection('partnerB')}
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-stone-50 text-[#59318F] border border-[#B388EB] font-extrabold text-[11px] shadow-2xs"
+                    >
+                      🔌 接続テスト
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-stone-500 mb-0.5">
+                        {store.metadata.partners.partnerB.name}用 GAS URL（空欄なら上のGASを使用）
+                      </label>
+                      <input
+                        type="url"
+                        value={partnerBGasUrl}
+                        onChange={(e) => setPartnerBGasUrl(e.target.value)}
+                        placeholder="https://script.google.com/macros/s/.../exec（任意）"
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-stone-500 mb-0.5">
+                        {store.metadata.partners.partnerB.name}のカレンダーID（メールアドレス等）
+                      </label>
+                      <input
+                        type="text"
+                        value={partnerBCalendarId}
+                        onChange={(e) => setPartnerBCalendarId(e.target.value)}
+                        placeholder="primary または パートナーのGmailアドレス"
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 保存＆今すぐGoogleカレンダー双方向同期ボタン */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  {gcalSyncConfig.lastGoogleSyncedAt && (
+                    <span className="text-[11px] text-stone-400 font-bold">
+                      最終Google同期:{' '}
+                      {new Date(gcalSyncConfig.lastGoogleSyncedAt).toLocaleString('ja-JP', {
+                        month: 'numeric',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={gcalBusy}
+                    onClick={handleSaveAndSyncGcal}
+                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-[#126875] to-[#56CFE1] hover:opacity-95 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${gcalBusy ? 'animate-spin' : ''}`} />
+                    <span>
+                      {gcalBusy
+                        ? 'Googleカレンダーと双方向同期中...'
+                        : '💾 設定を保存して今すぐGoogleカレンダーと双方向同期する'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               {/* 🔔 スマホのカレンダー＆Googleカレンダー通知連携（夫の端末専用 ／ 妻の端末専用） */}
               <div className="bg-[#F6F9FF] rounded-2xl p-4 border border-sky-200/90 space-y-2.5 shadow-2xs">
                 <h3 className="text-sm font-extrabold text-sky-900 flex items-center gap-1.5">

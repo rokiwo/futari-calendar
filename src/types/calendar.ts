@@ -94,12 +94,19 @@ export interface ScheduleEvent {
   supportBadges?: string[]; // 例: ["🍳夜ごはん不要", "🍱お弁当あり"]
   isTentative?: boolean;    // 仮予定フラグ（「〜予定」「〜かも」）
 
-  // タスク機能＆Googleカレンダー端末別通知フィールド
+  // タスク機能＆Googleカレンダー端末別通知・双方向自動同期フィールド
   isTask?: boolean;           // true の場合はタスク（ToDoチェック付き）として扱う
   isCompleted?: boolean;      // タスクの完了チェック状態
   notifyTarget?: NotifyTarget; // 通知を送る対象（'partnerA'=夫の端末のみ, 'partnerB'=妻の端末のみ, 'both'=両方）
   reminderMinutes?: number;   // Googleカレンダー通知タイミング（分前: 0=定刻, 10=10分前, 30=30分前, 60=1時間前, 1440=前日）
   googleCalSynced?: boolean;  // Googleカレンダーへ登録済みフラグ
+  googleEventId?: string;     // Googleカレンダー側のイベントID（単一カレンダー連携・後方互換用）
+  googleEventIds?: {          // ゆうと用・さや用・共有用それぞれのGoogleカレンダー内イベントID
+    partnerA?: string;
+    partnerB?: string;
+    shared?: string;
+  };
+  syncedFromGoogle?: boolean; // Googleカレンダー（またはGemini→Googleカレンダー）から自動取り込みされた予定フラグ
 
   // 🔒 操作者限定プライベート予定（相手の画面・通知・カレンダーには一切表示しない特別な予定）
   privateFor?: PartnerId;
@@ -138,6 +145,25 @@ export interface WelcomeImageConfig {
   lastShownDate?: string;    // 最終表示日付 "YYYY-MM-DD"
 }
 
+// Googleカレンダー双方向自動同期（GASブリッジ）設定
+export interface GoogleCalendarSyncConfig {
+  enabled: boolean;
+  autoSync: boolean;
+  // ゆうと（partnerA）のGAS WebアプリURL と カレンダーID（未入力時は 'primary'）
+  partnerAGasUrl?: string;
+  partnerACalendarId?: string;
+  // さや（partnerB）のGAS WebアプリURL と カレンダーID（未入力時は 'primary'。ゆうとと同じURLでカレンダーIDだけ変える運用も可）
+  partnerBGasUrl?: string;
+  partnerBCalendarId?: string;
+  // ふたり共有GoogleカレンダーID（任意：指定すると二人予定をここへ同期）
+  sharedCalendarId?: string;
+  // 1つのGAS URLで複数カレンダー（ゆうと・さや・共有）をまとめて同期する統合モードか、個別URLか
+  syncRangePastDays?: number;   // 過去何日分を同期するか（デフォルト30日）
+  syncRangeFutureDays?: number; // 未来何日分を同期するか（デフォルト120日）
+  lastGoogleSyncedAt?: string;  // 最終同期日時 ISO 8601
+  updatedAt?: string;           // 設定自体の更新日時（クラウド共有用）
+}
+
 export interface CoupleMetadata {
   partners: {
     partnerA: PartnerProfile;
@@ -146,6 +172,7 @@ export interface CoupleMetadata {
   lastSyncedAt: string;
   updatedAt?: string;
   welcomeImageConfig?: WelcomeImageConfig;
+  googleCalendarSyncConfig?: GoogleCalendarSyncConfig;
 }
 
 // カレンダー全体の保存データストア構造（Conflict-Free Merge対応）

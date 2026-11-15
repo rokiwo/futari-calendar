@@ -3,12 +3,18 @@ import {
   CalendarDataStore,
   CloudSyncConfig,
   FilterCategoryId,
+  GoogleCalendarSyncConfig,
   PartnerId,
   ScheduleEvent,
   ShiftEntry,
   StampPreset,
   WelcomeImageConfig,
 } from './types/calendar';
+import {
+  loadGoogleCalendarSyncConfig,
+  saveGoogleCalendarSyncConfig,
+  syncWithGoogleCalendar,
+} from './utils/googleCalendar';
 import {
   createInitialDataStore,
   createUploaded2026NovShifts,
@@ -130,6 +136,9 @@ export const App: React.FC = () => {
   const [savedPassHash, setSavedPassHashState] = useState<string | null>(null);
   const [sessionPassword, setSessionPassword] = useState<string>('');
   const [syncConfig, setSyncConfig] = useState<CloudSyncConfig>(() => loadSyncConfig());
+  const [gcalSyncConfig, setGcalSyncConfig] = useState<GoogleCalendarSyncConfig>(() =>
+    loadGoogleCalendarSyncConfig()
+  );
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   // トースト通知メッセージ
@@ -604,10 +613,15 @@ export const App: React.FC = () => {
       }
 
       setStore(nextStore);
+      const initialGcalCfg = loadGoogleCalendarSyncConfig(
+        nextStore.metadata?.googleCalendarSyncConfig
+      );
+      setGcalSyncConfig(initialGcalCfg);
       setIsLoaded(true);
 
-      // 合言葉認証済みの端末のみクラウドから最新データを自動マージ取得
+      // 合言葉認証済みの端末のみクラウドから最新データを自動マージ取得 ＋ Googleカレンダー双方向同期
       const initialCfg = loadSyncConfig();
+      let currentWorkingStore = nextStore;
       if (initialCfg.enabled && initialCfg.githubToken) {
         try {
           setIsSyncing(true);
@@ -622,16 +636,66 @@ export const App: React.FC = () => {
               nextStore.metadata?.welcomeImageConfig?.dataUrl
                 ? nextStore.metadata.welcomeImageConfig
                 : mergedStore.metadata?.welcomeImageConfig;
-            setStore({
+            currentWorkingStore = {
               ...mergedStore,
               metadata: {
                 ...mergedStore.metadata,
                 welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
               },
-            });
+            };
+            setStore(currentWorkingStore);
+            if (currentWorkingStore.metadata?.googleCalendarSyncConfig) {
+              const mergedGcalCfg = loadGoogleCalendarSyncConfig(
+                currentWorkingStore.metadata.googleCalendarSyncConfig
+              );
+              setGcalSyncConfig(mergedGcalCfg);
+              saveGoogleCalendarSyncConfig(mergedGcalCfg);
+            }
           }
         } catch {
           // オフライン時はローカルデータを維持
+        } finally {
+          if (mounted) setIsSyncing(false);
+        }
+      }
+
+      // 🔄 起動時にGoogleカレンダー＆Geminiの予定も自動で双方向同期
+      const activeGcalCfg = loadGoogleCalendarSyncConfig(
+        currentWorkingStore.metadata?.googleCalendarSyncConfig
+      );
+      if (
+        mounted &&
+        activeGcalCfg.enabled &&
+        activeGcalCfg.autoSync &&
+        (activeGcalCfg.partnerAGasUrl || activeGcalCfg.partnerBGasUrl)
+      ) {
+        try {
+          setIsSyncing(true);
+          const gcalRes = await syncWithGoogleCalendar(
+            currentWorkingStore,
+            activeGcalCfg,
+            getActivePartnerId()
+          );
+          if (mounted) {
+            setStore(gcalRes.nextStore);
+            if (gcalRes.nextStore.metadata?.googleCalendarSyncConfig) {
+              setGcalSyncConfig(gcalRes.nextStore.metadata.googleCalendarSyncConfig);
+            }
+            await saveLocalStore(gcalRes.nextStore, activeSessionPass || undefined);
+            if (
+              (gcalRes.importedCount > 0 || gcalRes.updatedCount > 0 || gcalRes.pushedCount > 0) &&
+              initialCfg.enabled &&
+              initialCfg.githubToken
+            ) {
+              await syncWithGitHub(
+                gcalRes.nextStore,
+                initialCfg,
+                activeSessionPass || undefined
+              ).catch(() => {});
+            }
+          }
+        } catch {
+          // ignore background gcal error on startup
         } finally {
           if (mounted) setIsSyncing(false);
         }
@@ -670,16 +734,46 @@ export const App: React.FC = () => {
     }
   }, [isLoaded, store.metadata?.welcomeImageConfig, openWelcomeModal]);
 
-  // ストア変更時のローカル保存＆自動クラウド同期（合言葉未設定でもデフォルト夫婦暗号鍵で自動同期）
+  // ストア変更時のローカル保存＆自動クラウド同期＆自動Googleカレンダー双方向同期
   const commitStore = useCallback(
     async (nextStore: CalendarDataStore, triggerAutoCloud = true) => {
-      const stamped: CalendarDataStore = {
+      let stamped: CalendarDataStore = {
         ...nextStore,
         updatedAt: new Date().toISOString(),
       };
       setStore(stamped);
       await saveLocalStore(stamped, sessionPassword || undefined);
 
+      // 1. Googleカレンダー自動双方向同期がONなら、まずGoogleカレンダーへ即座に反映＆Gemini予定を取得
+      const currentGcalCfg =
+        stamped.metadata?.googleCalendarSyncConfig || gcalSyncConfig;
+      if (
+        triggerAutoCloud &&
+        currentGcalCfg?.enabled &&
+        currentGcalCfg?.autoSync &&
+        (currentGcalCfg.partnerAGasUrl || currentGcalCfg.partnerBGasUrl)
+      ) {
+        try {
+          setIsSyncing(true);
+          const gcalRes = await syncWithGoogleCalendar(
+            stamped,
+            currentGcalCfg,
+            activePartner
+          );
+          stamped = gcalRes.nextStore;
+          setStore(stamped);
+          if (stamped.metadata?.googleCalendarSyncConfig) {
+            setGcalSyncConfig(stamped.metadata.googleCalendarSyncConfig);
+          }
+          await saveLocalStore(stamped, sessionPassword || undefined);
+        } catch {
+          // Googleカレンダー通信失敗時もローカル・GitHub同期は継続
+        } finally {
+          setIsSyncing(false);
+        }
+      }
+
+      // 2. 夫婦共有クラウド（GitHub Gist/Repo）へ自動同期
       if (
         triggerAutoCloud &&
         syncConfig.enabled &&
@@ -693,13 +787,19 @@ export const App: React.FC = () => {
             stamped.metadata?.welcomeImageConfig?.dataUrl
               ? stamped.metadata.welcomeImageConfig
               : mergedStore.metadata?.welcomeImageConfig;
-          setStore({
+          const finalMerged: CalendarDataStore = {
             ...mergedStore,
             metadata: {
               ...mergedStore.metadata,
               welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
             },
-          });
+          };
+          setStore(finalMerged);
+          if (finalMerged.metadata?.googleCalendarSyncConfig) {
+            setGcalSyncConfig(
+              loadGoogleCalendarSyncConfig(finalMerged.metadata.googleCalendarSyncConfig)
+            );
+          }
         } catch {
           // オフライン時はローカル保存を維持
         } finally {
@@ -707,7 +807,7 @@ export const App: React.FC = () => {
         }
       }
     },
-    [sessionPassword, syncConfig]
+    [activePartner, gcalSyncConfig, sessionPassword, syncConfig]
   );
 
   // 🔑 合言葉の検証と共有カレンダー同期開始
@@ -1472,25 +1572,126 @@ export const App: React.FC = () => {
     return count;
   }, [activePartner, store.events, store.metadata.partners, store.shifts]);
 
+  const handleTriggerGoogleCalendarSync = useCallback(
+    async (configOverride?: GoogleCalendarSyncConfig): Promise<string> => {
+      const cfg =
+        configOverride ||
+        store.metadata?.googleCalendarSyncConfig ||
+        gcalSyncConfig;
+      setIsSyncing(true);
+      try {
+        const gcalRes = await syncWithGoogleCalendar(store, cfg, activePartner);
+        let workingStore = gcalRes.nextStore;
+        setStore(workingStore);
+        if (workingStore.metadata?.googleCalendarSyncConfig) {
+          setGcalSyncConfig(workingStore.metadata.googleCalendarSyncConfig);
+        }
+        await saveLocalStore(workingStore, sessionPassword || undefined);
+
+        // 夫婦クラウド（GitHub）が有効なら、Gemini・Googleカレンダーから取り込んだ予定もパートナーへ即同期
+        if (syncConfig.enabled && syncConfig.githubToken) {
+          try {
+            const { mergedStore } = await syncWithGitHub(
+              workingStore,
+              syncConfig,
+              sessionPassword
+            );
+            const preservedWelcome =
+              workingStore.metadata?.welcomeImageConfig?.dataUrl
+                ? workingStore.metadata.welcomeImageConfig
+                : mergedStore.metadata?.welcomeImageConfig;
+            workingStore = {
+              ...mergedStore,
+              metadata: {
+                ...mergedStore.metadata,
+                welcomeImageConfig:
+                  preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+              },
+            };
+            setStore(workingStore);
+          } catch {
+            // ignore github error if gcal succeeded
+          }
+        }
+
+        showToast(gcalRes.statusMessage);
+        return gcalRes.statusMessage;
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Googleカレンダー同期中にエラーが発生しました';
+        showToast(msg);
+        throw err;
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    [activePartner, gcalSyncConfig, sessionPassword, showToast, store, syncConfig]
+  );
+
   const handleTriggerCloudSync = useCallback(
     async (configOverride?: CloudSyncConfig, passwordOverride?: string) => {
       const cfg = configOverride || syncConfig;
       const pass = passwordOverride || sessionPassword;
       setIsSyncing(true);
       try {
-        const { mergedStore, statusMessage } = await syncWithGitHub(store, cfg, pass);
+        let workingStore = store;
+        let gcalMsg = '';
+        const currentGcalCfg =
+          workingStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig;
+
+        // Googleカレンダー双方向同期がONなら同時に双方向同期
+        if (
+          currentGcalCfg?.enabled &&
+          (currentGcalCfg.partnerAGasUrl || currentGcalCfg.partnerBGasUrl)
+        ) {
+          try {
+            const gcalRes = await syncWithGoogleCalendar(
+              workingStore,
+              currentGcalCfg,
+              activePartner
+            );
+            workingStore = gcalRes.nextStore;
+            if (
+              gcalRes.importedCount > 0 ||
+              gcalRes.updatedCount > 0 ||
+              gcalRes.pushedCount > 0
+            ) {
+              gcalMsg = `（Google: 取込${gcalRes.importedCount + gcalRes.updatedCount}件/送信${gcalRes.pushedCount}件）`;
+            }
+          } catch {
+            // ignore gcal error during manual cloud sync
+          }
+        }
+
+        const { mergedStore, statusMessage } = await syncWithGitHub(
+          workingStore,
+          cfg,
+          pass
+        );
         const preservedWelcome =
-          store.metadata?.welcomeImageConfig?.dataUrl
-            ? store.metadata.welcomeImageConfig
+          workingStore.metadata?.welcomeImageConfig?.dataUrl
+            ? workingStore.metadata.welcomeImageConfig
             : mergedStore.metadata?.welcomeImageConfig;
-        setStore({
+        const finalStore: CalendarDataStore = {
           ...mergedStore,
           metadata: {
             ...mergedStore.metadata,
-            welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+            welcomeImageConfig:
+              preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
           },
-        });
-        showToast(statusMessage);
+        };
+        setStore(finalStore);
+        if (finalStore.metadata?.googleCalendarSyncConfig) {
+          setGcalSyncConfig(
+            loadGoogleCalendarSyncConfig(
+              finalStore.metadata.googleCalendarSyncConfig
+            )
+          );
+        }
+        await saveLocalStore(finalStore, pass || undefined);
+        showToast(`${statusMessage}${gcalMsg}`);
       } catch (err) {
         showToast(err instanceof Error ? err.message : '同期エラーが発生しました');
         throw err;
@@ -1498,32 +1699,89 @@ export const App: React.FC = () => {
         setIsSyncing(false);
       }
     },
-    [sessionPassword, showToast, store, syncConfig]
+    [activePartner, gcalSyncConfig, sessionPassword, showToast, store, syncConfig]
   );
 
-  // スマホでアプリ画面を開き直した時（フォーカス復帰時）に自動でクラウド同期
+  // スマホでアプリ画面を開き直した時（フォーカス復帰時）＋3分おきの定期チェックで、夫婦クラウド＆Googleカレンダー（Gemini追加予定）を自動同期
   useEffect(() => {
-    if (!isLoaded || !syncConfig.enabled || !syncConfig.githubToken) return;
-    const onFocus = () => {
-      syncWithGitHub(store, syncConfig, sessionPassword)
-        .then(({ mergedStore }) => {
+    if (!isLoaded) return;
+
+    const runBackgroundSync = async () => {
+      let currentStore = store;
+      const activeGcalCfg =
+        currentStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig;
+      let gcalChanged = false;
+
+      if (
+        activeGcalCfg?.enabled &&
+        activeGcalCfg?.autoSync &&
+        (activeGcalCfg.partnerAGasUrl || activeGcalCfg.partnerBGasUrl)
+      ) {
+        try {
+          const gcalRes = await syncWithGoogleCalendar(
+            currentStore,
+            activeGcalCfg,
+            activePartner
+          );
+          currentStore = gcalRes.nextStore;
+          if (
+            gcalRes.importedCount > 0 ||
+            gcalRes.updatedCount > 0 ||
+            gcalRes.pushedCount > 0
+          ) {
+            gcalChanged = true;
+            setStore(currentStore);
+            await saveLocalStore(currentStore, sessionPassword || undefined);
+            if (gcalRes.importedCount > 0) {
+              showToast(
+                `✨ Googleカレンダー/Geminiから新しい予定 ${gcalRes.importedCount}件 を自動取り込みしました！`
+              );
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (syncConfig.enabled && syncConfig.githubToken) {
+        try {
+          const { mergedStore } = await syncWithGitHub(
+            currentStore,
+            syncConfig,
+            sessionPassword
+          );
           const preservedWelcome =
-            store.metadata?.welcomeImageConfig?.dataUrl
-              ? store.metadata.welcomeImageConfig
+            currentStore.metadata?.welcomeImageConfig?.dataUrl
+              ? currentStore.metadata.welcomeImageConfig
               : mergedStore.metadata?.welcomeImageConfig;
-          setStore({
+          const finalStore: CalendarDataStore = {
             ...mergedStore,
             metadata: {
               ...mergedStore.metadata,
-              welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+              welcomeImageConfig:
+                preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
             },
-          });
-        })
-        .catch(() => {});
+          };
+          setStore(finalStore);
+          if (gcalChanged) {
+            await saveLocalStore(finalStore, sessionPassword || undefined);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    const onFocus = () => {
+      runBackgroundSync();
     };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [isLoaded, sessionPassword, store, syncConfig]);
+    const intervalId = window.setInterval(runBackgroundSync, 180_000);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.clearInterval(intervalId);
+    };
+  }, [activePartner, gcalSyncConfig, isLoaded, sessionPassword, showToast, store, syncConfig]);
 
   const handlePrevMonth = useCallback(() => {
     setMonth((m) => {
@@ -1872,12 +2130,29 @@ export const App: React.FC = () => {
           store={store}
           activePartner={activePartner}
           syncConfig={syncConfig}
+          gcalSyncConfig={
+            store.metadata?.googleCalendarSyncConfig || gcalSyncConfig
+          }
           currentPassword={sessionPassword}
           onClose={() => closeNavLayer(() => setSettingsOpen(false))}
           onUpdateSyncConfig={(nextCfg) => {
             setSyncConfig(nextCfg);
             saveSyncConfig(nextCfg);
           }}
+          onUpdateGcalSyncConfig={(nextGcalCfg) => {
+            setGcalSyncConfig(nextGcalCfg);
+            saveGoogleCalendarSyncConfig(nextGcalCfg);
+            const nowIso = new Date().toISOString();
+            commitStore({
+              ...store,
+              metadata: {
+                ...store.metadata,
+                googleCalendarSyncConfig: nextGcalCfg,
+                updatedAt: nowIso,
+              },
+            });
+          }}
+          onTriggerGoogleCalendarSync={handleTriggerGoogleCalendarSync}
           onUpdatePassword={async (newPass) => {
             setSessionPassword(newPass);
             await saveLocalStore(store, newPass);

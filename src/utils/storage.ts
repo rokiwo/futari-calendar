@@ -4,6 +4,7 @@ import {
   CloudSyncConfig,
   DaySupportEntry,
   EncryptedPayload,
+  GoogleCalendarSyncConfig,
   PartnerId,
   ScheduleEvent,
   ShiftEntry,
@@ -332,6 +333,25 @@ export function mergeCalendarStores(
   const partnerA = mergePartnerProfile('partnerA', '🐻', 'ゆうと');
   const partnerB = mergePartnerProfile('partnerB', '🐰', 'さや');
 
+  // 📅 Googleカレンダー双方向自動同期設定のマージ保護
+  const locGcal = localMeta?.googleCalendarSyncConfig;
+  const remGcal = remoteMeta?.googleCalendarSyncConfig;
+  let mergedGcal: GoogleCalendarSyncConfig | undefined = locGcal || remGcal;
+  if (locGcal && remGcal) {
+    const isRemGcalNewer = toTimeMs(remGcal.updatedAt) > toTimeMs(locGcal.updatedAt);
+    const primaryGcal = isRemGcalNewer ? remGcal : locGcal;
+    const secondaryGcal = isRemGcalNewer ? locGcal : remGcal;
+    mergedGcal = {
+      ...secondaryGcal,
+      ...primaryGcal,
+      partnerAGasUrl: primaryGcal.partnerAGasUrl || secondaryGcal.partnerAGasUrl,
+      partnerACalendarId: primaryGcal.partnerACalendarId || secondaryGcal.partnerACalendarId,
+      partnerBGasUrl: primaryGcal.partnerBGasUrl || secondaryGcal.partnerBGasUrl,
+      partnerBCalendarId: primaryGcal.partnerBCalendarId || secondaryGcal.partnerBCalendarId,
+      sharedCalendarId: primaryGcal.sharedCalendarId || secondaryGcal.sharedCalendarId,
+    };
+  }
+
   const nowIso = new Date().toISOString();
 
   return {
@@ -342,6 +362,7 @@ export function mergeCalendarStores(
         partnerB,
       },
       welcomeImageConfig: mergedWelcome,
+      googleCalendarSyncConfig: mergedGcal,
       lastSyncedAt: nowIso,
       updatedAt:
         toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt)

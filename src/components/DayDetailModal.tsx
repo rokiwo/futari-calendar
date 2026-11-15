@@ -951,7 +951,16 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       </div>
 
                       {/* 現在の操作端末（activePartner）が通知対象に含まれている場合のみ、保存時Googleカレンダー起動チェックを表示 */}
-                      {notifyTarget === 'both' || notifyTarget === activePartner ? (
+                      {store.metadata?.googleCalendarSyncConfig?.enabled &&
+                      (store.metadata.googleCalendarSyncConfig.partnerAGasUrl ||
+                        store.metadata.googleCalendarSyncConfig.partnerBGasUrl) ? (
+                        <div className="text-[11px] font-extrabold text-[#1E6645] bg-[#E6F7EF] px-2.5 py-1.5 rounded-xl border border-[#52B788] flex items-center gap-1.5">
+                          <span>🔄</span>
+                          <span>
+                            Googleカレンダー自動双方向同期がONのため、保存するとバックグラウンドで自動的にGoogleカレンダーへ登録・更新されます✨
+                          </span>
+                        </div>
+                      ) : notifyTarget === 'both' || notifyTarget === activePartner ? (
                         <label className="flex items-center gap-1.5 pt-1 text-[11px] font-extrabold text-sky-900 cursor-pointer">
                           <input
                             type="checkbox"
@@ -1131,6 +1140,12 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                               <span className="px-2 py-0.5 rounded-full bg-purple-600 text-white text-[10px] font-black flex items-center gap-0.5 shadow-2xs">
                                 <Lock className="w-2.5 h-2.5 text-purple-200" />
                                 <span>🔒 じぶん限定</span>
+                              </span>
+                            )}
+
+                            {(ev.syncedFromGoogle || ev.googleCalSynced) && (
+                              <span className="px-2 py-0.5 rounded-full bg-[#E6F7EF] text-[#1E6645] border border-[#52B788]/50 text-[10px] font-extrabold flex items-center gap-0.5">
+                                <span>{ev.syncedFromGoogle ? '✨ Gemini/Google取込' : '🔄 Google同期済'}</span>
                               </span>
                             )}
                           </div>
