@@ -229,19 +229,30 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
               </h2>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-1.5 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-black flex items-center justify-center shrink-0 active:scale-95"
-            title="最小化・閉じる"
-          >
-            <ChevronDown className="w-5 h-5 stroke-[2.75]" />
-          </button>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsAdding(!isAdding)}
+              className="px-3 py-1.5 rounded-2xl bg-gradient-to-r from-[#FF6B8B] to-[#9B5DE5] text-white text-xs font-black flex items-center gap-1 whitespace-nowrap shadow-sm hover:opacity-95 active:scale-95 transition-all"
+            >
+              <Plus className="w-4 h-4 stroke-[2.75] shrink-0" />
+              <span>タスク追加</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-2.5 py-1.5 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-black flex items-center justify-center shrink-0 active:scale-95"
+              title="最小化・閉じる"
+            >
+              <ChevronDown className="w-5 h-5 stroke-[2.75]" />
+            </button>
+          </div>
         </div>
 
-        {/* タブ切り替えバー（文字が縦に伸びないよう whitespace-nowrap ＆ 短縮ラベル） */}
-        <div className="bg-[#FFF0F5]/80 px-3 py-1.5 border-b border-[#FFE5EC] flex items-center justify-between gap-1.5">
-          <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-stone-200 shadow-2xs">
+        {/* タブ切り替えバー（スマホ画面幅でも一切見切れないコンパクト配置） */}
+        <div className="bg-[#FFF0F5]/80 px-3 py-1.5 border-b border-[#FFE5EC] flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-stone-200 shadow-2xs min-w-0">
             <button
               type="button"
               onClick={() => setActiveTab('calendar')}
@@ -280,26 +291,15 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <label className="flex items-center gap-1 text-[10px] font-bold text-stone-600 cursor-pointer whitespace-nowrap">
-              <input
-                type="checkbox"
-                checked={showCompleted}
-                onChange={(e) => setShowCompleted(e.target.checked)}
-                className="w-3 h-3 rounded text-rose-500 focus:ring-rose-400"
-              />
-              <span>完了済</span>
-            </label>
-
-            <button
-              type="button"
-              onClick={() => setIsAdding(!isAdding)}
-              className="px-2.5 py-1 rounded-xl bg-[#FF8FAB] text-white text-[11px] font-black flex items-center gap-0.5 whitespace-nowrap shadow-xs hover:bg-[#FF758F] active:scale-95 transition-all shrink-0"
-            >
-              <Plus className="w-3 h-3 shrink-0" />
-              <span>追加</span>
-            </button>
-          </div>
+          <label className="flex items-center gap-1 text-[11px] font-extrabold text-stone-600 cursor-pointer whitespace-nowrap shrink-0 pr-0.5">
+            <input
+              type="checkbox"
+              checked={showCompleted}
+              onChange={(e) => setShowCompleted(e.target.checked)}
+              className="w-3.5 h-3.5 rounded text-rose-500 focus:ring-rose-400"
+            />
+            <span>完了済も表示</span>
+          </label>
         </div>
 
         {/* 新規タスク追加フォーム（トグル展開） */}

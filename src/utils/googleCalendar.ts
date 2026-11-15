@@ -1099,14 +1099,18 @@ export async function syncWithGoogleCalendar(
       }
 
       const rawTrimmed = (rem.title || '').trim();
+      const rawMemo = (rem.memo || '').trim();
       const isTaskDetected =
-        /^(✅|⬜|☑️|【?タスク】?|\[タスク\]|タスク[:：\s・]|TODO[:：\s・]|ToDo[:：\s・]|やること[:：\s・])/i.test(rawTrimmed) ||
-        /([（(【\[](タスク|TODO|ToDo|やること)[）)】\]])\s*$/i.test(rawTrimmed);
+        /^(✅|⬜|☑️|【?タスク】?|\[タスク\]|タスク|TODO|ToDo|やること)/i.test(rawTrimmed) ||
+        /(【?タスク】?|\[タスク\]|タスク|TODO|ToDo|やること)\s*$/i.test(rawTrimmed) ||
+        /([（(【\[](タスク|TODO|ToDo|やること)[）)】\]])/i.test(rawTrimmed) ||
+        /(#タスク|【タスク】|\[タスク\])/i.test(rawMemo);
       const cleanTitle =
         rawTrimmed
           .replace(/^(✅|⬜|☑️)\s*/, '')
           .replace(/^(【?タスク】?|\[タスク\]|タスク|TODO|ToDo|やること)[:：\s・]*/i, '')
           .replace(/\s*([（(【\[](タスク|TODO|ToDo|やること)[）)】\]])\s*$/i, '')
+          .replace(/\s+(タスク|TODO|ToDo|やること)\s*$/i, '')
           .trim() || rawTrimmed || '(無題の予定)';
 
       if (matchedLocal) {
