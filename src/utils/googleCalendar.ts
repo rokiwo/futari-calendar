@@ -783,7 +783,12 @@ function shouldSyncEventToTarget(
   targetKey: 'partnerA' | 'partnerB' | 'shared',
   hasSharedCalendar: boolean
 ): boolean {
-  // プライベート予定およびタスク（常に個人専用）は本人のカレンダーのみに同期し、相手や共有カレンダーには出さない
+  // タスクはペアカレ内の個人タスクカレンダーだけで管理し、Googleカレンダー（ファミリー共有含む）には書き出さない
+  if (ev.isTask) {
+    return false;
+  }
+
+  // プライベート予定は本人のカレンダーのみに同期し、相手や共有カレンダーには出さない
   const priv = getEffectivePrivateFor(ev);
   if (priv) {
     return priv === targetKey;

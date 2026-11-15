@@ -2284,10 +2284,13 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* ✅ ふたりタスク管理モーダル（タスク専用カレンダー ＆ Googleタスク連携 ＆ 端末別通知） */}
+      {/* ✅ 個人タスクカレンダー＆事務所勤務タスク一覧モーダル（ペアカレ内完結・自分専用） */}
       {taskManagerOpen && (
         <TaskManagerModal
           events={store.events}
+          shifts={store.shifts}
+          stamps={store.stamps}
+          initialSelectedDate={selectedDate}
           activePartner={activePartner}
           metadata={store.metadata}
           categories={activeCategories}
