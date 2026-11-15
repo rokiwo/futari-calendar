@@ -666,7 +666,9 @@ function syncCalendarEvents(payload) {
     ok: true,
     calendarName: cal.getName(),
     pushedMapping: pushedMapping,
+    idMap: pushedMapping,
     remoteEvents: remoteList,
+    events: remoteList,
     syncedAt: new Date().toISOString()
   };
 }
@@ -707,7 +709,9 @@ interface GasSyncResponse {
   error?: string;
   calendarName?: string;
   pushedMapping?: Record<string, string>;
+  idMap?: Record<string, string>;
   remoteEvents?: GasRemoteEventItem[];
+  events?: GasRemoteEventItem[];
   syncedAt?: string;
 }
 
@@ -941,7 +945,7 @@ export async function syncWithGoogleCalendar(
     }
 
     // 2. Googleカレンダー側で採番された googleEventId をペアカレ側のイベントに記録
-    const mapping = data.pushedMapping || {};
+    const mapping = data.pushedMapping || data.idMap || {};
     const seenGoogleIdsInRemote = new Set<string>();
 
     for (const [paircalId, gEventId] of Object.entries(mapping)) {
@@ -964,7 +968,7 @@ export async function syncWithGoogleCalendar(
     }
 
     // 3. Googleカレンダー側にある予定（Geminiから登録された予定やGoogleカレンダー直接入力分を含む）をペアカレへ取り込み・更新
-    const remoteEvents = data.remoteEvents || [];
+    const remoteEvents = data.remoteEvents || data.events || [];
     for (const rem of remoteEvents) {
       if (!rem.googleEventId || !rem.date) continue;
       seenGoogleIdsInRemote.add(rem.googleEventId);
