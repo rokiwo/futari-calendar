@@ -371,6 +371,8 @@ export async function openOrShareIcsOnDevice(
 // ============================================================================
 
 const LS_GCAL_SYNC_CONFIG_KEY = 'futarical_gcal_sync_config_v1';
+export const DEFAULT_PARTNER_A_GAS_URL =
+  'https://script.google.com/macros/s/AKfycbwx2LGNbsmqB1vJrCfvWXTj8CC4DAkioE4w9G19ccib7Xz9ss6QaSlCIt5gjJXX1Ohl/exec';
 
 export function loadGoogleCalendarSyncConfig(
   storeConfig?: GoogleCalendarSyncConfig
@@ -379,7 +381,7 @@ export function loadGoogleCalendarSyncConfig(
     return {
       enabled: storeConfig.enabled ?? true,
       autoSync: storeConfig.autoSync ?? true,
-      partnerAGasUrl: storeConfig.partnerAGasUrl || '',
+      partnerAGasUrl: storeConfig.partnerAGasUrl || DEFAULT_PARTNER_A_GAS_URL,
       partnerACalendarId: storeConfig.partnerACalendarId || 'primary',
       partnerBGasUrl: storeConfig.partnerBGasUrl || '',
       partnerBCalendarId: storeConfig.partnerBCalendarId || 'primary',
@@ -394,10 +396,11 @@ export function loadGoogleCalendarSyncConfig(
     const raw = localStorage.getItem(LS_GCAL_SYNC_CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as GoogleCalendarSyncConfig;
+      const partnerAGasUrl = parsed.partnerAGasUrl || DEFAULT_PARTNER_A_GAS_URL;
       return {
-        enabled: parsed.enabled ?? Boolean(parsed.partnerAGasUrl || parsed.partnerBGasUrl),
+        enabled: parsed.enabled ?? Boolean(partnerAGasUrl || parsed.partnerBGasUrl),
         autoSync: parsed.autoSync ?? true,
-        partnerAGasUrl: parsed.partnerAGasUrl || '',
+        partnerAGasUrl,
         partnerACalendarId: parsed.partnerACalendarId || 'primary',
         partnerBGasUrl: parsed.partnerBGasUrl || '',
         partnerBCalendarId: parsed.partnerBCalendarId || 'primary',
@@ -412,9 +415,9 @@ export function loadGoogleCalendarSyncConfig(
     // ignore
   }
   return {
-    enabled: false,
+    enabled: true,
     autoSync: true,
-    partnerAGasUrl: '',
+    partnerAGasUrl: DEFAULT_PARTNER_A_GAS_URL,
     partnerACalendarId: 'primary',
     partnerBGasUrl: '',
     partnerBCalendarId: 'primary',
@@ -738,9 +741,23 @@ export async function testGoogleCalendarGasConnection(
       }),
     });
     if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        return {
+          ok: false,
+          error: `アクセス権限エラー (${res.status})：GASの「デプロイを管理」＞✏️編集 で「アクセスできるユーザー」を「全員」に変更してデプロイしてください`,
+        };
+      }
       return { ok: false, error: `HTTPエラー (${res.status})` };
     }
-    const data = (await res.json()) as GasSyncResponse;
+    const text = await res.text();
+    if (text.trim().startsWith('<!DOCTYPE') || text.includes('accounts.google.com')) {
+      return {
+        ok: false,
+        error:
+          'Googleログイン画面が返されました：GASの「デプロイを管理」＞✏️編集 で「アクセスできるユーザー」を「全員」に変更してデプロイしてください',
+      };
+    }
+    const data = JSON.parse(text) as GasSyncResponse;
     if (!data.ok) {
       return { ok: false, error: data.error || 'カレンダーの接続に失敗しました' };
     }
