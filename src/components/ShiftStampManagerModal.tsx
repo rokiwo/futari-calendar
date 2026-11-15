@@ -246,10 +246,10 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
             </button>
           </div>
 
-          {/* プリセット一括反映ボタン */}
+          {/* プリセット一括反映・クリアボタン */}
           <div className="flex items-center justify-between gap-2 px-1">
             <span className="text-[11px] text-stone-500 font-bold">
-              {targetPartner === 'partnerB' ? '🐰 さやの勤務表:' : '🐻 夫の勤務表:'}
+              {targetPartner === 'partnerB' ? `🐰 ${partnerBName}の勤務表:` : `🐻 ${partnerAName}の勤務表:`}
             </span>
             {targetPartner === 'partnerB' ? (
               <button
@@ -266,13 +266,11 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const pAStamps = DEFAULT_STAMP_PRESETS.filter((s) => s.partnerId === 'partnerA');
-                  commitPartnerStamps(pAStamps);
+                  commitPartnerStamps([]);
                 }}
-                className="px-2.5 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#136370] hover:text-white font-extrabold text-[11px] transition-colors border border-cyan-200 shadow-2xs"
-                title="日勤・遅A・遅B・早A・早B・２早・夜勤・２夜・明け・準早・準遅・休み・年休をセット"
+                className="px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-500 text-rose-600 hover:text-white font-extrabold text-[11px] transition-colors border border-rose-200 shadow-2xs"
               >
-                ✨ 夫の12種勤務テンプレを一括反映
+                🗑️ {partnerAName}の勤務リストをすべて消去
               </button>
             )}
           </div>

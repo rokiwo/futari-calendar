@@ -110,7 +110,7 @@ export const App: React.FC = () => {
     getActivePartnerId() === 'partnerB' ? 'partnerB_shift' : 'partnerA_shift'
   );
   const [selectedStampId, setSelectedStampId] = useState<string | null>(() =>
-    getActivePartnerId() === 'partnerB' ? 'shift_b_day' : 'shift_a_day'
+    getActivePartnerId() === 'partnerB' ? 'shift_b_day' : null
   );
 
   // 各種モーダル開閉状態
@@ -437,6 +437,12 @@ export const App: React.FC = () => {
       const shouldApplySayaPresets =
         localStorage.getItem(SAYA_10_SHIFTS_FLAG) !== '1';
 
+      // ご要望：「ゆうと側の勤務表だけ全部消す＆ゆうと側の勤務簡単入力リストも消す（さや側は触らない）」を自動適用
+      const CLEAR_YUUTO_SHIFTS_AND_STAMPS_FLAG =
+        'paircal_clear_yuuto_shifts_and_stamps_20261115_v1';
+      const shouldClearYuutoShiftsAndStamps =
+        localStorage.getItem(CLEAR_YUUTO_SHIFTS_AND_STAMPS_FLAG) !== '1';
+
       const cleanedLoadedStamps = (loaded.stamps || [])
         .filter((s) => s.type === 'shift' && !LEGACY_DEFAULT_STAMP_IDS.has(s.id))
         .map((s) => ({ ...s, partnerId: s.partnerId || 'partnerA' }));
@@ -446,6 +452,11 @@ export const App: React.FC = () => {
         cleanedLoadedStamps.length > 0
           ? cleanedLoadedStamps
           : [...DEFAULT_STAMP_PRESETS];
+
+      if (shouldClearYuutoShiftsAndStamps) {
+        // ゆうと側（partnerA）の勤務簡単入力リストのみ削除し、さや側（partnerB）はそのまま保持
+        nextStamps = nextStamps.filter((s) => s.partnerId === 'partnerB');
+      }
 
       let nextMetadata = loaded.metadata;
       if (shouldApplySayaPresets && !nextStamps.some((s) => s.partnerId === 'partnerB')) {
@@ -556,10 +567,33 @@ export const App: React.FC = () => {
       }
 
       const nowIso = new Date().toISOString();
+
+      // ご要望：ゆうと側（partnerA）の勤務表（シフトデータ）だけすべて論理削除し、さや側（partnerB）は一切触らない
+      if (shouldClearYuutoShiftsAndStamps) {
+        for (const [k, s] of Object.entries(nextShifts)) {
+          if (!s) continue;
+          if (s.partnerId === 'partnerA' || k.endsWith('_partnerA')) {
+            nextShifts[k] = {
+              ...s,
+              overtimeMinutes: 0,
+              overtimeHours: 0,
+              holidayWorkMinutes: 0,
+              holidayWorkHours: 0,
+              isHolidayWork: false,
+              subStampId: undefined,
+              subCustomLabel: undefined,
+              updatedAt: nowIso,
+              deletedAt: nowIso,
+            };
+          }
+        }
+      }
+
       const hasAnyPresetChange =
         shouldApplyHusband12Presets ||
         shouldApplyNursecal202611 ||
         shouldApplySayaPresets ||
+        shouldClearYuutoShiftsAndStamps ||
         hasRenamedToYuuto ||
         shiftsRepaired;
 
@@ -585,6 +619,9 @@ export const App: React.FC = () => {
       }
       if (shouldApplySayaPresets) {
         localStorage.setItem(SAYA_10_SHIFTS_FLAG, '1');
+      }
+      if (shouldClearYuutoShiftsAndStamps) {
+        localStorage.setItem(CLEAR_YUUTO_SHIFTS_AND_STAMPS_FLAG, '1');
       }
       // 🔑 共有キーワード（合言葉）の認証状態をチェック
       let currentKeyword = getSavedSharedKeyword();

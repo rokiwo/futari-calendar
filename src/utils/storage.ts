@@ -224,23 +224,22 @@ export function mergeCalendarStores(
     }
   }
 
-  // 4. スタンププリセットのマージ（旧デフォルトスタンプは除外し、更新日時が新しい方を優先しつつ統合）
+  // 4. スタンププリセットのマージ（旧デフォルトスタンプは除外し、更新日時が新しい方のリストを採用して削除も反映されるようにする）
   const isRemoteNewer = toTimeMs(remote.updatedAt) > toTimeMs(local.updatedAt);
   const primaryStamps = (isRemoteNewer ? remote.stamps : local.stamps) || [];
-  const secondaryStamps = (isRemoteNewer ? local.stamps : remote.stamps) || [];
 
   const stampMap = new Map<string, StampPreset>();
-  for (const s of DEFAULT_STAMP_PRESETS) {
-    stampMap.set(s.id, s);
-  }
-  for (const s of secondaryStamps) {
+  for (const s of primaryStamps) {
     if (!LEGACY_DEFAULT_STAMP_IDS.has(s.id) && s.type === 'shift') {
       stampMap.set(s.id, { ...s, partnerId: s.partnerId || 'partnerA' });
     }
   }
-  for (const s of primaryStamps) {
-    if (!LEGACY_DEFAULT_STAMP_IDS.has(s.id) && s.type === 'shift') {
-      stampMap.set(s.id, { ...s, partnerId: s.partnerId || 'partnerA' });
+  // さや側（partnerB）のスタンプが万一1件も無い場合のみデフォルトを維持
+  if (!Array.from(stampMap.values()).some((s) => s.partnerId === 'partnerB')) {
+    for (const s of DEFAULT_STAMP_PRESETS) {
+      if (s.partnerId === 'partnerB') {
+        stampMap.set(s.id, s);
+      }
     }
   }
   const mergedStamps = Array.from(stampMap.values()).sort((a, b) => a.order - b.order);

@@ -132,190 +132,26 @@ export const LEGACY_DEFAULT_STAMP_IDS = new Set([
   'shift_paid',
   'shift_ake',
   'shift_remote',
+  // 🐻 ゆうと（partnerA）側の旧デフォルト勤務簡単入力リストID（ユーザー要望により完全削除）
+  'shift_a_day',
+  'shift_a_late_a',
+  'shift_a_late_b',
+  'shift_a_early_a',
+  'shift_a_early_b',
+  'shift_a_2early',
+  'shift_a_night',
+  'shift_a_2night',
+  'shift_a_ake',
+  'shift_a_semi_early',
+  'shift_a_semi_late',
+  'shift_a_off',
+  'shift_a_paid',
 ]);
 
 // デフォルトのシフトスタンププリセット
-// 🐻 夫（partnerA）：ご指定の12種類の勤務リストを初期登録済み
-// 🐰 妻（partnerB）：ご要望により初期状態は空（[]）に設定（あとから自由に追加可能）
+// 🐻 ゆうと（partnerA）：ご要望により初期状態は空（[]）に設定
+// 🐰 さや（partnerB）：専用シフト勤務プリセットを維持
 export const DEFAULT_STAMP_PRESETS: StampPreset[] = [
-  {
-    id: 'shift_a_day',
-    partnerId: 'partnerA',
-    label: '日勤',
-    shortLabel: '日勤',
-    type: 'shift',
-    color: '#E2F9FC',
-    textColor: '#126875',
-    startTime: '09:00',
-    endTime: '18:05',
-    icon: '☀️',
-    isHoliday: false,
-    order: 1,
-  },
-  {
-    id: 'shift_a_late_a',
-    partnerId: 'partnerA',
-    label: '遅A',
-    shortLabel: '遅A',
-    type: 'shift',
-    color: '#FFF3D6',
-    textColor: '#996300',
-    startTime: '10:50',
-    endTime: '20:05',
-    icon: '🌆',
-    isHoliday: false,
-    order: 2,
-  },
-  {
-    id: 'shift_a_late_b',
-    partnerId: 'partnerA',
-    label: '遅B',
-    shortLabel: '遅B',
-    type: 'shift',
-    color: '#FFECE5',
-    textColor: '#9C3D1C',
-    startTime: '10:50',
-    endTime: '20:05',
-    icon: '🌇',
-    isHoliday: false,
-    order: 3,
-  },
-  {
-    id: 'shift_a_early_a',
-    partnerId: 'partnerA',
-    label: '早A',
-    shortLabel: '早A',
-    type: 'shift',
-    color: '#FFF6D6',
-    textColor: '#8A5A00',
-    startTime: '07:20',
-    endTime: '16:35',
-    icon: '🌅',
-    isHoliday: false,
-    order: 4,
-  },
-  {
-    id: 'shift_a_early_b',
-    partnerId: 'partnerA',
-    label: '早B',
-    shortLabel: '早B',
-    type: 'shift',
-    color: '#FEF3C7',
-    textColor: '#92400E',
-    startTime: '07:20',
-    endTime: '16:35',
-    icon: '🌄',
-    isHoliday: false,
-    order: 5,
-  },
-  {
-    id: 'shift_a_2early',
-    partnerId: 'partnerA',
-    label: '２早',
-    shortLabel: '２早',
-    type: 'shift',
-    color: '#D8F8EE',
-    textColor: '#0F6E56',
-    startTime: '07:20',
-    endTime: '16:35',
-    icon: '🌅',
-    isHoliday: false,
-    order: 6,
-  },
-  {
-    id: 'shift_a_night',
-    partnerId: 'partnerA',
-    label: '夜勤',
-    shortLabel: '夜勤',
-    type: 'shift',
-    color: '#E8E5FF',
-    textColor: '#483D8B',
-    startTime: '16:45',
-    endTime: '23:59',
-    icon: '🌙',
-    isHoliday: false,
-    order: 7,
-  },
-  {
-    id: 'shift_a_2night',
-    partnerId: 'partnerA',
-    label: '２夜',
-    shortLabel: '２夜',
-    type: 'shift',
-    color: '#F3EAFF',
-    textColor: '#59318F',
-    startTime: '16:45',
-    endTime: '23:59',
-    icon: '🌌',
-    isHoliday: false,
-    order: 8,
-  },
-  {
-    id: 'shift_a_ake',
-    partnerId: 'partnerA',
-    label: '明け',
-    shortLabel: '明け',
-    type: 'shift',
-    color: '#E0E7FF',
-    textColor: '#3730A3',
-    startTime: '00:00',
-    endTime: '09:45',
-    icon: '🍵',
-    isHoliday: false,
-    order: 9,
-  },
-  {
-    id: 'shift_a_semi_early',
-    partnerId: 'partnerA',
-    label: '準早',
-    shortLabel: '準早',
-    type: 'shift',
-    color: '#E6F7EF',
-    textColor: '#1E6645',
-    startTime: '07:50',
-    endTime: '17:05',
-    icon: '🌤️',
-    isHoliday: false,
-    order: 10,
-  },
-  {
-    id: 'shift_a_semi_late',
-    partnerId: 'partnerA',
-    label: '準遅',
-    shortLabel: '準遅',
-    type: 'shift',
-    color: '#EDE9FE',
-    textColor: '#6D28D9',
-    startTime: '09:50',
-    endTime: '19:05',
-    icon: '🌥️',
-    isHoliday: false,
-    order: 11,
-  },
-  {
-    id: 'shift_a_off',
-    partnerId: 'partnerA',
-    label: '休み',
-    shortLabel: '休み',
-    type: 'shift',
-    color: '#FFE5EC',
-    textColor: '#D63864',
-    icon: '🏠',
-    isHoliday: true,
-    order: 12,
-  },
-  {
-    id: 'shift_a_paid',
-    partnerId: 'partnerA',
-    label: '年休',
-    shortLabel: '年休',
-    type: 'shift',
-    color: '#D8F3DC',
-    textColor: '#1B5E3A',
-    icon: '🌴',
-    isHoliday: true,
-    order: 13,
-  },
   // 🐰 さや（partnerB）専用シフト勤務プリセット（10種類＋休み・有休）
   {
     id: 'shift_b_night',
@@ -771,41 +607,15 @@ export const UPLOADED_2026_11_NURSECAL_LABELS: Record<number, string> = {
   30: '休み',
 };
 
-// 2026年11月の30日分のシフトデータを生成（夫のデフォルト勤務表として初期反映＆ワンタップ復元可能）
+// 2026年11月の30日分のシフトデータを生成（ユーザー要望によりゆうと側の初期シフトは空に）
 export function createUploaded2026NovShifts(
-  partnerId: PartnerId = 'partnerA',
-  stamps: StampPreset[] = DEFAULT_STAMP_PRESETS
+  _partnerId: PartnerId = 'partnerA',
+  _stamps: StampPreset[] = DEFAULT_STAMP_PRESETS
 ): Record<string, ShiftEntry> {
-  const result: Record<string, ShiftEntry> = {};
-  const partnerStamps = getPartnerShiftStamps(stamps, partnerId);
-  const pool = partnerStamps.length > 0 ? partnerStamps : DEFAULT_STAMP_PRESETS;
-  const nowIso = '2026-11-04T00:00:00.000Z';
-
-  for (let day = 1; day <= 30; day++) {
-    const label = UPLOADED_2026_11_NURSECAL_LABELS[day];
-    if (!label) continue;
-    const stamp =
-      pool.find((s) => s.label === label || s.shortLabel === label) ||
-      DEFAULT_STAMP_PRESETS.find((s) => s.label === label || s.shortLabel === label);
-    if (!stamp) continue;
-    const dateStr = `2026-11-${String(day).padStart(2, '0')}`;
-    result[`${dateStr}_${partnerId}`] = {
-      id: `shift_${dateStr}_${partnerId}`,
-      date: dateStr,
-      partnerId,
-      stampId: stamp.id,
-      customLabel: stamp.shortLabel,
-      startTime: stamp.startTime,
-      endTime: stamp.endTime,
-      createdBy: partnerId,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-  }
-  return result;
+  return {};
 }
 
-// 初期ストアを作成（初期登録されていたサンプル予定はすべて削除し、2026年11月ナスカレ勤務表を初期セット）
+// 初期ストアを作成（初期登録されていたサンプル予定やゆうと側の初期勤務表は空にセット）
 export function createInitialDataStore(): CalendarDataStore {
   const now = new Date();
   const metadata = createDefaultMetadata();
@@ -815,7 +625,7 @@ export function createInitialDataStore(): CalendarDataStore {
     metadata,
     categories: DEFAULT_CATEGORIES,
     stamps: DEFAULT_STAMP_PRESETS,
-    shifts: createUploaded2026NovShifts('partnerA', DEFAULT_STAMP_PRESETS),
+    shifts: {},
     events: {},
     daySupports: {},
     updatedAt: now.toISOString(),
