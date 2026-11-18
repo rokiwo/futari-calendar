@@ -83,7 +83,12 @@ export const App: React.FC = () => {
     '0'
   )}-${String(now.getDate()).padStart(2, '0')}`;
 
-  const [store, setStore] = useState<CalendarDataStore>(() => createInitialDataStore());
+  const [store, setStoreState] = useState<CalendarDataStore>(() => createInitialDataStore());
+  const latestStoreRef = useRef<CalendarDataStore>(store);
+  const setStore = useCallback((next: CalendarDataStore) => {
+    latestStoreRef.current = next;
+    setStoreState(next);
+  }, []);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // デフォルトで「📅月間カレンダー」画面で起動（ウィジェットはヘッダーの「🏠ウィジェット」ボタンから閲覧可能）
@@ -95,7 +100,13 @@ export const App: React.FC = () => {
   // 表示中の年月・選択日
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [selectedDate, setSelectedDate] = useState(initialDateStr);
+  const [selectedDate, setSelectedDateState] = useState(initialDateStr);
+  const selectedDateRef = useRef<string>(initialDateStr);
+  const setSelectedDate = useCallback((next: string | ((prev: string) => string)) => {
+    const resolved = typeof next === 'function' ? next(selectedDateRef.current) : next;
+    selectedDateRef.current = resolved;
+    setSelectedDateState(resolved);
+  }, []);
 
   // 操作中のパートナー（夫 / 妻）
   const [activePartner, setActivePartner] = useState<PartnerId>(() => getActivePartnerId());
@@ -670,19 +681,22 @@ export const App: React.FC = () => {
             activeSessionPass || undefined
           );
           if (mounted) {
-            // 📸 クラウドから返ってきた mergedStore に写真が無い場合でもローカルの写真を100%保護
+            // 起動中の操作で入力されたシフト等を上書きしないよう、最新の latestStoreRef.current と差分マージ
+            const latestNow = latestStoreRef.current;
+            const remerged = mergeCalendarStores(latestNow, mergedStore);
             const preservedWelcome =
-              nextStore.metadata?.welcomeImageConfig?.dataUrl
-                ? nextStore.metadata.welcomeImageConfig
-                : mergedStore.metadata?.welcomeImageConfig;
+              latestNow.metadata?.welcomeImageConfig?.dataUrl
+                ? latestNow.metadata.welcomeImageConfig
+                : remerged.metadata?.welcomeImageConfig;
             currentWorkingStore = {
-              ...mergedStore,
+              ...remerged,
               metadata: {
-                ...mergedStore.metadata,
-                welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
+                ...remerged.metadata,
+                welcomeImageConfig: preservedWelcome || remerged.metadata?.welcomeImageConfig,
               },
             };
             setStore(currentWorkingStore);
+            await saveLocalStore(currentWorkingStore, activeSessionPass || undefined);
             if (currentWorkingStore.metadata?.googleCalendarSyncConfig) {
               const mergedGcalCfg = loadGoogleCalendarSyncConfig(
                 currentWorkingStore.metadata.googleCalendarSyncConfig
@@ -711,23 +725,25 @@ export const App: React.FC = () => {
         try {
           setIsSyncing(true);
           const gcalRes = await syncWithGoogleCalendar(
-            currentWorkingStore,
+            latestStoreRef.current,
             activeGcalCfg,
             getActivePartnerId()
           );
           if (mounted) {
-            setStore(gcalRes.nextStore);
-            if (gcalRes.nextStore.metadata?.googleCalendarSyncConfig) {
-              setGcalSyncConfig(gcalRes.nextStore.metadata.googleCalendarSyncConfig);
+            // Googleカレンダー同期中に入力されたシフト等を絶対に消さないよう最新ストアとマージ
+            const safeAfterGcal = mergeCalendarStores(latestStoreRef.current, gcalRes.nextStore);
+            setStore(safeAfterGcal);
+            if (safeAfterGcal.metadata?.googleCalendarSyncConfig) {
+              setGcalSyncConfig(safeAfterGcal.metadata.googleCalendarSyncConfig);
             }
-            await saveLocalStore(gcalRes.nextStore, activeSessionPass || undefined);
+            await saveLocalStore(safeAfterGcal, activeSessionPass || undefined);
             if (
               (gcalRes.importedCount > 0 || gcalRes.updatedCount > 0 || gcalRes.pushedCount > 0) &&
               initialCfg.enabled &&
               initialCfg.githubToken
             ) {
               await syncWithGitHub(
-                gcalRes.nextStore,
+                latestStoreRef.current,
                 initialCfg,
                 activeSessionPass || undefined
               ).catch(() => {});
@@ -773,22 +789,81 @@ export const App: React.FC = () => {
     }
   }, [isLoaded, store.metadata?.welcomeImageConfig, openWelcomeModal]);
 
+  // 連続シフト入力時などに古い通信レスポンスが新しいシフト入力を上書きしないための直列化＆デバウンス同期キュー
+  const cloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cloudSyncInFlightRef = useRef<boolean>(false);
+  const cloudSyncPendingRef = useRef<boolean>(false);
+
+  const runSerializedCloudSync = useCallback(async () => {
+    if (!syncConfig.enabled || !syncConfig.autoSync || !syncConfig.githubToken) return;
+    if (cloudSyncInFlightRef.current) {
+      cloudSyncPendingRef.current = true;
+      return;
+    }
+
+    cloudSyncInFlightRef.current = true;
+    cloudSyncPendingRef.current = false;
+    setIsSyncing(true);
+
+    try {
+      const snapshotBeforeSync = latestStoreRef.current;
+      const { mergedStore } = await syncWithGitHub(snapshotBeforeSync, syncConfig, sessionPassword);
+
+      // 通信中に入力された最新のシフト・予定（latestStoreRef.current）を最優先でマージし、古いレスポンスで絶対に上書きしない！
+      const latestNow = latestStoreRef.current;
+      const remerged = mergeCalendarStores(latestNow, mergedStore);
+      const preservedWelcome =
+        latestNow.metadata?.welcomeImageConfig?.dataUrl
+          ? latestNow.metadata.welcomeImageConfig
+          : remerged.metadata?.welcomeImageConfig;
+      const finalMerged: CalendarDataStore = {
+        ...remerged,
+        metadata: {
+          ...remerged.metadata,
+          welcomeImageConfig: preservedWelcome || remerged.metadata?.welcomeImageConfig,
+        },
+      };
+      setStore(finalMerged);
+      await saveLocalStore(finalMerged, sessionPassword || undefined);
+      if (finalMerged.metadata?.googleCalendarSyncConfig) {
+        setGcalSyncConfig(
+          loadGoogleCalendarSyncConfig(finalMerged.metadata.googleCalendarSyncConfig)
+        );
+      }
+    } catch {
+      // オフライン時はローカル保存を維持
+    } finally {
+      cloudSyncInFlightRef.current = false;
+      setIsSyncing(false);
+      // 通信中にさらなるシフト入力等が行われていた場合は、最新状態で追従同期を実行
+      if (cloudSyncPendingRef.current) {
+        cloudSyncPendingRef.current = false;
+        void runSerializedCloudSync();
+      }
+    }
+  }, [sessionPassword, setStore, syncConfig]);
+
   // ストア変更時のローカル保存＆自動クラウド同期＆自動Googleカレンダー双方向同期
   const commitStore = useCallback(
-    async (nextStore: CalendarDataStore, triggerAutoCloud = true) => {
-      let stamped: CalendarDataStore = {
+    async (
+      nextStore: CalendarDataStore,
+      triggerAutoCloud = true,
+      triggerGoogleSync = false
+    ) => {
+      const stamped: CalendarDataStore = {
         ...nextStore,
         updatedAt: new Date().toISOString(),
       };
       setStore(stamped);
       await saveLocalStore(stamped, sessionPassword || undefined);
 
-      // 1. Googleカレンダー自動双方向同期がONなら、まずGoogleカレンダーへ即座に反映＆Gemini予定を取得
+      // 1. 予定（イベント）の変更時のみGoogleカレンダー自動双方向同期を実行（シフト連続入力時はGoogle通信でブロックしない）
       const currentGcalCfg = loadGoogleCalendarSyncConfig(
         stamped.metadata?.googleCalendarSyncConfig || gcalSyncConfig
       );
       if (
         triggerAutoCloud &&
+        triggerGoogleSync &&
         currentGcalCfg?.enabled &&
         currentGcalCfg?.autoSync &&
         (currentGcalCfg.partnerAGasUrl || currentGcalCfg.partnerBGasUrl)
@@ -796,16 +871,17 @@ export const App: React.FC = () => {
         try {
           setIsSyncing(true);
           const gcalRes = await syncWithGoogleCalendar(
-            stamped,
+            latestStoreRef.current,
             currentGcalCfg,
             activePartner
           );
-          stamped = gcalRes.nextStore;
-          setStore(stamped);
-          if (stamped.metadata?.googleCalendarSyncConfig) {
-            setGcalSyncConfig(stamped.metadata.googleCalendarSyncConfig);
+          // 通信中に追加されたシフト等を消さないよう必ず最新ストア（latestStoreRef.current）とマージ
+          const safeAfterGcal = mergeCalendarStores(latestStoreRef.current, gcalRes.nextStore);
+          setStore(safeAfterGcal);
+          if (safeAfterGcal.metadata?.googleCalendarSyncConfig) {
+            setGcalSyncConfig(safeAfterGcal.metadata.googleCalendarSyncConfig);
           }
-          await saveLocalStore(stamped, sessionPassword || undefined);
+          await saveLocalStore(safeAfterGcal, sessionPassword || undefined);
         } catch {
           // Googleカレンダー通信失敗時もローカル・GitHub同期は継続
         } finally {
@@ -813,41 +889,22 @@ export const App: React.FC = () => {
         }
       }
 
-      // 2. 夫婦共有クラウド（GitHub Gist/Repo）へ自動同期
+      // 2. 夫婦共有クラウド（GitHub Gist/Repo）へデバウンス＆直列化して自動同期
       if (
         triggerAutoCloud &&
         syncConfig.enabled &&
         syncConfig.autoSync &&
         syncConfig.githubToken
       ) {
-        try {
-          setIsSyncing(true);
-          const { mergedStore } = await syncWithGitHub(stamped, syncConfig, sessionPassword);
-          const preservedWelcome =
-            stamped.metadata?.welcomeImageConfig?.dataUrl
-              ? stamped.metadata.welcomeImageConfig
-              : mergedStore.metadata?.welcomeImageConfig;
-          const finalMerged: CalendarDataStore = {
-            ...mergedStore,
-            metadata: {
-              ...mergedStore.metadata,
-              welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
-            },
-          };
-          setStore(finalMerged);
-          if (finalMerged.metadata?.googleCalendarSyncConfig) {
-            setGcalSyncConfig(
-              loadGoogleCalendarSyncConfig(finalMerged.metadata.googleCalendarSyncConfig)
-            );
-          }
-        } catch {
-          // オフライン時はローカル保存を維持
-        } finally {
-          setIsSyncing(false);
+        if (cloudSyncTimerRef.current) {
+          clearTimeout(cloudSyncTimerRef.current);
         }
+        cloudSyncTimerRef.current = setTimeout(() => {
+          void runSerializedCloudSync();
+        }, 650);
       }
     },
-    [activePartner, gcalSyncConfig, sessionPassword, syncConfig]
+    [activePartner, gcalSyncConfig, runSerializedCloudSync, sessionPassword, setStore, syncConfig]
   );
 
   // 🔑 合言葉の検証と共有カレンダー同期開始
@@ -934,15 +991,17 @@ export const App: React.FC = () => {
       stamp: StampPreset | null,
       advanceDate = true
     ) => {
-      const shiftId = `${dateStr}_${partnerId}`;
+      const targetDate = dateStr || selectedDateRef.current;
+      const curStore = latestStoreRef.current;
+      const shiftId = `${targetDate}_${partnerId}`;
       const nowIso = new Date().toISOString();
-      const existing = store.shifts[shiftId];
+      const existing = curStore.shifts[shiftId];
 
       let nextShift: ShiftEntry;
       if (!stamp) {
         nextShift = {
           id: shiftId,
-          date: dateStr,
+          date: targetDate,
           partnerId,
           stampId: existing?.stampId || '',
           createdBy: activePartner,
@@ -958,12 +1017,12 @@ export const App: React.FC = () => {
         );
         const todayDate = new Date();
         const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`;
-        const isFutureDate = dateStr > todayStr;
+        const isFutureDate = targetDate > todayStr;
 
         nextShift = {
           ...(existing && !existing.deletedAt ? existing : {}),
           id: shiftId,
-          date: dateStr,
+          date: targetDate,
           partnerId,
           stampId: stamp.id,
           startTime: stamp.startTime,
@@ -983,40 +1042,41 @@ export const App: React.FC = () => {
         };
       }
 
-      const nextStore: CalendarDataStore = {
-        ...store,
-        shifts: {
-          ...store.shifts,
-          [shiftId]: nextShift,
-        },
-      };
-      commitStore(nextStore);
-
       if (advanceDate) {
-        // 連続スタンプモード時は翌日へ自動移動！
-        const nextDate = addDaysToDateStr(dateStr, 1);
+        // 連続スタンプモード時は即座に翌日へ移動（高速連打でも確実に次の日へ進むようRefも同期更新）
+        const nextDate = addDaysToDateStr(targetDate, 1);
         setSelectedDate(nextDate);
         const [ny, nm] = nextDate.split('-').map(Number);
         setYear(ny);
         setMonth(nm);
       } else {
-        const [, m, d] = dateStr.split('-').map(Number);
+        const [, m, d] = targetDate.split('-').map(Number);
         showToast(
           stamp
             ? `✨ ${m}/${d} のシフトを「${stamp.label}」に更新しました`
             : `🧹 ${m}/${d} のシフトをクリアしました`
         );
       }
+
+      const nextStore: CalendarDataStore = {
+        ...curStore,
+        shifts: {
+          ...curStore.shifts,
+          [shiftId]: nextShift,
+        },
+      };
+      void commitStore(nextStore, true, false);
     },
-    [activePartner, commitStore, showToast, store]
+    [activePartner, commitStore, setSelectedDate, showToast]
   );
 
   // 指定日のサブシフト（仕事終わり・休日のバイト）や残業・休日出勤時間を更新（日付は移動しない）
   const handleUpdateShiftDetails = useCallback(
     (dateStr: string, partnerId: PartnerId, patch: Partial<ShiftEntry>) => {
+      const curStore = latestStoreRef.current;
       const shiftId = `${dateStr}_${partnerId}`;
       const nowIso = new Date().toISOString();
-      const existing = store.shifts[shiftId];
+      const existing = curStore.shifts[shiftId];
       const activeExisting = existing && !existing.deletedAt ? existing : undefined;
 
       const defaultStampId = activeExisting?.stampId
@@ -1088,16 +1148,20 @@ export const App: React.FC = () => {
         }
       }
 
-      commitStore({
-        ...store,
-        shifts: {
-          ...store.shifts,
-          [shiftId]: nextShift,
+      void commitStore(
+        {
+          ...curStore,
+          shifts: {
+            ...curStore.shifts,
+            [shiftId]: nextShift,
+          },
         },
-      });
+        true,
+        false
+      );
 
       const [, m, d] = dateStr.split('-').map(Number);
-      const pName = store.metadata.partners[partnerId].name;
+      const pName = curStore.metadata.partners[partnerId].name;
       if (
         patch.overtimeMinutes !== undefined ||
         patch.holidayWorkMinutes !== undefined ||
@@ -1128,7 +1192,7 @@ export const App: React.FC = () => {
         showToast(`✨ ${m}/${d}（${pName}）のシフト詳細を反映しました！`);
       }
     },
-    [activePartner, commitStore, showToast, store]
+    [activePartner, commitStore, showToast]
   );
 
   // その日の終わりにアプリから実残業時間を確定させるコールバック
@@ -1287,33 +1351,35 @@ export const App: React.FC = () => {
   // 予定・タスクの追加・更新
   const handleSaveEvent = useCallback(
     (ev: ScheduleEvent) => {
+      const curStore = latestStoreRef.current;
       const nextStore: CalendarDataStore = {
-        ...store,
+        ...curStore,
         events: {
-          ...store.events,
+          ...curStore.events,
           [ev.id]: ev,
         },
       };
-      commitStore(nextStore);
+      void commitStore(nextStore, true, !ev.isTask || Boolean(ev.syncedFromGoogle));
       const [, m, d] = ev.date.split('-').map(Number);
       showToast(
         `${ev.isTask ? '✅' : '📅'} ${m}/${d} に「${ev.title}」を登録しました💕`
       );
     },
-    [commitStore, showToast, store]
+    [commitStore, showToast]
   );
 
   // タスクの完了／未完了を1タップ切替
   const handleToggleTaskComplete = useCallback(
     (eventId: string) => {
-      const existing = store.events[eventId];
+      const curStore = latestStoreRef.current;
+      const existing = curStore.events[eventId];
       if (!existing) return;
       const nowIso = new Date().toISOString();
       const nextCompleted = !existing.isCompleted;
       const nextStore: CalendarDataStore = {
-        ...store,
+        ...curStore,
         events: {
-          ...store.events,
+          ...curStore.events,
           [eventId]: {
             ...existing,
             isCompleted: nextCompleted,
@@ -1321,16 +1387,17 @@ export const App: React.FC = () => {
           },
         },
       };
-      commitStore(nextStore);
+      void commitStore(nextStore, true, false);
       showToast(nextCompleted ? '✅ タスクを完了にしました！' : '⬜ タスクを未完了に戻しました');
     },
-    [commitStore, showToast, store]
+    [commitStore, showToast]
   );
 
   // 予定の論理削除（誤操作防止の確認ダイアログ付き）
   const handleDeleteEvent = useCallback(
     (eventId: string) => {
-      const existing = store.events[eventId];
+      const curStore = latestStoreRef.current;
+      const existing = curStore.events[eventId];
       if (!existing) return;
       const itemLabel = existing.isTask ? 'タスク' : '予定';
       if (!window.confirm(`「${existing.title}」の${itemLabel}を消しますか？`)) {
@@ -1338,9 +1405,9 @@ export const App: React.FC = () => {
       }
       const nowIso = new Date().toISOString();
       const nextStore: CalendarDataStore = {
-        ...store,
+        ...curStore,
         events: {
-          ...store.events,
+          ...curStore.events,
           [eventId]: {
             ...existing,
             updatedAt: nowIso,
@@ -1348,10 +1415,10 @@ export const App: React.FC = () => {
           },
         },
       };
-      commitStore(nextStore);
+      void commitStore(nextStore, true, !existing.isTask || Boolean(existing.syncedFromGoogle));
       showToast('予定を削除しました');
     },
-    [commitStore, showToast, store]
+    [commitStore, showToast]
   );
 
   // 登録されているすべての予定・タスクを一括削除
@@ -2024,14 +2091,15 @@ export const App: React.FC = () => {
             autoAdvance={autoAdvance}
             onToggleAutoAdvance={setAutoAdvance}
             onApplyShiftAndAdvance={(stamp, targetPartner) =>
-              handleSetShiftAndAdvance(selectedDate, targetPartner, stamp, autoAdvance)
+              handleSetShiftAndAdvance(selectedDateRef.current, targetPartner, stamp, autoAdvance)
             }
             onClearShiftAndAdvance={(targetPartner) =>
-              handleSetShiftAndAdvance(selectedDate, targetPartner, null, autoAdvance)
+              handleSetShiftAndAdvance(selectedDateRef.current, targetPartner, null, autoAdvance)
             }
             onUpdateShiftDetailsOnSelectedDate={(targetPartner, patch) => {
-              handleUpdateShiftDetails(selectedDate, targetPartner, patch);
-              const [, m, d] = selectedDate.split('-').map(Number);
+              const curDate = selectedDateRef.current;
+              handleUpdateShiftDetails(curDate, targetPartner, patch);
+              const [, m, d] = curDate.split('-').map(Number);
               showToast(`✨ ${m}/${d} のシフト詳細（バイト・残業）を更新しました`);
             }}
             currentShiftOnSelectedDate={currentShiftOnSelectedDate}
