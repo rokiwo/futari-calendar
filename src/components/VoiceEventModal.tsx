@@ -144,6 +144,8 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   const isRecordingActiveRef = useRef<boolean>(false);
   const confirmedPhrasesRef = useRef<string[]>([]);
   confirmedPhrasesRef.current = confirmedPhrases;
+  const interimTextRef = useRef<string>('');
+  interimTextRef.current = interimText;
 
   // 時刻範囲から残業分数を再計算するヘルパー（1分単位）
   const handleRecalculateOvertime = (start: string, end: string) => {
@@ -180,9 +182,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
       if (result.parsed.startTime) setStartTime(result.parsed.startTime);
       if (result.parsed.endTime) setEndTime(result.parsed.endTime);
       if (result.parsed.categoryId) setCategoryId(result.parsed.categoryId);
-      if (result.parsed.supportBadges.length > 0) {
-        setSupportBadges(result.parsed.supportBadges);
-      }
+      setSupportBadges(result.parsed.supportBadges);
       // 残業・休出の排他制御（どちらか一方のみを保持し、もう片方は確実にクリア）
       if (result.parsed.holidayWorkMinutes !== undefined || result.parsed.holidayWorkHours !== undefined) {
         const hwMin =
@@ -228,14 +228,8 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
       if (result.parsed.targetPartner) {
         setTargetPartner(result.parsed.targetPartner);
       }
-      if (result.parsed.isTentative) {
-        setIsTentative(true);
-      } else {
-        const todayStr = getLocalTodayStr();
-        if (result.date > todayStr) {
-          setIsTentative(true);
-        }
-      }
+      const todayStr = getLocalTodayStr();
+      setIsTentative(Boolean(result.parsed.isTentative || result.date > todayStr));
       if (result.parsed.isPrivate !== undefined) {
         setIsPrivate(result.parsed.isPrivate);
       }
@@ -243,21 +237,38 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   };
 
   // マイク認識の完全停止
-  const stopListening = () => {
+  const stopListening = (commitInterim = false, abortOnCleanup = false) => {
     isRecordingActiveRef.current = false;
     if (recognitionRef.current) {
+      const rec = recognitionRef.current;
+      recognitionRef.current = null;
       try {
-        recognitionRef.current.onresult = null;
-        recognitionRef.current.onerror = null;
-        recognitionRef.current.onend = null;
-        recognitionRef.current.stop();
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        if (abortOnCleanup && typeof rec.abort === 'function') {
+          rec.abort();
+        } else {
+          rec.stop();
+        }
       } catch {
         // ignore
       }
-      recognitionRef.current = null;
     }
     setIsListening(false);
+    const pendingInterim = interimTextRef.current.trim();
+    interimTextRef.current = '';
     setInterimText('');
+    if (commitInterim && pendingInterim) {
+      const prev = confirmedPhrasesRef.current;
+      const next =
+        prev.length > 0 && prev[prev.length - 1] === pendingInterim
+          ? prev
+          : [...prev, pendingInterim];
+      confirmedPhrasesRef.current = next;
+      setConfirmedPhrases(next);
+      updateAiAndForm(next, '');
+    }
   };
 
   // 🎙️ 音声認識の起動（iOS Safariで確実に反応するクリーンなWeb Speech API起動）
@@ -282,8 +293,13 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
     try {
       if (recognitionRef.current) {
+        const prevRec = recognitionRef.current;
+        recognitionRef.current = null;
         try {
-          recognitionRef.current.stop();
+          prevRec.onresult = null;
+          prevRec.onerror = null;
+          prevRec.onend = null;
+          prevRec.stop();
         } catch {
           // ignore
         }
@@ -311,21 +327,17 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
         }
 
         const trimmedFinal = newFinalChunk.trim();
+        let nextPhrases = confirmedPhrasesRef.current;
         if (trimmedFinal) {
-          setConfirmedPhrases((prev) => {
-            // 直前と完全に同じフレーズの二重コミット防止
-            if (prev.length > 0 && prev[prev.length - 1] === trimmedFinal) {
-              return prev;
-            }
-            const next = [...prev, trimmedFinal];
-            updateAiAndForm(next, currentInterim);
-            return next;
-          });
-        } else {
-          updateAiAndForm(confirmedPhrasesRef.current, currentInterim);
+          if (nextPhrases.length === 0 || nextPhrases[nextPhrases.length - 1] !== trimmedFinal) {
+            nextPhrases = [...nextPhrases, trimmedFinal];
+            confirmedPhrasesRef.current = nextPhrases;
+            setConfirmedPhrases(nextPhrases);
+          }
         }
-
+        interimTextRef.current = currentInterim;
         setInterimText(currentInterim);
+        updateAiAndForm(nextPhrases, currentInterim);
       };
 
       rec.onerror = (e: { error: string }) => {
@@ -366,7 +378,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   // トグル
   const toggleListening = () => {
     if (isListening) {
-      stopListening();
+      stopListening(true);
     } else {
       startListening();
     }
@@ -374,20 +386,27 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
   // ⌫ 直前の発話を取り消す（Undo）
   const handleUndoLastPhrase = () => {
-    setConfirmedPhrases((prev) => {
-      if (prev.length === 0) return prev;
-      const next = prev.slice(0, -1);
-      updateAiAndForm(next, interimText);
-      return next;
-    });
+    const prev = confirmedPhrasesRef.current;
+    if (prev.length === 0) return;
+    const next = prev.slice(0, -1);
+    confirmedPhrasesRef.current = next;
+    setConfirmedPhrases(next);
+    updateAiAndForm(next, interimTextRef.current);
   };
 
   // 🔄 最初からやり直す（リセット）
   const handleRestart = () => {
-    stopListening();
+    stopListening(false);
+    confirmedPhrasesRef.current = [];
+    interimTextRef.current = '';
     setConfirmedPhrases([]);
     setInterimText('');
+    setDateStr(selectedDate);
     setTitle('');
+    setCategoryId(activePartner);
+    setIsAllDay(true);
+    setStartTime('10:00');
+    setEndTime('11:00');
     setOvertimeMinutes(null);
     setOvertimeHours(null);
     setOvertimeStartTime(null);
@@ -395,6 +414,10 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     setHolidayWorkMinutes(null);
     setHolidayWorkHours(null);
     setSupportBadges([]);
+    setTargetPartner(activePartner);
+    setApplyToShift(true);
+    setIsTentative(selectedDate > getLocalTodayStr());
+    setIsPrivate(false);
     setSpeechError(null);
     updateAiAndForm([], '');
   };
@@ -402,13 +425,66 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   // クリーンアップ
   useEffect(() => {
     return () => {
-      stopListening();
+      stopListening(false, true);
     };
   }, []);
 
+  // 現在のフォーム値からパートナー向けLINE共有メッセージを構築
+  const buildLivePartnerLineMessage = () => {
+    if (isPrivate) return '';
+    const hasOtOrHw =
+      overtimeMinutes !== null ||
+      overtimeHours !== null ||
+      holidayWorkMinutes !== null ||
+      holidayWorkHours !== null;
+    const cleanTitle = title.trim();
+    const hasSpoken = confirmedPhrases.length > 0 || interimText.trim().length > 0;
+    if (!cleanTitle && !hasSpoken && !hasOtOrHw) return '';
+
+    const targetProfile = targetPartner === 'partnerA' ? partnerA : partnerB;
+    const [ly, lm, ld] = (dateStr || '').split('-').map(Number);
+    const dowNames = ['日', '月', '火', '水', '木', '金', '土'];
+    const dow = ly && lm && ld ? dowNames[new Date(ly, lm - 1, ld).getDay()] : '';
+    const dStr = lm && ld ? `${lm}/${ld}${dow ? `(${dow})` : ''}` : dateStr;
+    const tStr = isAllDay ? '終日' : `${startTime}〜${endTime}`;
+    const resolvedTitle = cleanTitle || aiResult.cleanSentence;
+    const otM =
+      overtimeMinutes !== null
+        ? overtimeMinutes
+        : overtimeHours !== null
+        ? Math.round(overtimeHours * 60)
+        : null;
+    const hwM =
+      holidayWorkMinutes !== null
+        ? holidayWorkMinutes
+        : holidayWorkHours !== null
+        ? Math.round(holidayWorkHours * 60)
+        : null;
+
+    const lines: string[] = [];
+    lines.push(`📅 ${dStr} ${tStr}【${targetProfile.name}】`);
+    if (resolvedTitle) {
+      lines.push(resolvedTitle);
+    }
+    if (hwM && hwM > 0) {
+      lines.push(`🎌 休日出勤 ${formatMinutesToJa(hwM)}`);
+    } else if (otM && otM > 0) {
+      const rangeStr =
+        overtimeStartTime && overtimeEndTime ? ` (${overtimeStartTime}〜${overtimeEndTime})` : '';
+      lines.push(`⏱️ 残業 +${formatMinutesToJa(otM)}${rangeStr}`);
+    }
+    if (supportBadges.length > 0) {
+      const badgeLabels = supportBadges.map(
+        (id) => SUPPORT_BADGE_PRESETS.find((b) => b.id === id)?.short || id
+      );
+      lines.push(`🏷️ ${badgeLabels.join('・')}`);
+    }
+    return lines.join('\n');
+  };
+
   // カレンダーへ保存
   const executeSave = (shouldOpenLine = false) => {
-    stopListening();
+    stopListening(true);
 
     const hasOtOrHw =
       overtimeMinutes !== null ||
@@ -418,12 +494,18 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
     const cleanTitle = title.trim();
     const isPureOvertime =
-      hasOtOrHw && (!cleanTitle || /^(残業|残業申請|仕事|仕事残業)$/.test(cleanTitle));
+      hasOtOrHw &&
+      (!cleanTitle ||
+        /^(残業(\s*\+\d+分)?|残業申請|仕事|仕事残業|休日出勤(\s*\d+分)?|休出)$/.test(cleanTitle));
 
     const finalTitle =
       cleanTitle ||
       aiResult.cleanSentence ||
-      (overtimeMinutes
+      (holidayWorkMinutes
+        ? `休日出勤 ${holidayWorkMinutes}分`
+        : holidayWorkHours
+        ? `休日出勤 ${Math.round(holidayWorkHours * 60)}分`
+        : overtimeMinutes
         ? `残業 +${overtimeMinutes}分`
         : overtimeHours
         ? `残業 +${Math.round(overtimeHours * 60)}分`
@@ -505,9 +587,10 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
     }
 
     // もしLINE送信も希望ならLINEを即座に開く（じぶん限定秘密予定の場合は相手に送信しない）
-    if (shouldOpenLine && !isPrivate && aiResult.partnerLineMessage) {
-      const lineUrl = `https://line.me/R/share?text=${encodeURIComponent(aiResult.partnerLineMessage)}`;
-      window.open(lineUrl, '_blank');
+    const liveLineMsg = buildLivePartnerLineMessage();
+    if (shouldOpenLine && !isPrivate && liveLineMsg) {
+      const lineUrl = `https://line.me/R/share?text=${encodeURIComponent(liveLineMsg)}`;
+      window.open(lineUrl, '_blank', 'noopener,noreferrer');
     }
 
     onClose();
@@ -520,12 +603,15 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
   // サンプルフレーズを適用
   const handleApplySample = (sample: string) => {
+    confirmedPhrasesRef.current = [sample];
+    interimTextRef.current = '';
     setConfirmedPhrases([sample]);
     setInterimText('');
     updateAiAndForm([sample], '');
   };
 
   const hasAnyText = confirmedPhrases.length > 0 || interimText.trim().length > 0;
+  const livePartnerLineMessage = buildLivePartnerLineMessage();
 
   return (
     <div
@@ -633,7 +719,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                   <div className="space-y-2 w-full pt-1">
                     <button
                       type="button"
-                      onClick={stopListening}
+                      onClick={() => stopListening(true)}
                       className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 active:scale-95 text-white font-black text-sm shadow-md flex items-center justify-center gap-2 animate-bounce"
                     >
                       <span>⏹️</span>
@@ -823,18 +909,18 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
             </div>
 
             {/* 💬 パートナーへLINEで連絡するワンタップボタン */}
-            {aiResult.partnerLineMessage && (
+            {!isPrivate && livePartnerLineMessage && (
               <div className="p-3 rounded-2xl bg-white border border-emerald-200 shadow-2xs space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-extrabold text-emerald-800 text-[11px] flex items-center gap-1">
                     <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>パートナーへのLINE連絡文（AI自動生成）</span>
+                    <span>パートナーへのLINE連絡文（自動作成）</span>
                   </span>
                   <button
                     type="button"
                     onClick={async () => {
                       try {
-                        await navigator.clipboard.writeText(aiResult.partnerLineMessage);
+                        await navigator.clipboard.writeText(livePartnerLineMessage);
                         setCopiedLineMsg(true);
                         setTimeout(() => setCopiedLineMsg(false), 2000);
                       } catch {
@@ -849,11 +935,11 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                 </div>
 
                 <div className="p-2.5 rounded-xl bg-emerald-50/60 text-emerald-900 font-bold text-[11px] whitespace-pre-line border border-emerald-100 leading-relaxed">
-                  {aiResult.partnerLineMessage}
+                  {livePartnerLineMessage}
                 </div>
 
                 <a
-                  href={`https://line.me/R/share?text=${encodeURIComponent(aiResult.partnerLineMessage)}`}
+                  href={`https://line.me/R/share?text=${encodeURIComponent(livePartnerLineMessage)}`}
                   target="_blank"
                   rel="noreferrer"
                   className="w-full py-2 px-3 rounded-xl bg-[#06C755] hover:bg-[#05b04b] active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-2xs transition-all"
@@ -1086,13 +1172,15 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
               <Check className="w-4 h-4" />
               <span>
                 {overtimeMinutes !== null || overtimeHours !== null
-                  ? `⏱️ ${currentPartner.name}の残業(+${overtimeMinutes ?? Math.round((overtimeHours || 0) * 60)}分)を登録`
+                  ? `⏱️ ${(targetPartner === 'partnerA' ? partnerA : partnerB).name}の残業(+${overtimeMinutes ?? Math.round((overtimeHours || 0) * 60)}分)を登録`
+                  : holidayWorkMinutes !== null || holidayWorkHours !== null
+                  ? `🎌 ${(targetPartner === 'partnerA' ? partnerA : partnerB).name}の休日出勤(${holidayWorkMinutes ?? Math.round((holidayWorkHours || 0) * 60)}分)を登録`
                   : 'この内容でカレンダーに登録する✨'}
               </span>
             </button>
 
             {/* 💬 カレンダー登録 ＋ LINEにも同時送信ボタン */}
-            {aiResult.partnerLineMessage && (
+            {!isPrivate && livePartnerLineMessage && (
               <button
                 type="button"
                 onClick={() => executeSave(true)}

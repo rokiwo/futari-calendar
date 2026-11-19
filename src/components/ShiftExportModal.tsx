@@ -20,6 +20,7 @@ import {
   getLocalTodayStr,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
+  isShiftConsideredHoliday,
 } from '../utils/presets';
 
 export type ExportPartnerMode = 'partnerA' | 'partnerB' | 'both';
@@ -169,7 +170,10 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
     canvas.height = totalHeight * scale;
 
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      setIsGenerating(false);
+      return;
+    }
 
     ctx.scale(scale, scale);
 
@@ -226,10 +230,8 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
         }
 
         const isTent = Boolean(
-          (ot > 0 && (s.isTentativeOvertime || s.date > todayIsoStr)) ||
-          (hw > 0 && (s.isTentativeHolidayWork || s.date > todayIsoStr)) ||
-          s.overtimeStatus === 'tentative' ||
-          s.holidayWorkStatus === 'tentative'
+          (ot > 0 && (s.isTentativeOvertime || s.overtimeStatus === 'tentative' || s.date > todayIsoStr)) ||
+          (hw > 0 && (s.isTentativeHolidayWork || s.holidayWorkStatus === 'tentative' || s.date > todayIsoStr))
         );
 
         if (isTent) {
@@ -350,11 +352,19 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
       // ──【モード1: ゆうとのみ または さやのみ】（シフト文字位置固定で波打ち解消＆夜バ・残業・休出を拡大表示）──
       if (exportMode === 'partnerA' || exportMode === 'partnerB') {
         const isPartnerA = exportMode === 'partnerA';
-        const label = isPartnerA ? labelA : labelB;
         const stamp = isPartnerA ? stampA : stampB;
         const shift = isPartnerA ? actA : actB;
+        const hwFallback = getShiftHolidayWorkMinutes(shift) > 0 ? '休出' : '';
+        const label = (isPartnerA ? labelA : labelB) || hwFallback;
+        const hasAnyBadge = Boolean(
+          label ||
+          shift?.subCustomLabel ||
+          shift?.subStampId ||
+          getShiftOvertimeMinutes(shift) > 0 ||
+          getShiftHolidayWorkMinutes(shift) > 0
+        );
 
-        if (label) {
+        if (hasAnyBadge) {
           const shiftColor = resolveShiftColor(label, stamp?.textColor);
           const hasSub = Boolean(shift?.subCustomLabel || shift?.subStampId);
           const otMin = getShiftOvertimeMinutes(shift);
@@ -504,29 +514,45 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
 
       // ──【モード2: 2人両方】（上段にゆうと、下段にさやを波打ちゼロで固定配置！）──
       else {
-        const hasA = Boolean(labelA);
-        const hasB = Boolean(labelB);
+        const hwA = getShiftHolidayWorkMinutes(actA);
+        const hwB = getShiftHolidayWorkMinutes(actB);
+        const dispLabelA = labelA || (hwA > 0 ? '休出' : '');
+        const dispLabelB = labelB || (hwB > 0 ? '休出' : '');
+        const hasA = Boolean(
+          dispLabelA ||
+          actA?.subCustomLabel ||
+          actA?.subStampId ||
+          getShiftOvertimeMinutes(actA) > 0 ||
+          hwA > 0
+        );
+        const hasB = Boolean(
+          dispLabelB ||
+          actB?.subCustomLabel ||
+          actB?.subStampId ||
+          getShiftOvertimeMinutes(actB) > 0 ||
+          hwB > 0
+        );
 
         // 2人とも同じ休日の場合は仲良しハートマーク
         const bothHoliday =
-          hasA &&
-          hasB &&
-          /休|年休|有休/.test(labelA) &&
-          /休|年休|有休/.test(labelB);
+          isShiftConsideredHoliday(actA, stampA) &&
+          isShiftConsideredHoliday(actB, stampB);
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         // 上段：ゆうと（位置固定で波打ち解消＆下段に残業・夜勤バイトを拡大配置）
         if (hasA) {
-          const colorA = resolveShiftColor(labelA, stampA?.textColor);
+          const colorA = resolveShiftColor(dispLabelA, stampA?.textColor);
           ctx.fillStyle = colorA;
-          const fontSizeA = labelA.length <= 2 ? 28 : 22;
+          const fontSizeA = dispLabelA.length <= 2 ? 28 : 22;
           ctx.font = `900 ${fontSizeA}px "Zen Maru Gothic", sans-serif`;
 
           // メインシフトY位置固定（波打ちゼロ）
           const yA = y + 52;
-          ctx.fillText(`${labelA}`, x + cellWidth / 2 + 10, yA);
+          if (dispLabelA) {
+            ctx.fillText(`${dispLabelA}`, x + cellWidth / 2 + 10, yA);
+          }
 
           // 左横に夫のアバターアイコン
           ctx.font = '700 15px sans-serif';
@@ -601,14 +627,16 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
 
         // 下段：さや（位置固定で波打ち解消＆下段に残業・夜勤バイトを拡大配置）
         if (hasB) {
-          const colorB = resolveShiftColor(labelB, stampB?.textColor);
+          const colorB = resolveShiftColor(dispLabelB, stampB?.textColor);
           ctx.fillStyle = colorB;
-          const fontSizeB = labelB.length <= 2 ? 28 : 22;
+          const fontSizeB = dispLabelB.length <= 2 ? 28 : 22;
           ctx.font = `900 ${fontSizeB}px "Zen Maru Gothic", sans-serif`;
 
           // メインシフトY位置固定（波打ちゼロ）
           const yB = y + 120;
-          ctx.fillText(`${labelB}`, x + cellWidth / 2 + 10, yB);
+          if (dispLabelB) {
+            ctx.fillText(`${dispLabelB}`, x + cellWidth / 2 + 10, yB);
+          }
 
           // 左横に妻のアバターアイコン
           ctx.font = '700 15px sans-serif';
@@ -723,9 +751,12 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
   // Web Share API（スマホでLINEや写真アプリに保存）
   const handleShare = async () => {
     if (!imageDataUrl || !canvasRef.current) return;
-    try {
-      canvasRef.current.toBlob(async (blob) => {
-        if (!blob) return;
+    canvasRef.current.toBlob(async (blob) => {
+      if (!blob) {
+        handleDownload();
+        return;
+      }
+      try {
         const file = new File(
           [blob],
           `シフト表_${viewYear}年${viewMonth}月.png`,
@@ -740,10 +771,11 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
           // 非対応なら通常ダウンロード
           handleDownload();
         }
-      }, 'image/png');
-    } catch {
-      handleDownload();
-    }
+      } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        handleDownload();
+      }
+    }, 'image/png');
   };
 
   return (

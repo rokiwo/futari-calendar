@@ -38,6 +38,9 @@ import {
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
   isEventVisibleToPartner,
+  isShiftConsideredHoliday,
+  isShiftTentativeHolidayWork,
+  isShiftTentativeOvertime,
   resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
@@ -132,15 +135,23 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const [isOtHolidayWork, setIsOtHolidayWork] = useState<boolean>(false);
   const [otIsTentative, setOtIsTentative] = useState<boolean>(false);
 
+  useEffect(() => {
+    setEditingOtPartner(null);
+    setOtInputMinutes('');
+    setIsOtHolidayWork(false);
+    setOtIsTentative(false);
+  }, [dateStr]);
+
   // 残業入力パネルを開く処理
   const handleOpenOvertimeEditor = (partnerId: PartnerId) => {
-    const shift = partnerId === 'partnerA' ? store.shifts[`${dateStr}_partnerA`] : store.shifts[`${dateStr}_partnerB`];
+    const rawShift = store.shifts?.[`${dateStr}_${partnerId}`];
+    const shift = rawShift && !rawShift.deletedAt ? rawShift : undefined;
     const curOt = getShiftOvertimeMinutes(shift);
     const curHw = getShiftHolidayWorkMinutes(shift);
     const isHw = Boolean(shift?.isHolidayWork || curHw > 0);
     const isFuture = dateStr > getLocalTodayStr();
     const isExistingTentative = Boolean(
-      isHw ? shift?.isTentativeHolidayWork : shift?.isTentativeOvertime
+      isHw ? isShiftTentativeHolidayWork(shift) : isShiftTentativeOvertime(shift)
     );
     setIsOtHolidayWork(isHw);
     setOtInputMinutes(String(isHw ? curHw : curOt || 30));
@@ -150,12 +161,13 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
   // 残業・休日出勤の保存
   const handleSaveOvertime = (targetPartner: PartnerId, minutes: number, isHw: boolean) => {
-    if (!onUpdateShiftDetails) return;
+    if (!onUpdateShiftDetails || !Number.isFinite(minutes) || minutes < 0) return;
+    const roundedMin = Math.round(minutes);
     const todayStr = getLocalTodayStr();
     const isFuture = dateStr > todayStr;
     const finalTentative = isFuture ? true : dateStr === todayStr ? otIsTentative : false;
 
-    if (minutes === 0) {
+    if (roundedMin === 0) {
       onUpdateShiftDetails(dateStr, targetPartner, {
         overtimeMinutes: 0,
         overtimeHours: 0,
@@ -170,8 +182,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     } else if (isHw) {
       onUpdateShiftDetails(dateStr, targetPartner, {
         isHolidayWork: true,
-        holidayWorkMinutes: minutes,
-        holidayWorkHours: Math.round((minutes / 60) * 10) / 10,
+        holidayWorkMinutes: roundedMin,
+        holidayWorkHours: Math.round((roundedMin / 60) * 10) / 10,
         overtimeMinutes: 0,
         overtimeHours: 0,
         isTentativeHolidayWork: finalTentative,
@@ -184,8 +196,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
         isHolidayWork: false,
         holidayWorkMinutes: 0,
         holidayWorkHours: 0,
-        overtimeMinutes: minutes,
-        overtimeHours: Math.round((minutes / 60) * 10) / 10,
+        overtimeMinutes: roundedMin,
+        overtimeHours: Math.round((roundedMin / 60) * 10) / 10,
         isTentativeOvertime: finalTentative,
         isTentativeHolidayWork: false,
         overtimeStatus: finalTentative ? 'tentative' : 'confirmed',
@@ -200,9 +212,12 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     const todayStr = getLocalTodayStr();
     const isFuture = dateStr > todayStr;
     const isToday = dateStr === todayStr;
+    const trimmedOt = otInputMinutes.trim();
+    const parsedOt = trimmedOt === '' ? NaN : Number(trimmedOt);
+    const isOtValid = Number.isFinite(parsedOt) && parsedOt >= 0;
 
     return (
-      <div className="mt-2.5 bg-linear-to-r from-[#FFF4EA] to-[#FFEBEF] p-3 rounded-2xl border-2 border-[#FFD0BF] space-y-2.5 animate-pop text-xs">
+      <div className="mt-2.5 bg-gradient-to-r from-[#FFF4EA] to-[#FFEBEF] p-3 rounded-2xl border-2 border-[#FFD0BF] space-y-2.5 animate-pop text-xs">
         <div className="flex items-center justify-between">
           <span className="font-black text-[#9C3D1C] flex items-center gap-1">
             <Clock className="w-4 h-4 text-rose-500" />
@@ -253,17 +268,17 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
           </div>
           <button
             type="button"
-            disabled={otInputMinutes === '' || Number(otInputMinutes) < 0}
-            onClick={() => handleSaveOvertime(targetPartner, Number(otInputMinutes), isOtHolidayWork)}
-            className="px-4 py-2.5 rounded-xl bg-linear-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 disabled:opacity-40 text-white font-black text-xs shadow-md active:scale-95 transition-all shrink-0"
+            disabled={!isOtValid}
+            onClick={() => handleSaveOvertime(targetPartner, parsedOt, isOtHolidayWork)}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 disabled:opacity-40 text-white font-black text-xs shadow-md active:scale-95 transition-all shrink-0"
           >
-            {Number(otInputMinutes) === 0 ? '0分で保存' : 'この分数で保存 ✨'}
+            {isOtValid && Math.round(parsedOt) === 0 ? '0分で保存' : 'この分数で保存 ✨'}
           </button>
         </div>
 
-        {otInputMinutes !== '' && Number(otInputMinutes) > 0 && (
+        {isOtValid && Math.round(parsedOt) > 0 && (
           <div className="text-[11px] font-black text-rose-600 pl-1">
-            ＝ {formatMinutesToJa(Number(otInputMinutes))}
+            ＝ {formatMinutesToJa(Math.round(parsedOt))}
             {isOtHolidayWork ? '（💼休日出勤）' : '（⏱️通常残業）'}
           </div>
         )}
@@ -382,12 +397,8 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const stampA = shiftA ? stampMap.get(shiftA.stampId) : undefined;
   const stampB = shiftB ? stampMap.get(shiftB.stampId) : undefined;
 
-  const isHolidayShift = (shift?: ShiftEntry) => {
-    if (!shift || shift.isHolidayWork) return false;
-    const p = stampMap.get(shift.stampId);
-    return Boolean(p?.isHoliday || (p && /休|有休|公休/.test(p.label)));
-  };
-  const isBothHoliday = isHolidayShift(shiftA) && isHolidayShift(shiftB);
+  const isBothHoliday =
+    isShiftConsideredHoliday(shiftA, stampA) && isShiftConsideredHoliday(shiftB, stampB);
 
   const dayEvents = Object.values(store.events || {})
     .filter((e): e is ScheduleEvent =>
@@ -699,7 +710,10 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() => setShowEventForm(false)}
+                    onClick={() => {
+                      setShowEventForm(false);
+                      setEditingEventId(null);
+                    }}
                     className="text-xs text-stone-400 hover:text-stone-600 font-bold"
                   >
                     閉じる
@@ -1075,7 +1089,10 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       <div className="flex justify-center">
                         <button
                           type="button"
-                          onClick={() => setShowEventForm(false)}
+                          onClick={() => {
+                            setShowEventForm(false);
+                            setEditingEventId(null);
+                          }}
                           className="text-stone-400 hover:text-stone-600 text-xs font-bold py-1 px-3 rounded-lg hover:bg-stone-100 transition-colors"
                         >
                           キャンセルして閉じる
@@ -1260,7 +1277,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     <span>{partnerA.avatar}</span>
                     <span>{partnerA.name}</span>
                   </span>
-                  {onUpdateShiftDetails && (
+                  {onUpdateShiftDetails && activePartner === 'partnerA' && (
                     <button
                       type="button"
                       onClick={() => handleOpenOvertimeEditor('partnerA')}
@@ -1297,10 +1314,10 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       🌙 夜バ
                     </span>
                   )}
-                  {(getShiftHolidayWorkMinutes(shiftA) > 0 || getShiftOvertimeMinutes(shiftA) > 0) && (() => {
+                  {activePartner === 'partnerA' && (getShiftHolidayWorkMinutes(shiftA) > 0 || getShiftOvertimeMinutes(shiftA) > 0) && (() => {
                     const hw = getShiftHolidayWorkMinutes(shiftA);
                     const ot = getShiftOvertimeMinutes(shiftA);
-                    const isTentative = Boolean((ot > 0 && shiftA?.isTentativeOvertime) || (hw > 0 && shiftA?.isTentativeHolidayWork));
+                    const isTentative = isShiftTentativeOvertime(shiftA) || isShiftTentativeHolidayWork(shiftA);
                     const todayStr = getLocalTodayStr();
                     const isFuture = dateStr > todayStr;
                     return (
@@ -1325,7 +1342,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                                 overtimeStatus: 'confirmed',
                               });
                             }}
-                            className="px-2 py-0.5 rounded-lg bg-linear-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-extrabold text-[10px] shadow-2xs active:scale-95 transition-all"
+                            className="px-2 py-0.5 rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-extrabold text-[10px] shadow-2xs active:scale-95 transition-all"
                           >
                             ✨ 実残業を確定
                           </button>
@@ -1339,7 +1356,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     );
                   })()}
                 </div>
-                {editingOtPartner === 'partnerA' && renderOvertimeEditor('partnerA')}
+                {activePartner === 'partnerA' && editingOtPartner === 'partnerA' && renderOvertimeEditor('partnerA')}
                 {shiftA && renderAuditAndReadStatus(shiftA.createdBy, shiftA.createdAt, shiftA.updatedAt)}
               </div>
 
@@ -1350,7 +1367,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     <span>{partnerB.avatar}</span>
                     <span>{partnerB.name}</span>
                   </span>
-                  {onUpdateShiftDetails && (
+                  {onUpdateShiftDetails && activePartner === 'partnerB' && (
                     <button
                       type="button"
                       onClick={() => handleOpenOvertimeEditor('partnerB')}
@@ -1387,10 +1404,10 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                       🌙 夜バ
                     </span>
                   )}
-                  {(getShiftHolidayWorkMinutes(shiftB) > 0 || getShiftOvertimeMinutes(shiftB) > 0) && (() => {
+                  {activePartner === 'partnerB' && (getShiftHolidayWorkMinutes(shiftB) > 0 || getShiftOvertimeMinutes(shiftB) > 0) && (() => {
                     const hw = getShiftHolidayWorkMinutes(shiftB);
                     const ot = getShiftOvertimeMinutes(shiftB);
-                    const isTentative = Boolean((ot > 0 && shiftB?.isTentativeOvertime) || (hw > 0 && shiftB?.isTentativeHolidayWork));
+                    const isTentative = isShiftTentativeOvertime(shiftB) || isShiftTentativeHolidayWork(shiftB);
                     const todayStr = getLocalTodayStr();
                     const isFuture = dateStr > todayStr;
                     return (
@@ -1415,7 +1432,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                                 overtimeStatus: 'confirmed',
                               });
                             }}
-                            className="px-2 py-0.5 rounded-lg bg-linear-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-extrabold text-[10px] shadow-2xs active:scale-95 transition-all"
+                            className="px-2 py-0.5 rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-extrabold text-[10px] shadow-2xs active:scale-95 transition-all"
                           >
                             ✨ 実残業を確定
                           </button>
@@ -1429,7 +1446,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     );
                   })()}
                 </div>
-                {editingOtPartner === 'partnerB' && renderOvertimeEditor('partnerB')}
+                {activePartner === 'partnerB' && editingOtPartner === 'partnerB' && renderOvertimeEditor('partnerB')}
                 {shiftB && renderAuditAndReadStatus(shiftB.createdBy, shiftB.createdAt, shiftB.updatedAt)}
               </div>
             </div>
@@ -1440,7 +1457,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleOpenOvertimeEditor(activePartner)}
-                  className="w-full py-2.5 px-3 rounded-xl bg-linear-to-r from-rose-500 via-pink-500 to-rose-500 hover:from-rose-600 hover:to-pink-600 active:scale-95 text-white font-black text-xs shadow-md flex items-center justify-center gap-1.5 transition-all"
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-rose-500 via-pink-500 to-rose-500 hover:from-rose-600 hover:to-pink-600 active:scale-95 text-white font-black text-xs shadow-md flex items-center justify-center gap-1.5 transition-all"
                 >
                   <Clock className="w-4 h-4 text-amber-300" />
                   <span>⏱️ {currentPartnerInfo.name}の残業・休日出勤を入力する</span>

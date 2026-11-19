@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
   Camera,
@@ -77,7 +77,10 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
   // AI抽出結果プレビュー ＆ 7列カレンダー上で1タップ微調整するためのブラシ選択状態
   const [ocrResult, setOcrResult] = useState<ExtractedImageScheduleResult | null>(null);
   const [brushStampId, setBrushStampId] = useState<string>(() => {
-    const first = stamps.find((s) => s.type === 'shift') || DEFAULT_STAMP_PRESETS[0];
+    const firstForPartner = stamps.find(
+      (s) => s.type === 'shift' && (s.partnerId || 'partnerA') === targetPartner
+    );
+    const first = firstForPartner || stamps.find((s) => s.type === 'shift') || DEFAULT_STAMP_PRESETS[0];
     return first ? first.id : 'shift_a_day';
   });
 
@@ -85,6 +88,7 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
   const [nurseKarText, setNurseKarText] = useState<string>('');
   const icsInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const analysisReqIdRef = useRef<number>(0);
 
   const partnerSpecificStamps = stamps.filter(
     (s) => s.type === 'shift' && (s.partnerId || 'partnerA') === targetPartner
@@ -103,6 +107,21 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
   const partnerA = metadata.partners.partnerA;
   const partnerB = metadata.partners.partnerB;
 
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  useEffect(() => {
+    const preferred = shiftStamps[0];
+    if (preferred) {
+      setBrushStampId((prev) =>
+        prev === '__ERASER__' || shiftStamps.some((s) => s.id === prev) ? prev : preferred.id
+      );
+    }
+  }, [targetPartner, stamps]);
+
   // 画像を選んだら即座にAPIキー不要の自動解析を開始する
   const runAnalysisForFile = async (
     fileToAnalyze: File,
@@ -110,6 +129,7 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
     m = targetMonth,
     mondayStart = weekStartsOnMonday
   ) => {
+    const reqId = ++analysisReqIdRef.current;
     setError(null);
     setAnalyzing(true);
     setProgressMsg('🔍 画像を読み込んでいます...');
@@ -126,14 +146,20 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
         personNameInTable,
         shiftStamps,
         mondayStart,
-        (msg) => setProgressMsg(msg)
+        (msg) => {
+          if (analysisReqIdRef.current === reqId) setProgressMsg(msg);
+        }
       );
+      if (analysisReqIdRef.current !== reqId) return;
       setOcrResult(result);
     } catch (err) {
+      if (analysisReqIdRef.current !== reqId) return;
       setError(err instanceof Error ? err.message : '画像解析中にエラーが発生しました');
     } finally {
-      setAnalyzing(false);
-      setProgressMsg('');
+      if (analysisReqIdRef.current === reqId) {
+        setAnalyzing(false);
+        setProgressMsg('');
+      }
     }
   };
 
@@ -167,6 +193,7 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setSelectedFile(file);
     setPreviewUrl(URL.createObjectURL(file));
@@ -237,12 +264,10 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
         date: item.date,
         partnerId: targetPartner,
         stampId: st.id,
-        customLabel: st.shortLabel,
         startTime: item.startTime || st.startTime,
         endTime: item.endTime || st.endTime,
         createdBy: activePartner,
         createdAt: nowIso,
-        updatedBy: activePartner,
         updatedAt: nowIso,
       };
     });
@@ -290,11 +315,13 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
         setError('.icsファイル内に有効なシフトや予定が見つかりませんでした');
         return;
       }
+      const fixedShifts = shifts.map((s) => ({ ...s, createdBy: activePartner }));
+      const fixedEvents = events.map((ev) => ({ ...ev, createdBy: activePartner }));
       const pInfo = metadata.partners[targetPartner];
       onBulkApplyShiftsAndEvents(
-        shifts,
-        events,
-        `🏥 ナスカレ/カレンダーから ${pInfo.avatar}シフト${shifts.length}件・予定${events.length}件を取り込みました！`
+        fixedShifts,
+        fixedEvents,
+        `🏥 ナスカレ/カレンダーから ${pInfo.avatar}シフト${fixedShifts.length}件・予定${fixedEvents.length}件を取り込みました！`
       );
       onClose();
     } catch {
@@ -324,11 +351,13 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
       );
       return;
     }
+    const fixedShifts = shifts.map((s) => ({ ...s, createdBy: activePartner }));
+    const fixedEvents = events.map((ev) => ({ ...ev, createdBy: activePartner }));
     const pInfo = metadata.partners[targetPartner];
     onBulkApplyShiftsAndEvents(
-      shifts,
-      events,
-      `🏥 テキストから ${pInfo.avatar}シフト${shifts.length}件・予定${events.length}件を一括登録しました！`
+      fixedShifts,
+      fixedEvents,
+      `🏥 テキストから ${pInfo.avatar}シフト${fixedShifts.length}件・予定${fixedEvents.length}件を一括登録しました！`
     );
     onClose();
   };
@@ -447,8 +476,12 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setTargetPartner('partnerA')}
-                className={`py-2 px-3 rounded-xl font-extrabold flex items-center justify-center gap-1.5 border-2 transition-all ${
+                disabled={analyzing}
+                onClick={() => {
+                  setTargetPartner('partnerA');
+                  setOcrResult(null);
+                }}
+                className={`py-2 px-3 rounded-xl font-extrabold flex items-center justify-center gap-1.5 border-2 transition-all disabled:opacity-60 ${
                   targetPartner === 'partnerA'
                     ? 'bg-[#E2F9FC] border-[#56CFE1] text-[#136370]'
                     : 'bg-stone-50 border-stone-200 text-stone-500'
@@ -460,8 +493,12 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
 
               <button
                 type="button"
-                onClick={() => setTargetPartner('partnerB')}
-                className={`py-2 px-3 rounded-xl font-extrabold flex items-center justify-center gap-1.5 border-2 transition-all ${
+                disabled={analyzing}
+                onClick={() => {
+                  setTargetPartner('partnerB');
+                  setOcrResult(null);
+                }}
+                className={`py-2 px-3 rounded-xl font-extrabold flex items-center justify-center gap-1.5 border-2 transition-all disabled:opacity-60 ${
                   targetPartner === 'partnerB'
                     ? 'bg-[#F3EAFF] border-[#B388EB] text-[#59318F]'
                     : 'bg-stone-50 border-stone-200 text-stone-500'
@@ -475,12 +512,17 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
             <div className="flex items-center gap-2">
               <select
                 value={targetYear}
+                disabled={analyzing}
                 onChange={(e) => {
                   const ny = Number(e.target.value);
                   setTargetYear(ny);
-                  if (selectedFile) runAnalysisForFile(selectedFile, ny, targetMonth, weekStartsOnMonday);
+                  if (selectedFile) {
+                    runAnalysisForFile(selectedFile, ny, targetMonth, weekStartsOnMonday);
+                  } else {
+                    setOcrResult(null);
+                  }
                 }}
-                className="flex-1 px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] font-extrabold"
+                className="flex-1 px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] font-extrabold disabled:opacity-60"
               >
                 {[year - 1, year, year + 1].map((y) => (
                   <option key={y} value={y}>
@@ -490,12 +532,17 @@ export const ShiftImageOcrModal: React.FC<ShiftImageOcrModalProps> = ({
               </select>
               <select
                 value={targetMonth}
+                disabled={analyzing}
                 onChange={(e) => {
                   const nm = Number(e.target.value);
                   setTargetMonth(nm);
-                  if (selectedFile) runAnalysisForFile(selectedFile, targetYear, nm, weekStartsOnMonday);
+                  if (selectedFile) {
+                    runAnalysisForFile(selectedFile, targetYear, nm, weekStartsOnMonday);
+                  } else {
+                    setOcrResult(null);
+                  }
                 }}
-                className="flex-1 px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] font-extrabold"
+                className="flex-1 px-3 py-1.5 rounded-xl border border-stone-200 bg-[#FFFBF7] font-extrabold disabled:opacity-60"
               >
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                   <option key={m} value={m}>

@@ -30,8 +30,17 @@ import {
   getPartnerShiftStamps,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
+  isShiftExtraTentative,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
+
+function addMinutesToHHMM(timeStr: string, addMinutes: number): string {
+  const [hRaw, mRaw] = (timeStr || '17:00').split(':').map(Number);
+  const h = Number.isFinite(hRaw) ? hRaw : 17;
+  const m = Number.isFinite(mRaw) ? mRaw : 0;
+  const total = (((h * 60 + m + addMinutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
 
 export type StampDrawerTab = 'partnerA_shift' | 'partnerB_shift' | 'support_badge';
 
@@ -119,8 +128,9 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
     const curOt = getShiftOvertimeMinutes(currentShiftOnSelectedDate);
     setDirectMin(curOt > 0 ? String(curOt) : '');
     const shiftEnd = currentShiftOnSelectedDate?.endTime || '17:00';
-    setCalcStart(currentShiftOnSelectedDate?.overtimeStartTime || shiftEnd);
-    setCalcEnd(currentShiftOnSelectedDate?.overtimeEndTime || '17:35');
+    const defaultStart = currentShiftOnSelectedDate?.overtimeStartTime || shiftEnd;
+    setCalcStart(defaultStart);
+    setCalcEnd(currentShiftOnSelectedDate?.overtimeEndTime || addMinutesToHHMM(defaultStart, 30));
   }, [currentShiftOnSelectedDate, selectedDate]);
 
   if (!isOpen) {
@@ -178,7 +188,7 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   }
 
   return (
-    <div className="fixed bottom-0 inset-x-0 z-40 bg-white/98 backdrop-blur-md rounded-t-3xl shadow-2xl border-t-2 border-[#FF8FAB] pb-[env(safe-area-inset-bottom)] animate-pop">
+    <div className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md rounded-t-3xl shadow-2xl border-t-2 border-[#FF8FAB] pb-[env(safe-area-inset-bottom)] animate-pop">
       <div className="max-w-xl mx-auto px-3 pt-2 pb-2.5 space-y-1.5">
         {/* 1. ドロワー上部：選択日表示（カレンダーの日付タップで自由移動）＆ 連続翌日移動ON/OFF ＆ シフト種類編集 */}
         <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-stone-100 pb-1.5">
@@ -371,25 +381,32 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                 <span className="font-bold text-stone-400 shrink-0">
                   {formatSelectedDate(selectedDate)}:
                 </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
-                      subStampId: currentShiftOnSelectedDate?.subCustomLabel ? undefined : 'shift_part',
-                      subCustomLabel: currentShiftOnSelectedDate?.subCustomLabel ? undefined : '夜勤バイト',
-                      subStartTime: '21:00',
-                      subEndTime: '23:59',
-                    })
-                  }
-                  className={`px-2.5 py-1 rounded-lg font-black border shrink-0 transition-all ${
-                    currentShiftOnSelectedDate?.subCustomLabel
-                      ? 'bg-amber-300 border-amber-400 text-stone-900 shadow-2xs'
-                      : 'bg-[#FFFBF7] border-stone-200 text-stone-600 hover:bg-amber-50'
-                  }`}
-                  title="仕事終わりの夜勤バイトを1タップで追加（カレンダーに夜バと表示されます）"
-                >
-                  {currentShiftOnSelectedDate?.subCustomLabel ? '🌙夜勤バイト中' : '＋🌙夜勤バイト'}
-                </button>
+                {(() => {
+                  const hasSub = Boolean(
+                    currentShiftOnSelectedDate?.subCustomLabel || currentShiftOnSelectedDate?.subStampId
+                  );
+                  return (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
+                          subStampId: hasSub ? undefined : 'shift_part',
+                          subCustomLabel: hasSub ? undefined : '夜勤バイト',
+                          subStartTime: hasSub ? undefined : '21:00',
+                          subEndTime: hasSub ? undefined : '23:59',
+                        })
+                      }
+                      className={`px-2.5 py-1 rounded-lg font-black border shrink-0 transition-all ${
+                        hasSub
+                          ? 'bg-amber-300 border-amber-400 text-stone-900 shadow-2xs'
+                          : 'bg-[#FFFBF7] border-stone-200 text-stone-600 hover:bg-amber-50'
+                      }`}
+                      title="仕事終わりの夜勤バイトを1タップで追加（カレンダーに夜バと表示されます）"
+                    >
+                      {hasSub ? '🌙夜勤バイト中' : '＋🌙夜勤バイト'}
+                    </button>
+                  );
+                })()}
 
                 {/* ⚡ 開始〜終了時刻から自動計算のトグルボタン */}
                 <button
@@ -433,6 +450,10 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                               isHolidayWork: false,
                               holidayWorkMinutes: 0,
                               holidayWorkHours: 0,
+                              isTentativeOvertime: false,
+                              overtimeStatus: 'confirmed',
+                              isTentativeHolidayWork: false,
+                              holidayWorkStatus: 'confirmed',
                             });
                           }}
                           className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 text-[10px] transition-all ${
@@ -455,6 +476,10 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                             holidayWorkHours: nextHwMin > 0 ? 4 : 0,
                             overtimeMinutes: 0,
                             overtimeHours: 0,
+                            isTentativeOvertime: false,
+                            overtimeStatus: 'confirmed',
+                            isTentativeHolidayWork: false,
+                            holidayWorkStatus: 'confirmed',
                           });
                         }}
                         className={`px-2 py-1 rounded-lg font-extrabold border shrink-0 text-[10px] ${
@@ -486,7 +511,7 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                           type="button"
                           onClick={() => {
                             setCalcStart(shiftEnd);
-                            setCalcEnd(currentShiftOnSelectedDate?.overtimeEndTime || shiftEnd);
+                            setCalcEnd(currentShiftOnSelectedDate?.overtimeEndTime || addMinutesToHHMM(shiftEnd, 30));
                           }}
                           className="px-2 py-0.5 rounded-md bg-white border border-rose-200 text-rose-700 font-bold text-[9px] hover:bg-rose-100"
                         >
@@ -531,6 +556,10 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                             isHolidayWork: false,
                             holidayWorkMinutes: 0,
                             holidayWorkHours: 0,
+                            isTentativeOvertime: false,
+                            overtimeStatus: 'confirmed',
+                            isTentativeHolidayWork: false,
+                            holidayWorkStatus: 'confirmed',
                           });
                           setShowAutoCalc(false);
                         }}
@@ -559,13 +588,18 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const val = Math.max(0, parseInt(directMin, 10) || 0);
+                    const parsed = parseInt(directMin, 10);
+                    const val = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
                     onUpdateShiftDetailsOnSelectedDate(currentShiftPartner, {
                       overtimeMinutes: val,
                       overtimeHours: Math.round((val / 60) * 10) / 10,
                       isHolidayWork: false,
                       holidayWorkMinutes: 0,
                       holidayWorkHours: 0,
+                      isTentativeOvertime: false,
+                      overtimeStatus: 'confirmed',
+                      isTentativeHolidayWork: false,
+                      holidayWorkStatus: 'confirmed',
                     });
                   }}
                   className="px-2 py-0.5 rounded-md bg-stone-800 text-white font-extrabold hover:bg-stone-900 active:scale-95 shadow-2xs"
@@ -577,9 +611,10 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
                   const curOt = getShiftOvertimeMinutes(currentShiftOnSelectedDate);
                   const curHw = getShiftHolidayWorkMinutes(currentShiftOnSelectedDate);
                   if (curOt === 0 && curHw === 0) return null;
+                  const isTent = isShiftExtraTentative(currentShiftOnSelectedDate);
                   return (
                     <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 font-extrabold text-[10px] ml-auto">
-                      {curHw > 0 ? `休出 ${curHw}分` : `残業 +${curOt}分`} 反映中
+                      {isTent ? '仮' : ''}{curHw > 0 ? `休出 ${curHw}分` : `残業 +${curOt}分`} 反映中
                     </span>
                   );
                 })()}

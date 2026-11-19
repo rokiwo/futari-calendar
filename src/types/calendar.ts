@@ -147,6 +147,7 @@ export interface WelcomeImageConfig {
   message?: string;          // 表示メッセージ（例：「今日も1日お疲れ様💕」）
   mode?: 'always' | 'daily'; // 'always'=毎回 / 'daily'=1日1回
   lastShownDate?: string;    // 最終表示日付 "YYYY-MM-DD"
+  updatedAt?: string;        // 最終更新日時 ISO 8601
 }
 
 // Googleカレンダー双方向自動同期（GASブリッジ）設定
@@ -184,7 +185,9 @@ export interface CalendarDataStore {
   version: number;
   metadata: CoupleMetadata;
   categories?: CalendarCategoryItem[];      // カスタマイズ可能なカレンダー予定項目リスト
+  categoriesUpdatedAt?: string;             // カテゴリの最終更新日時 ISO 8601
   stamps: StampPreset[];
+  stampsUpdatedAt?: string;                 // スタンプ定義の最終更新日時 ISO 8601
   shifts: Record<string, ShiftEntry>;        // key: `${date}_${partnerId}`
   events: Record<string, ScheduleEvent>;     // key: event.id
   daySupports: Record<string, DaySupportEntry>; // key: date ("YYYY-MM-DD")

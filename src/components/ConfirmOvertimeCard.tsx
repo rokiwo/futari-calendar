@@ -7,6 +7,8 @@ import {
   getLocalTodayStr,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
+  isShiftTentativeHolidayWork,
+  isShiftTentativeOvertime,
 } from '../utils/presets';
 
 interface ConfirmOvertimeCardProps {
@@ -26,6 +28,7 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
 }) => {
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [customMin, setCustomMin] = useState<string>('');
+  const [dismissedIds, setDismissedIds] = useState<Record<string, boolean>>({});
   const [todayStr, setTodayStr] = useState<string>(() => getLocalTodayStr());
 
   // 画面復帰時や日付またぎ（PWAを翌日まで開いたままにした場合など）にローカル今日日付を再評価
@@ -54,13 +57,8 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
   // 操作中パートナーのシフトの中で、未確定（仮・見込み）かつ昨日以前（翌日以降にアプリを開いたとき対象）のものを抽出
   const pendingEntries: ShiftEntry[] = Object.values(shifts)
     .filter((s) => {
-      if (s.deletedAt || s.partnerId !== activePartner) return false;
-      const otMin = getShiftOvertimeMinutes(s);
-      const hwMin = getShiftHolidayWorkMinutes(s);
-      const isTentative = Boolean(
-        (otMin > 0 && s.isTentativeOvertime) ||
-        (hwMin > 0 && s.isTentativeHolidayWork)
-      );
+      if (!s || s.deletedAt || s.partnerId !== activePartner || dismissedIds[s.id]) return false;
+      const isTentative = isShiftTentativeOvertime(s) || isShiftTentativeHolidayWork(s);
       if (!isTentative) return false;
       // 当日は表示せず、翌日以降（s.date < todayStr）になったときに確定カードを表示
       return s.date < todayStr;
@@ -86,13 +84,19 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
   const hwMin = getShiftHolidayWorkMinutes(currentEntry);
   const otMin = getShiftOvertimeMinutes(currentEntry);
   const isHw = Boolean(
-    (hwMin > 0 && currentEntry.isTentativeHolidayWork) ||
-    (hwMin > 0 && otMin === 0)
+    isShiftTentativeHolidayWork(currentEntry) || (hwMin > 0 && otMin === 0)
   );
   const plannedMinutes = isHw ? hwMin : otMin;
 
-  const partner = metadata.partners[activePartner];
+  const partner = metadata?.partners?.[activePartner] || {
+    name: activePartner === 'partnerB' ? 'さや' : 'ゆうと',
+    avatar: activePartner === 'partnerB' ? '🐰' : '🐻',
+  };
   const [, m, d] = currentEntry.date.split('-').map(Number);
+
+  const trimmedCustom = customMin.trim();
+  const parsedCustom = trimmedCustom === '' ? NaN : Number(trimmedCustom);
+  const isCustomValid = Number.isFinite(parsedCustom) && parsedCustom >= 0;
 
   // 予定通り確定
   const handleConfirmAsIs = () => {
@@ -103,7 +107,8 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
 
   // 実時間を変更して確定
   const handleConfirmCustom = (min: number) => {
-    onConfirmShift(currentEntry.date, activePartner, min, isHw);
+    if (!Number.isFinite(min) || min < 0) return;
+    onConfirmShift(currentEntry.date, activePartner, Math.round(min), isHw);
     setIsAdjusting(false);
     setCustomMin('');
   };
@@ -111,6 +116,13 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
   // 残業・休出なし（0分）にして完了
   const handleZeroAndComplete = () => {
     onCancelTentative(currentEntry.date, activePartner);
+    setIsAdjusting(false);
+    setCustomMin('');
+  };
+
+  // 今回はあとで確認するためにカードを閉じる（データは削除しない）
+  const handleDismissForSession = () => {
+    setDismissedIds((prev) => ({ ...prev, [currentEntry.id]: true }));
     setIsAdjusting(false);
     setCustomMin('');
   };
@@ -124,7 +136,7 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
   };
 
   return (
-    <div className="mb-2.5 mx-2 rounded-2xl bg-linear-to-r from-[#FFF4EA] to-[#FFEBEF] border-2 border-[#FFD0BF] p-3 shadow-md animate-pop">
+    <div className="mb-2.5 mx-2 rounded-2xl bg-gradient-to-r from-[#FFF4EA] to-[#FFEBEF] border-2 border-[#FFD0BF] p-3 shadow-md animate-pop">
       <div className="flex items-start justify-between gap-2">
         <div className="space-y-0.5">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -152,8 +164,8 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
 
         <button
           type="button"
-          onClick={handleZeroAndComplete}
-          title={isHw ? '休日出勤なし（0分）にする' : '残業なし（0分）にする'}
+          onClick={handleDismissForSession}
+          title="今は閉じてあとで確認する"
           className="text-stone-400 hover:text-stone-600 font-bold text-xs p-1"
         >
           ✕
@@ -165,7 +177,7 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
         <button
           type="button"
           onClick={handleConfirmAsIs}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-linear-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-black text-xs shadow-xs active:scale-95 transition-all"
+          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-black text-xs shadow-xs active:scale-95 transition-all"
         >
           <Sparkles className="w-3.5 h-3.5" />
           <span>予定通り {formatMinutesToJa(plannedMinutes)} で確定</span>
@@ -203,9 +215,9 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
                 <span>⏱️</span>
                 <span>実際の{isHw ? '実休日出勤時間' : '実残業時間'}（分単位）を入力：</span>
               </span>
-              {customMin !== '' && Number(customMin) >= 0 && (
+              {isCustomValid && (
                 <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
-                  ＝ {formatMinutesToJa(Number(customMin))}
+                  ＝ {formatMinutesToJa(Math.round(parsedCustom))}
                 </span>
               )}
             </div>
@@ -228,9 +240,9 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
               </div>
               <button
                 type="button"
-                disabled={customMin === '' || Number(customMin) < 0}
-                onClick={() => handleConfirmCustom(Number(customMin))}
-                className="px-4 py-2.5 rounded-xl bg-linear-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 disabled:opacity-40 text-white font-black text-xs shadow-md active:scale-95 transition-all shrink-0"
+                disabled={!isCustomValid}
+                onClick={() => handleConfirmCustom(parsedCustom)}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 disabled:opacity-40 text-white font-black text-xs shadow-md active:scale-95 transition-all shrink-0"
               >
                 この時間で確定 ✨
               </button>
@@ -245,7 +257,7 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
                     key={delta}
                     type="button"
                     onClick={() => {
-                      const base = customMin === '' ? plannedMinutes : Number(customMin);
+                      const base = isCustomValid ? Math.round(parsedCustom) : plannedMinutes;
                       const next = Math.max(0, base + delta);
                       setCustomMin(String(next));
                     }}

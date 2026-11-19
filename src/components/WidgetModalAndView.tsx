@@ -30,18 +30,46 @@ import {
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
   isEventVisibleToPartner,
+  isShiftConsideredHoliday,
   resolveCategoryInfo,
 } from '../utils/presets';
 import { MonthlyOvertimeSummary, formatLastSeen } from './TopHeader';
 import { buildGoogleCalendarUrl, shouldNotifyPartner } from '../utils/googleCalendar';
+
+async function copyTextWithFallback(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fallback below
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 interface WidgetCompactViewProps {
   store: CalendarDataStore;
   activePartner: PartnerId;
   onToggleActivePartner: (p: PartnerId) => void;
   onMarkSeenNow: () => void;
-  matchedHolidays: string[];
-  overtimeSummary: MonthlyOvertimeSummary;
+  matchedHolidays?: string[];
+  overtimeSummary?: MonthlyOvertimeSummary;
   onExitWidgetMode: () => void;
   onOpenCalendarWithStampDrawer: () => void;
   onOpenDayDetail: (dateStr: string) => void;
@@ -100,8 +128,6 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
   activePartner,
   onToggleActivePartner,
   onMarkSeenNow,
-  matchedHolidays,
-  overtimeSummary,
   onExitWidgetMode,
   onOpenCalendarWithStampDrawer,
   onOpenDayDetail,
@@ -124,6 +150,31 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
   const otherProfile = store.metadata.partners[otherPartnerId];
 
   const todayStr = upcoming[0]?.dateStr || '';
+  const nowDate = new Date();
+  const curYear = nowDate.getFullYear();
+  const curMonth = nowDate.getMonth() + 1;
+  const curMonthPrefix = `${curYear}-${String(curMonth).padStart(2, '0')}`;
+  const daysInCurMonth = new Date(curYear, curMonth, 0).getDate();
+
+  let currentMonthMatchedCount = 0;
+  let currentMonthExtraMinutes = 0;
+  for (let d = 1; d <= daysInCurMonth; d++) {
+    const dStr = `${curMonthPrefix}-${String(d).padStart(2, '0')}`;
+    const rawA = store.shifts[`${dStr}_partnerA`];
+    const rawB = store.shifts[`${dStr}_partnerB`];
+    const shA = rawA && !rawA.deletedAt ? rawA : undefined;
+    const shB = rawB && !rawB.deletedAt ? rawB : undefined;
+    const stA = shA ? stampMap.get(shA.stampId) : undefined;
+    const stB = shB ? stampMap.get(shB.stampId) : undefined;
+    if (isShiftConsideredHoliday(shA, stA) && isShiftConsideredHoliday(shB, stB)) {
+      currentMonthMatchedCount += 1;
+    }
+    const mySh = activePartner === 'partnerA' ? shA : shB;
+    if (mySh) {
+      currentMonthExtraMinutes += getShiftOvertimeMinutes(mySh) + getShiftHolidayWorkMinutes(mySh);
+    }
+  }
+  const currentMonthExtraFormatted = formatMinutesToJa(currentMonthExtraMinutes);
 
   return (
     <div className="min-h-screen bg-[#FFFBF7] pb-24">
@@ -192,19 +243,19 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
                 className="px-2.5 py-1 rounded-full bg-[#FFE5EC] text-[#D63864] text-[11px] font-extrabold flex items-center gap-1"
               >
                 <Heart className="w-3 h-3 fill-[#FF8FAB] text-[#FF8FAB]" />
-                <span>今月お休み一致 {matchedHolidays.length}日</span>
+                <span>今月お休み一致 {currentMonthMatchedCount}日</span>
               </button>
 
               <button
                 type="button"
                 onClick={onExitWidgetMode}
                 className="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-extrabold flex items-center gap-1"
-                title={`${store.metadata.partners[activePartner].name}の残業時間`}
+                title={`${store.metadata.partners[activePartner].name}の今月残業時間`}
               >
                 <Timer className="w-3 h-3 text-amber-600" />
                 <span>
                   残業 {store.metadata.partners[activePartner].avatar}
-                  {overtimeSummary[activePartner].totalExtraFormatted}
+                  {currentMonthExtraFormatted}
                 </span>
               </button>
 
@@ -254,7 +305,9 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
           const subLabelA = shiftA?.subCustomLabel || subStampA?.label;
           const subLabelB = shiftB?.subCustomLabel || subStampB?.label;
 
-          const isBothHoliday = matchedHolidays.includes(day.dateStr);
+          const isBothHoliday =
+            isShiftConsideredHoliday(shiftA, stampA) &&
+            isShiftConsideredHoliday(shiftB, stampB);
 
           const events = Object.values(store.events)
             .filter((e) => !e.deletedAt && e.date === day.dateStr && isEventVisibleToPartner(e, activePartner))
@@ -616,7 +669,7 @@ export const WidgetGuideModal: React.FC<WidgetGuideModalProps> = ({
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedScriptable, setCopiedScriptable] = useState(false);
 
-  const widgetUrl = `${window.location.origin}${window.location.pathname}?widget=1`;
+  const widgetUrl = `${window.location.origin}${window.location.pathname}?view=widget`;
 
   // iPhone Scriptableアプリ用のネイティブウィジェットコードを自動生成
   const generateScriptableCode = () => {
@@ -723,7 +776,7 @@ w.presentMedium();`;
               <span>① ウィジェット専用コンパクト画面（Android / iPhone 共通）</span>
             </div>
             <p className="text-stone-600 leading-relaxed">
-              「今日・明日・明後日の2人のシフトと予定」だけをカード表示する専用URL（`?widget=1`）を搭載しています。
+              「今日・明日・明後日の2人のシフトと予定」だけをカード表示する専用URL（`?view=widget`）を搭載しています。
               Androidの「Web Widget」アプリ等にこのURLを設定すると、ホーム画面にそのまま常時表示できます！
             </p>
 
@@ -740,9 +793,11 @@ w.presentMedium();`;
               <button
                 type="button"
                 onClick={async () => {
-                  await navigator.clipboard.writeText(widgetUrl);
-                  setCopiedUrl(true);
-                  setTimeout(() => setCopiedUrl(false), 2000);
+                  const ok = await copyTextWithFallback(widgetUrl);
+                  if (ok) {
+                    setCopiedUrl(true);
+                    setTimeout(() => setCopiedUrl(false), 2000);
+                  }
                 }}
                 className="py-2.5 px-3 rounded-xl bg-[#FFFBF7] hover:bg-[#FFE5EC] border border-[#FFC2D1] text-[#9E2A47] font-extrabold text-xs flex items-center gap-1"
               >
@@ -764,9 +819,11 @@ w.presentMedium();`;
             <button
               type="button"
               onClick={async () => {
-                await navigator.clipboard.writeText(generateScriptableCode());
-                setCopiedScriptable(true);
-                setTimeout(() => setCopiedScriptable(false), 2500);
+                const ok = await copyTextWithFallback(generateScriptableCode());
+                if (ok) {
+                  setCopiedScriptable(true);
+                  setTimeout(() => setCopiedScriptable(false), 2500);
+                }
               }}
               className="w-full py-2.5 px-3 rounded-xl bg-[#F3EAFF] hover:bg-[#B388EB] text-[#59318F] hover:text-white font-extrabold text-xs transition-colors flex items-center justify-center gap-1.5"
             >

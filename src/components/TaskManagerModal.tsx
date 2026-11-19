@@ -36,6 +36,7 @@ interface TaskManagerModalProps {
   categories?: CalendarCategoryItem[];
   onClose: () => void;
   onSaveEvent: (ev: ScheduleEvent) => void;
+  onSaveEvents?: (evs: ScheduleEvent[]) => void;
   onDeleteEvent: (id: string) => void;
   onToggleTaskComplete: (id: string) => void;
   onSyncGoogleTasks?: () => void;
@@ -70,6 +71,7 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
   metadata,
   onClose,
   onSaveEvent,
+  onSaveEvents,
   onDeleteEvent,
   onToggleTaskComplete,
   onSyncGoogleTasks,
@@ -282,8 +284,10 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
       ...t,
       title: editTitle.trim(),
       date: editDate || t.date,
+      endDate: undefined,
       isAllDay: !editTime,
       startTime: editTime || undefined,
+      endTime: undefined,
       memo: editMemo.trim() || undefined,
       privateFor: activePartner,
       updatedAt: nowIso,
@@ -297,21 +301,31 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
     onSaveEvent({
       ...t,
       date: targetDate,
+      endDate: undefined,
       privateFor: activePartner,
       updatedAt: nowIso,
     });
   };
 
-  // 過去の未完了タスクをすべて選択中の日へ一括移動
+  // 過去の未完了タスクをすべて選択中の日（過去日の場合は今日）へ一括移動
   const moveAllOverdueToSelectedDate = () => {
+    const carryTargetDate = selectedTaskDate >= todayStr ? selectedTaskDate : todayStr;
+    const targets = overdueTasks.filter((t) => t.date !== carryTargetDate);
+    if (targets.length === 0) return;
     const nowIso = new Date().toISOString();
-    for (const t of overdueTasks) {
-      onSaveEvent({
-        ...t,
-        date: selectedTaskDate,
-        privateFor: activePartner,
-        updatedAt: nowIso,
-      });
+    const updatedList: ScheduleEvent[] = targets.map((t) => ({
+      ...t,
+      date: carryTargetDate,
+      endDate: undefined,
+      privateFor: activePartner,
+      updatedAt: nowIso,
+    }));
+    if (onSaveEvents) {
+      onSaveEvents(updatedList);
+    } else {
+      for (const updated of updatedList) {
+        onSaveEvent(updated);
+      }
     }
   };
 
@@ -607,7 +621,8 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
           </label>
         </div>
 
-        {/* 選択中の日のタスク追加＆一覧アコーディオン（起動時は閉じた状態・見出し/日付/＋タスク追加で展開） */}
+        {/* 選択中の日のタスク追加＆一覧アコーディオン（カレンダー表示時のみ表示・起動時は閉じた状態） */}
+        {activeTab === 'calendar' && (
         <div className="bg-white border-b-2 border-[#FFE5EC] px-3 py-2 space-y-2">
           <div
             onClick={() => setDayCardMinimized((prev) => !prev)}
@@ -772,6 +787,7 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* メインコンテンツエリア */}
         <div className="flex-1 overflow-y-auto p-2.5 sm:p-4">
@@ -833,6 +849,11 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
                       key={cell.dateStr}
                       onClick={() => {
                         setSelectedTaskDate(cell.dateStr);
+                        const [cy, cm] = cell.dateStr.split('-').map(Number);
+                        if (cy && cm) {
+                          setCalYear(cy);
+                          setCalMonth(cm);
+                        }
                         setDayCardMinimized(false);
                       }}
                       className={`min-h-[68px] sm:min-h-[86px] p-1 rounded-xl border flex flex-col justify-between transition-all cursor-pointer ${
@@ -973,6 +994,12 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
                           type="button"
                           onClick={() => {
                             setSelectedTaskDate(dateStr);
+                            const [ly, lm] = dateStr.split('-').map(Number);
+                            if (ly && lm) {
+                              setCalYear(ly);
+                              setCalMonth(lm);
+                            }
+                            setDayCardMinimized(false);
                             setActiveTab('calendar');
                           }}
                           className="flex items-center gap-1.5 text-left"

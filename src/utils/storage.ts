@@ -219,7 +219,21 @@ export function mergeCalendarStores(
     const secondary = remoteIsNewer ? localEvent : remoteEvent;
 
     if (primary.deletedAt) {
-      mergedEvents[id] = primary;
+      if (!secondary.deletedAt) {
+        const mergedDelGEventIds =
+          primary.googleEventIds || secondary.googleEventIds
+            ? { ...(secondary.googleEventIds || {}), ...(primary.googleEventIds || {}) }
+            : undefined;
+        mergedEvents[id] = {
+          ...primary,
+          googleEventId: primary.googleEventId || secondary.googleEventId,
+          googleEventIds: mergedDelGEventIds,
+          googleTaskId: primary.googleTaskId || secondary.googleTaskId,
+          googleTaskListId: primary.googleTaskListId || secondary.googleTaskListId,
+        };
+      } else {
+        mergedEvents[id] = primary;
+      }
       continue;
     }
 
@@ -248,9 +262,20 @@ export function mergeCalendarStores(
     }
   }
 
-  // 4. スタンププリセットのマージ（旧デフォルトスタンプは除外し、更新日時が新しい方のリストを採用して削除も反映されるようにする）
-  const isRemoteNewer = toTimeMs(remote.updatedAt) > toTimeMs(local.updatedAt);
-  const primaryStamps = (isRemoteNewer ? remote.stamps : local.stamps) || [];
+  // 4. スタンププリセットのマージ（専用 updatedAt を比較し、新規端末や無関係な編集による上書きを防止）
+  const hasStampsTs = Boolean(local.stampsUpdatedAt || remote.stampsUpdatedAt);
+  const pickRemoteStamps = hasStampsTs
+    ? toTimeMs(remote.stampsUpdatedAt) > toTimeMs(local.stampsUpdatedAt)
+    : !local.updatedAt && Boolean(remote.updatedAt)
+    ? true
+    : !remote.updatedAt && Boolean(local.updatedAt)
+    ? false
+    : toTimeMs(remote.updatedAt) > toTimeMs(local.updatedAt);
+
+  const primaryStamps = (pickRemoteStamps ? remote.stamps : local.stamps) || [];
+  const mergedStampsUpdatedAt = pickRemoteStamps
+    ? remote.stampsUpdatedAt || local.stampsUpdatedAt
+    : local.stampsUpdatedAt || remote.stampsUpdatedAt;
 
   const stampMap = new Map<string, StampPreset>();
   for (const s of primaryStamps) {
@@ -268,27 +293,39 @@ export function mergeCalendarStores(
   }
   const mergedStamps = Array.from(stampMap.values()).sort((a, b) => a.order - b.order);
 
-  // 4-2. カレンダー予定項目（categories）のマージ
-  const mergedCategories =
-    toTimeMs(remote.updatedAt) > toTimeMs(local.updatedAt)
-      ? remote.categories || local.categories
-      : local.categories || remote.categories;
+  // 4-2. カレンダー予定項目（categories）のマージ（専用 updatedAt で比較）
+  const hasCatsTs = Boolean(local.categoriesUpdatedAt || remote.categoriesUpdatedAt);
+  const pickRemoteCats = hasCatsTs
+    ? toTimeMs(remote.categoriesUpdatedAt) > toTimeMs(local.categoriesUpdatedAt)
+    : !local.updatedAt && Boolean(remote.updatedAt)
+    ? true
+    : !remote.updatedAt && Boolean(local.updatedAt)
+    ? false
+    : toTimeMs(remote.updatedAt) > toTimeMs(local.updatedAt);
+  const mergedCategories = pickRemoteCats
+    ? remote.categories || local.categories
+    : local.categories || remote.categories;
+  const mergedCategoriesUpdatedAt = pickRemoteCats
+    ? remote.categoriesUpdatedAt || local.categoriesUpdatedAt
+    : local.categoriesUpdatedAt || remote.categoriesUpdatedAt;
 
   // 5. メタデータ＆最終確認日時（lastSeenAt は常に新しい方を採用）
   const localMeta = local.metadata;
   const remoteMeta = remote.metadata;
 
-  // 📸 お気に入り写真・ウェルカム設定のマージ保護
-  // ローカルに写真があれば、クラウド同期で写真が未設定のリモートデータが降ってきても100%ローカルの写真を保持！
+  // 📸 お気に入り写真・ウェルカム設定のマージ保護（updatedAt がある場合は削除も含めて新しい方を優先）
   const localWelcome = localMeta?.welcomeImageConfig;
   const remoteWelcome = remoteMeta?.welcomeImageConfig;
   let mergedWelcome: WelcomeImageConfig | undefined = localWelcome || remoteWelcome;
 
-  if (localWelcome?.dataUrl) {
-    // ローカルに写真があれば絶対に保護
+  if (localWelcome?.updatedAt || remoteWelcome?.updatedAt) {
+    mergedWelcome =
+      toTimeMs(remoteWelcome?.updatedAt) > toTimeMs(localWelcome?.updatedAt)
+        ? remoteWelcome
+        : localWelcome;
+  } else if (localWelcome?.dataUrl) {
     mergedWelcome = localWelcome;
   } else if (remoteWelcome?.dataUrl) {
-    // ローカルに無くてリモートに写真があれば採用
     mergedWelcome = remoteWelcome;
   } else if (localWelcome) {
     mergedWelcome = localWelcome;
@@ -356,7 +393,7 @@ export function mergeCalendarStores(
   const partnerA = mergePartnerProfile('partnerA', '🐻', 'ゆうと');
   const partnerB = mergePartnerProfile('partnerB', '🐰', 'さや');
 
-  // 📅 Googleカレンダー双方向自動同期設定のマージ保護
+  // 📅 Googleカレンダー双方向自動同期設定のマージ保護（明示的な空文字クリアを尊重）
   const locGcal = localMeta?.googleCalendarSyncConfig;
   const remGcal = remoteMeta?.googleCalendarSyncConfig;
   let mergedGcal: GoogleCalendarSyncConfig | undefined = locGcal || remGcal;
@@ -367,15 +404,19 @@ export function mergeCalendarStores(
     mergedGcal = {
       ...secondaryGcal,
       ...primaryGcal,
-      partnerAGasUrl: primaryGcal.partnerAGasUrl || secondaryGcal.partnerAGasUrl,
-      partnerACalendarId: primaryGcal.partnerACalendarId || secondaryGcal.partnerACalendarId,
-      partnerBGasUrl: primaryGcal.partnerBGasUrl || secondaryGcal.partnerBGasUrl,
-      partnerBCalendarId: primaryGcal.partnerBCalendarId || secondaryGcal.partnerBCalendarId,
-      sharedCalendarId: primaryGcal.sharedCalendarId || secondaryGcal.sharedCalendarId,
+      partnerAGasUrl: primaryGcal.partnerAGasUrl ?? secondaryGcal.partnerAGasUrl,
+      partnerACalendarId: primaryGcal.partnerACalendarId ?? secondaryGcal.partnerACalendarId,
+      partnerBGasUrl: primaryGcal.partnerBGasUrl ?? secondaryGcal.partnerBGasUrl,
+      partnerBCalendarId: primaryGcal.partnerBCalendarId ?? secondaryGcal.partnerBCalendarId,
+      sharedCalendarId: primaryGcal.sharedCalendarId ?? secondaryGcal.sharedCalendarId,
     };
   }
 
   const nowIso = new Date().toISOString();
+  const maxUpdatedAt =
+    toTimeMs(remote.updatedAt) > toTimeMs(local.updatedAt)
+      ? remote.updatedAt
+      : local.updatedAt || remote.updatedAt || '';
 
   return {
     version: 1,
@@ -390,14 +431,16 @@ export function mergeCalendarStores(
       updatedAt:
         toTimeMs(remoteMeta?.updatedAt) > toTimeMs(localMeta?.updatedAt)
           ? remoteMeta.updatedAt
-          : localMeta.updatedAt || nowIso,
+          : localMeta?.updatedAt || remoteMeta?.updatedAt || '',
     },
     categories: mergedCategories,
+    categoriesUpdatedAt: mergedCategoriesUpdatedAt,
     stamps: mergedStamps,
+    stampsUpdatedAt: mergedStampsUpdatedAt,
     shifts: mergedShifts,
     events: mergedEvents,
     daySupports: mergedSupports,
-    updatedAt: nowIso,
+    updatedAt: maxUpdatedAt,
   };
 }
 
@@ -624,24 +667,47 @@ export async function syncWithGitHub(
     const gistData = await getRes.json();
     const fileObj =
       gistData.files?.[GIST_FILENAME] ||
-      (Object.values(gistData.files || {})[0] as { content?: string } | undefined);
+      (Object.values(gistData.files || {})[0] as
+        | { content?: string; truncated?: boolean; raw_url?: string }
+        | undefined);
 
-    if (fileObj && fileObj.content) {
-      try {
-        const parsed = JSON.parse(fileObj.content) as EncryptedPayload;
-        if (parsed && parsed.app === 'FutariCal') {
-          try {
-            const remoteStore = await decryptCalendarStore(parsed, effectivePass);
-            mergedStore = mergeCalendarStores(localStore, remoteStore);
-          } catch {
-            // カスタムパスワードからデフォルトキーへフォールバック試行
-            const remoteStore = await decryptCalendarStore(parsed, defaults.defaultPass);
-            mergedStore = mergeCalendarStores(localStore, remoteStore);
-          }
-        }
-      } catch {
-        // 初回または空ファイルの場合はそのままアップロードへ進む
+    let rawContent = fileObj?.content || '';
+    if (fileObj?.truncated && fileObj.raw_url) {
+      let rawRes = await fetch(fileObj.raw_url, { cache: 'no-store' });
+      if (!rawRes.ok) {
+        rawRes = await fetch(fileObj.raw_url, {
+          headers: { Authorization: `Bearer ${effectiveToken}` },
+          cache: 'no-store',
+        });
       }
+      if (!rawRes.ok) {
+        throw new Error(`大容量クラウドデータの取得に失敗しました (${rawRes.status})。`);
+      }
+      rawContent = await rawRes.text();
+    }
+
+    if (rawContent.trim()) {
+      let parsed: EncryptedPayload;
+      try {
+        parsed = JSON.parse(rawContent) as EncryptedPayload;
+      } catch {
+        throw new Error('クラウドデータの解析に失敗しました（破損またはサイズ制限の可能性があります）。データ保護のため上書きを中止しました。');
+      }
+      if (!parsed || parsed.app !== 'FutariCal' || !parsed.ciphertext) {
+        throw new Error('クラウドデータの形式が不正なため、データ保護のため上書きを中止しました。');
+      }
+      let remoteStore: CalendarDataStore;
+      try {
+        remoteStore = await decryptCalendarStore(parsed, effectivePass);
+      } catch {
+        try {
+          // カスタムパスワードからデフォルトキーへフォールバック試行
+          remoteStore = await decryptCalendarStore(parsed, defaults.defaultPass);
+        } catch {
+          throw new Error('クラウドデータの復号に失敗しました（合言葉/パスワードが違う可能性があります）。データ保護のため上書きを中止しました。');
+        }
+      }
+      mergedStore = mergeCalendarStores(localStore, remoteStore);
     }
 
     // マージ後のストアを暗号化してGistへ保存
@@ -685,13 +751,31 @@ export async function syncWithGitHub(
     if (getRes.ok) {
       const fileData = await getRes.json();
       existingSha = fileData.sha;
-      if (fileData.content) {
-        const jsonStr = base64ToUtf8(fileData.content);
-        const parsed = JSON.parse(jsonStr) as EncryptedPayload;
-        if (parsed && parsed.app === 'FutariCal') {
-          const remoteStore = await decryptCalendarStore(parsed, effectivePass);
-          mergedStore = mergeCalendarStores(localStore, remoteStore);
+      let rawB64 = fileData.content || '';
+      if ((fileData.encoding === 'none' || (!rawB64 && fileData.size > 0)) && fileData.sha) {
+        const blobRes = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/git/blobs/${fileData.sha}`,
+          { headers, cache: 'no-store' }
+        );
+        if (!blobRes.ok) {
+          throw new Error(`大容量リポジトリデータの取得に失敗しました (${blobRes.status})`);
         }
+        const blobData = await blobRes.json();
+        rawB64 = blobData.content || '';
+      }
+      if (rawB64.trim()) {
+        const jsonStr = base64ToUtf8(rawB64);
+        const parsed = JSON.parse(jsonStr) as EncryptedPayload;
+        if (!parsed || parsed.app !== 'FutariCal' || !parsed.ciphertext) {
+          throw new Error('リポジトリデータの形式が不正なため上書きを中止しました');
+        }
+        let remoteStore: CalendarDataStore;
+        try {
+          remoteStore = await decryptCalendarStore(parsed, effectivePass);
+        } catch {
+          remoteStore = await decryptCalendarStore(parsed, defaults.defaultPass);
+        }
+        mergedStore = mergeCalendarStores(localStore, remoteStore);
       }
     } else if (getRes.status !== 404) {
       throw new Error(`リポジトリデータ取得エラー (${getRes.status})`);

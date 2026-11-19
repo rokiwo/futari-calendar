@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { KeyRound, Sparkles, X, CheckCircle2, AlertCircle, Heart } from 'lucide-react';
 
 interface SharedKeywordModalProps {
@@ -18,10 +18,29 @@ export const SharedKeywordModal: React.FC<SharedKeywordModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
+
+  useEffect(() => {
+    if (isOpen) {
+      setKeyword('');
+      setErrorMsg(null);
+      setLoading(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const busy = loading || isSyncing;
+  const safeClose = () => {
+    if (!busy) {
+      onClose();
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     if (!keyword.trim()) {
       setErrorMsg('合言葉を入力してください。');
       return;
@@ -31,22 +50,26 @@ export const SharedKeywordModal: React.FC<SharedKeywordModalProps> = ({
 
     try {
       const result = await onSubmitKeyword(keyword.trim());
+      if (!isOpenRef.current) return;
       if (!result.success) {
         setErrorMsg(result.message || '合言葉が一致しませんでした。正しいキーワードを入力してください。');
       } else {
         onClose();
       }
     } catch (err: any) {
+      if (!isOpenRef.current) return;
       setErrorMsg(err?.message || '通信エラーが発生しました。もう一度お試しください。');
     } finally {
-      setLoading(false);
+      if (isOpenRef.current) {
+        setLoading(false);
+      }
     }
   };
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-xs p-4 animate-fade-in"
-      onClick={onClose}
+      onClick={safeClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -70,8 +93,9 @@ export const SharedKeywordModal: React.FC<SharedKeywordModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-xl bg-white/80 hover:bg-stone-100 text-stone-400 hover:text-stone-600 transition-colors"
+            disabled={busy}
+            onClick={safeClose}
+            className="p-1.5 rounded-xl bg-white/80 hover:bg-stone-100 text-stone-400 hover:text-stone-600 transition-colors disabled:opacity-40"
           >
             <X className="w-5 h-5" />
           </button>
@@ -96,13 +120,14 @@ export const SharedKeywordModal: React.FC<SharedKeywordModalProps> = ({
               <input
                 type="text"
                 value={keyword}
+                disabled={busy}
                 onChange={(e) => {
                   setKeyword(e.target.value);
                   if (errorMsg) setErrorMsg(null);
                 }}
                 placeholder="例: ゆうとさや"
                 autoFocus
-                className="w-full px-4 py-3 rounded-2xl border-2 border-[#FFC2D1] bg-white font-black text-base text-stone-800 placeholder:text-stone-300 focus:border-[#FF8FAB] focus:outline-none shadow-inner"
+                className="w-full px-4 py-3 rounded-2xl border-2 border-[#FFC2D1] bg-white font-black text-base text-stone-800 placeholder:text-stone-300 focus:border-[#FF8FAB] focus:outline-none shadow-inner disabled:opacity-60"
               />
               <p className="text-[11px] text-stone-400 font-bold">
                 💡 ひらがな・カタカナ・ローマ字のいずれでも照合されます
@@ -118,10 +143,10 @@ export const SharedKeywordModal: React.FC<SharedKeywordModalProps> = ({
 
             <button
               type="submit"
-              disabled={loading || isSyncing}
+              disabled={busy}
               className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-[#FF8FAB] via-[#FF758F] to-[#B388EB] hover:opacity-95 text-white text-sm font-black shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
             >
-              {loading || isSyncing ? (
+              {busy ? (
                 <>
                   <Sparkles className="w-4 h-4 animate-spin text-white" />
                   <span>共有カレンダーに接続中...</span>
@@ -137,8 +162,9 @@ export const SharedKeywordModal: React.FC<SharedKeywordModalProps> = ({
             <div className="text-center pt-1">
               <button
                 type="button"
-                onClick={onClose}
-                className="text-xs text-stone-400 hover:text-stone-600 font-bold py-1 px-3 hover:underline"
+                disabled={busy}
+                onClick={safeClose}
+                className="text-xs text-stone-400 hover:text-stone-600 font-bold py-1 px-3 hover:underline disabled:opacity-40"
               >
                 あとで入力する（まっさらのまま使う）
               </button>

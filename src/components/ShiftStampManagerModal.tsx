@@ -154,7 +154,8 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
       if (s.id !== id) return s;
       const updated = { ...s, ...patch, partnerId: targetPartner };
       if (patch.label !== undefined) {
-        updated.shortLabel = patch.label.slice(0, 3) || updated.shortLabel;
+        const trimmedLabel = patch.label.trim();
+        updated.shortLabel = trimmedLabel.slice(0, 3) || updated.shortLabel;
       }
       return updated;
     });
@@ -266,7 +267,12 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  commitPartnerStamps([]);
+                  if (
+                    shiftStamps.length === 0 ||
+                    window.confirm(`${partnerAName}の勤務リストをすべて消去しますか？`)
+                  ) {
+                    commitPartnerStamps([]);
+                  }
                 }}
                 className="px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-500 text-rose-600 hover:text-white font-extrabold text-[11px] transition-colors border border-rose-200 shadow-2xs"
               >
@@ -468,23 +474,16 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
                 📋 {currentPartnerAvatar} {currentPartnerName}の勤務リスト ({shiftStamps.length}種類)
               </span>
               <div className="flex items-center gap-1.5">
-                {targetPartner === 'partnerA' && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      commitPartnerStamps(
-                        DEFAULT_STAMP_PRESETS.filter((s) => s.partnerId === 'partnerA')
-                      )
-                    }
-                    className="px-2.5 py-1 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#136370] hover:text-white text-[10px] font-extrabold transition-colors"
-                  >
-                    🔄 夫の12種リストに戻す
-                  </button>
-                )}
                 {shiftStamps.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => commitPartnerStamps([])}
+                    onClick={() => {
+                      if (
+                        window.confirm(`${currentPartnerName}の勤務リストを空にしますか？`)
+                      ) {
+                        commitPartnerStamps([]);
+                      }
+                    }}
                     className="px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 text-[10px] font-extrabold transition-colors"
                   >
                     🗑️ リストを空にする
@@ -611,6 +610,16 @@ export const ShiftStampManagerModal: React.FC<ShiftStampManagerModalProps> = ({
                             onChange={(e) =>
                               handleUpdateOne(stamp.id, { label: e.target.value })
                             }
+                            onBlur={(e) => {
+                              const trimmed = e.target.value.trim();
+                              if (!trimmed) {
+                                handleUpdateOne(stamp.id, {
+                                  label: stamp.shortLabel || 'シフト',
+                                });
+                              } else if (trimmed !== e.target.value) {
+                                handleUpdateOne(stamp.id, { label: trimmed });
+                              }
+                            }}
                             className="w-full px-3 py-1.5 rounded-xl border border-stone-200 bg-white font-extrabold text-sm"
                           />
                         </div>

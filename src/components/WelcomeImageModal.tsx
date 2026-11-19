@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Heart, X, Settings, Sparkles, Calendar, Maximize2 } from 'lucide-react';
 import { CalendarDataStore, PartnerId, WelcomeImageConfig } from '../types/calendar';
-import { formatMinutesShort, getJapaneseHoliday, getShiftOvertimeMinutes } from '../utils/presets';
+import { formatMinutesShort, getJapaneseHoliday, getShiftHolidayWorkMinutes, getShiftOvertimeMinutes, isShiftConsideredHoliday } from '../utils/presets';
 import { loadDedicatedWelcomePhoto } from '../utils/storage';
 
 interface WelcomeImageModalProps {
   store: CalendarDataStore;
   config: WelcomeImageConfig;
+  activePartner: PartnerId;
+  isPreview?: boolean;
   onClose: () => void;
   onOpenSettings?: () => void;
   onUpdateConfig?: (newConfig: WelcomeImageConfig) => void;
@@ -15,6 +17,8 @@ interface WelcomeImageModalProps {
 export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
   store,
   config,
+  activePartner,
+  isPreview = false,
   onClose,
   onOpenSettings,
   onUpdateConfig,
@@ -26,16 +30,20 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
   const [displayPhotoUrl, setDisplayPhotoUrl] = useState<string>(() => config.dataUrl || '');
 
   React.useEffect(() => {
+    let cancelled = false;
     if (config.dataUrl) {
       setDisplayPhotoUrl(config.dataUrl);
     } else {
       // 専用ストレージから直接安全に補完復元
       loadDedicatedWelcomePhoto().then((saved) => {
-        if (saved?.dataUrl) {
+        if (!cancelled && saved?.dataUrl) {
           setDisplayPhotoUrl(saved.dataUrl);
         }
       });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [config.dataUrl]);
 
   const today = new Date();
@@ -59,11 +67,11 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
   const stampB = activeShiftB ? stampMap.get(activeShiftB.stampId) : undefined;
 
   const isBothOff =
-    (stampA?.isHoliday || /休/.test(stampA?.label || '')) &&
-    (stampB?.isHoliday || /休/.test(stampB?.label || ''));
+    isShiftConsideredHoliday(activeShiftA, stampA) &&
+    isShiftConsideredHoliday(activeShiftB, stampB);
 
   const handleClose = () => {
-    if (dontShowToday && onUpdateConfig) {
+    if (!isPreview && dontShowToday && onUpdateConfig) {
       onUpdateConfig({
         ...config,
         lastShownDate: dateStr,
@@ -73,6 +81,7 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
   };
 
   const renderShiftBadge = (
+    partnerId: PartnerId,
     name: string,
     avatar: string,
     shift: typeof activeShiftA,
@@ -80,8 +89,10 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
     defaultColor: string
   ) => {
     const label = shift?.customLabel || stamp?.label || 'シフト未定';
-    const sub = shift?.subCustomLabel;
-    const ot = getShiftOvertimeMinutes(shift);
+    const sub = Boolean(shift?.subCustomLabel || shift?.subStampId);
+    const isOwn = partnerId === activePartner;
+    const ot = isOwn ? getShiftOvertimeMinutes(shift) : 0;
+    const hw = isOwn ? getShiftHolidayWorkMinutes(shift) : 0;
 
     return (
       <div
@@ -96,7 +107,8 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
           <span>{stamp?.icon || ''}</span>
           <span>{label}</span>
           {sub && <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-300 text-stone-900 font-black shadow-2xs">夜バ</span>}
-          {ot > 0 && <span className="text-[10px] px-1 rounded bg-rose-500 text-white">+{formatMinutesShort(ot)}</span>}
+          {hw > 0 && <span className="text-[10px] px-1 rounded bg-rose-500 text-white">休出{formatMinutesShort(hw)}</span>}
+          {hw === 0 && ot > 0 && <span className="text-[10px] px-1 rounded bg-rose-500 text-white">+{formatMinutesShort(ot)}</span>}
         </div>
         {(shift?.startTime || stamp?.startTime) && (
           <div className="text-[10px] opacity-80 font-bold mt-0.5">
@@ -163,7 +175,6 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onClose();
                   onOpenSettings();
                 }}
                 className="p-1.5 rounded-full hover:bg-white/60 text-stone-600 transition-colors"
@@ -210,7 +221,6 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    onClose();
                     onOpenSettings();
                   }}
                   className="px-3 py-1.5 rounded-xl bg-[#FF8FAB] text-white text-xs font-black shadow-xs"
@@ -240,21 +250,23 @@ export const WelcomeImageModal: React.FC<WelcomeImageModalProps> = ({
           </div>
 
           <div className="flex items-stretch gap-2">
-            {renderShiftBadge(partnerA.name, partnerA.avatar, activeShiftA, stampA, '#E2F9FC')}
-            {renderShiftBadge(partnerB.name, partnerB.avatar, activeShiftB, stampB, '#F3EAFF')}
+            {renderShiftBadge('partnerA', partnerA.name, partnerA.avatar, activeShiftA, stampA, '#E2F9FC')}
+            {renderShiftBadge('partnerB', partnerB.name, partnerB.avatar, activeShiftB, stampB, '#F3EAFF')}
           </div>
 
           {/* フッター操作ボタン */}
           <div className="pt-1 flex items-center justify-between gap-2">
-            <label className="flex items-center gap-1.5 text-[11px] text-stone-500 font-bold cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={dontShowToday}
-                onChange={(e) => setDontShowToday(e.target.checked)}
-                className="rounded border-stone-300 text-rose-500 focus:ring-rose-400 w-3.5 h-3.5"
-              />
-              <span>今日はもう表示しない</span>
-            </label>
+            {!isPreview && (
+              <label className="flex items-center gap-1.5 text-[11px] text-stone-500 font-bold cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={dontShowToday}
+                  onChange={(e) => setDontShowToday(e.target.checked)}
+                  className="rounded border-stone-300 text-rose-500 focus:ring-rose-400 w-3.5 h-3.5"
+                />
+                <span>今日はもう表示しない</span>
+              </label>
+            )}
 
             <button
               type="button"

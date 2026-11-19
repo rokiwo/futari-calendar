@@ -423,7 +423,7 @@ export const EVENT_PATTERN_CATEGORIES: EventPatternCategory[] = [
       '🏠', '🏡', '🛒', '📦', '🗑️', '🧹', '🧺', '🧼', '🧽', '🍚',
       '🍳', '🍱', '🏦', '💰', '💳', '🔧', '🔨', '📮', '💡', '🛋️',
       '🪴', '🌿', '🚿', '🛁', '🔑', '🚗', '⛽', '💴', '🧾', '📱',
-      '💻', '🔌', '📦', '⏰', '🛏️', '✨',
+      '💻', '🔌', '⏰', '🛏️', '✨',
     ],
     items: [],
   },
@@ -550,8 +550,6 @@ export function getJapaneseHoliday(dateStr: string): string | null {
 }
 
 export function createDefaultMetadata(): CoupleMetadata {
-  const now = new Date();
-  const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
   return {
     partners: {
       partnerA: {
@@ -559,18 +557,18 @@ export function createDefaultMetadata(): CoupleMetadata {
         avatar: '🐻',
         themeColor: '#56CFE1',
         bgColor: '#E2F9FC',
-        lastSeenAt: now.toISOString(),
+        lastSeenAt: '',
       },
       partnerB: {
         name: 'さや',
         avatar: '🐰',
         themeColor: '#B388EB',
         bgColor: '#F3EAFF',
-        lastSeenAt: twoHoursAgo,
+        lastSeenAt: '',
       },
     },
     lastSyncedAt: '',
-    updatedAt: now.toISOString(),
+    updatedAt: '',
   };
 }
 
@@ -618,18 +616,19 @@ export function createUploaded2026NovShifts(
 
 // 初期ストアを作成（初期登録されていたサンプル予定やゆうと側の初期勤務表は空にセット）
 export function createInitialDataStore(): CalendarDataStore {
-  const now = new Date();
   const metadata = createDefaultMetadata();
 
   return {
     version: 1,
     metadata,
     categories: DEFAULT_CATEGORIES,
+    categoriesUpdatedAt: '',
     stamps: DEFAULT_STAMP_PRESETS,
+    stampsUpdatedAt: '',
     shifts: {},
     events: {},
     daySupports: {},
-    updatedAt: now.toISOString(),
+    updatedAt: '',
   };
 }
 
@@ -665,10 +664,14 @@ export function getLocalDateStrOffset(
  */
 export function getShiftOvertimeMinutes(shift?: ShiftEntry): number {
   if (!shift) return 0;
-  if (typeof shift.overtimeMinutes === 'number') {
+  if (typeof shift.overtimeMinutes === 'number' && Number.isFinite(shift.overtimeMinutes)) {
     return Math.max(0, Math.round(shift.overtimeMinutes));
   }
-  if (typeof shift.overtimeHours === 'number' && shift.overtimeHours > 0) {
+  if (
+    typeof shift.overtimeHours === 'number' &&
+    Number.isFinite(shift.overtimeHours) &&
+    shift.overtimeHours > 0
+  ) {
     return Math.max(0, Math.round(shift.overtimeHours * 60));
   }
   return 0;
@@ -679,10 +682,14 @@ export function getShiftOvertimeMinutes(shift?: ShiftEntry): number {
  */
 export function getShiftHolidayWorkMinutes(shift?: ShiftEntry): number {
   if (!shift) return 0;
-  if (typeof shift.holidayWorkMinutes === 'number') {
+  if (typeof shift.holidayWorkMinutes === 'number' && Number.isFinite(shift.holidayWorkMinutes)) {
     return Math.max(0, Math.round(shift.holidayWorkMinutes));
   }
-  if (typeof shift.holidayWorkHours === 'number' && shift.holidayWorkHours > 0) {
+  if (
+    typeof shift.holidayWorkHours === 'number' &&
+    Number.isFinite(shift.holidayWorkHours) &&
+    shift.holidayWorkHours > 0
+  ) {
     return Math.max(0, Math.round(shift.holidayWorkHours * 60));
   }
   return 0;
@@ -691,24 +698,65 @@ export function getShiftHolidayWorkMinutes(shift?: ShiftEntry): number {
 /**
  * 残業が「仮予定（未確定）」かどうか
  */
-export function isShiftOvertimeTentative(shift?: ShiftEntry): boolean {
-  return shift?.overtimeStatus === 'tentative';
+export function isShiftTentativeOvertime(shift?: ShiftEntry): boolean {
+  return Boolean(
+    shift &&
+      !shift.deletedAt &&
+      getShiftOvertimeMinutes(shift) > 0 &&
+      (shift.isTentativeOvertime || shift.overtimeStatus === 'tentative')
+  );
 }
 
 /**
  * 休日出勤が「仮予定（未確定）」かどうか
  */
+export function isShiftTentativeHolidayWork(shift?: ShiftEntry): boolean {
+  return Boolean(
+    shift &&
+      !shift.deletedAt &&
+      getShiftHolidayWorkMinutes(shift) > 0 &&
+      (shift.isTentativeHolidayWork || shift.holidayWorkStatus === 'tentative')
+  );
+}
+
+export function isShiftOvertimeTentative(shift?: ShiftEntry): boolean {
+  return isShiftTentativeOvertime(shift);
+}
+
 export function isShiftHolidayWorkTentative(shift?: ShiftEntry): boolean {
-  return shift?.holidayWorkStatus === 'tentative';
+  return isShiftTentativeHolidayWork(shift);
 }
 
 /**
  * 残業または休日出勤に仮予定（未確定）が含まれるかどうか
  */
 export function isShiftExtraTentative(shift?: ShiftEntry): boolean {
-  return (
-    (getShiftOvertimeMinutes(shift) > 0 && isShiftOvertimeTentative(shift)) ||
-    (getShiftHolidayWorkMinutes(shift) > 0 && isShiftHolidayWorkTentative(shift))
+  return isShiftTentativeOvertime(shift) || isShiftTentativeHolidayWork(shift);
+}
+
+/**
+ * そのシフトが「ふたり休日一致」対象の休日かどうかを厳密判定
+ * - 休日出勤・半休・休出ラベルは除外
+ */
+export function isShiftConsideredHoliday(
+  shift?: ShiftEntry,
+  stamp?: StampPreset
+): boolean {
+  if (
+    !shift ||
+    shift.deletedAt ||
+    shift.isHolidayWork ||
+    shift.stampId === 'shift_hol_work' ||
+    getShiftHolidayWorkMinutes(shift) > 0
+  ) {
+    return false;
+  }
+  if (stamp?.isHoliday === true) return true;
+  if (stamp?.isHoliday === false) return false;
+  const label = shift.customLabel || stamp?.label || '';
+  if (!label || /半休|休出|休日出勤/.test(label)) return false;
+  return /^(休|休み|公休|有休|有給|特休|夏休|冬休|振休|代休)$|休み|有休|公休|夏休|冬休/.test(
+    label
   );
 }
 

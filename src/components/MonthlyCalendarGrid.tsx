@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Edit3, Plus, Trash2 } from 'lucide-react';
 import {
   CalendarDataStore,
@@ -15,6 +15,9 @@ import {
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
   isEventVisibleToPartner,
+  isShiftConsideredHoliday,
+  isShiftTentativeHolidayWork,
+  isShiftTentativeOvertime,
   resolveCategoryInfo,
 } from '../utils/presets';
 
@@ -131,10 +134,22 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   const touchStartY = useRef<number | null>(null);
   const lastTapRef = useRef<{ dateStr: string; time: number } | null>(null);
   const lastDoubleTapTimeRef = useRef<number>(0);
+  const lastSwipeAtRef = useRef<number>(0);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ダブルタップ実行（400ms以内の二重発火をガード）
+  useEffect(() => {
+    return () => {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    };
+  }, []);
+
+  // ダブルタップ実行（400ms以内の二重発火をガード・スタンプモード時は無効）
   const triggerDoubleTap = (dateStr: string) => {
-    if (!dateStr) return;
+    if (!dateStr || stampModeActive) return;
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
     const now = Date.now();
     if (now - lastDoubleTapTimeRef.current < 450) return;
     lastDoubleTapTimeRef.current = now;
@@ -145,8 +160,9 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   // シングルタップ＝その日に移動＆上部詳細カード表示、ダブルタップ＝DayDetailModalを表示
   const handleDateCellTap = (dateStr: string) => {
     if (!dateStr) return;
-    setPreviewPosition('top');
+    if (Date.now() - lastSwipeAtRef.current < 260) return;
     if (stampModeActive) {
+      setPreviewPosition('top');
       onCellSingleTap(dateStr);
       return;
     }
@@ -163,6 +179,15 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
 
     lastTapRef.current = { dateStr, time: nowMs };
     onCellSingleTap(dateStr);
+    if (previewPosition === 'hidden') {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = setTimeout(() => {
+        setPreviewPosition('top');
+        previewTimerRef.current = null;
+      }, 260);
+    } else {
+      setPreviewPosition('top');
+    }
   };
 
   const cells = buildMonthGrid(year, month);
@@ -206,13 +231,10 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     });
   }
 
-  // 休日一致判定（休日出勤やバイトが入っていない純粋な休日のみ一致とみなす場合はサブシフトも考慮可能だが、まず休日スタンプで判定）
+  // 休日一致判定（共通判定ヘルパー使用：休出・半休は除外）
   const isHolidayShift = (shift?: ShiftEntry): boolean => {
-    if (!shift || shift.deletedAt || shift.isHolidayWork) return false;
-    const preset = stampMap.get(shift.stampId);
-    if (!preset) return false;
-    if (preset.isHoliday) return true;
-    return /休|有休|公休|夏休|冬休/.test(preset.label);
+    if (!shift || shift.deletedAt) return false;
+    return isShiftConsideredHoliday(shift, stampMap.get(shift.stampId));
   };
 
   const isUnreadByPartner = (updatedAt: string, createdBy: PartnerId): boolean => {
@@ -221,7 +243,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
     return updatedMs > otherLastSeenMs;
   };
 
-  const myLastSeenMs = Date.parse(store.metadata.partners[activePartner].lastSeenAt || '') || 0;
+  const myLastSeenMs = Date.parse(store.metadata?.partners?.[activePartner]?.lastSeenAt || '') || 0;
   const isNewFromPartner = (updatedAt: string, createdBy: PartnerId): boolean => {
     if (createdBy === activePartner) return false;
     const updatedMs = Date.parse(updatedAt) || 0;
@@ -310,10 +332,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
 
         {/* 3段目：残業時間・休日出勤時間のバッジ表示（仮予定ならオレンジ仮バッジ） */}
         {showOvertime && (() => {
-          const isTentative = Boolean(
-            (otMin > 0 && shift?.isTentativeOvertime) ||
-            (hwMin > 0 && shift?.isTentativeHolidayWork)
-          );
+          const isTentative = isShiftTentativeOvertime(shift) || isShiftTentativeHolidayWork(shift);
           return (
             <div
               className={`w-full min-w-0 mt-[1px] px-0.5 rounded-xs text-[7px] min-[380px]:text-[8px] sm:text-[8.5px] font-black text-center truncate leading-tight shadow-2xs ${
@@ -443,9 +462,11 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-col items-start gap-1 w-full min-w-0 ${
               selStampA
                 ? ''
-                : getShiftOvertimeMinutes(activeSelShiftA) > 0 ||
-                  getShiftHolidayWorkMinutes(activeSelShiftA) > 0 ||
-                  activeSelShiftA?.subCustomLabel
+                : (activePartner === 'partnerA' &&
+                    (getShiftOvertimeMinutes(activeSelShiftA) > 0 ||
+                      getShiftHolidayWorkMinutes(activeSelShiftA) > 0)) ||
+                  activeSelShiftA?.subCustomLabel ||
+                  activeSelShiftA?.subStampId
                 ? 'bg-rose-50 text-rose-900 border border-rose-200'
                 : 'bg-stone-100 text-stone-400'
             }`}
@@ -469,24 +490,21 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             </div>
 
             {/* 2段目：夜勤バイト（勤務の下に配置） */}
-            {activeSelShiftA?.subCustomLabel && (
+            {(activeSelShiftA?.subCustomLabel || activeSelShiftA?.subStampId) && (
               <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
-                🌙 {activeSelShiftA.subCustomLabel}
+                🌙 {activeSelShiftA.subCustomLabel || '夜勤バイト'}
                 {activeSelShiftA.subStartTime
                   ? ` (${activeSelShiftA.subStartTime}${activeSelShiftA.subEndTime ? `〜${activeSelShiftA.subEndTime}` : ''})`
                   : ''}
               </span>
             )}
 
-            {/* 3段目：残業・休日出勤（勤務の下に配置・仮状態はオレンジ破線バッジで区別） */}
-            {(() => {
+            {/* 3段目：残業・休日出勤（操作中の本人のみ表示） */}
+            {activePartner === 'partnerA' && (() => {
               const otA = getShiftOvertimeMinutes(activeSelShiftA);
               const hwA = getShiftHolidayWorkMinutes(activeSelShiftA);
               if (otA === 0 && hwA === 0) return null;
-              const isTentA = Boolean(
-                (otA > 0 && activeSelShiftA?.isTentativeOvertime) ||
-                (hwA > 0 && activeSelShiftA?.isTentativeHolidayWork)
-              );
+              const isTentA = isShiftTentativeOvertime(activeSelShiftA) || isShiftTentativeHolidayWork(activeSelShiftA);
               return (
                 <span
                   className={`px-1.5 py-0.5 rounded text-[10px] font-black shadow-2xs ${
@@ -522,9 +540,11 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex flex-col items-start gap-1 w-full min-w-0 ${
               selStampB
                 ? ''
-                : getShiftOvertimeMinutes(activeSelShiftB) > 0 ||
-                  getShiftHolidayWorkMinutes(activeSelShiftB) > 0 ||
-                  activeSelShiftB?.subCustomLabel
+                : (activePartner === 'partnerB' &&
+                    (getShiftOvertimeMinutes(activeSelShiftB) > 0 ||
+                      getShiftHolidayWorkMinutes(activeSelShiftB) > 0)) ||
+                  activeSelShiftB?.subCustomLabel ||
+                  activeSelShiftB?.subStampId
                 ? 'bg-rose-50 text-rose-900 border border-rose-200'
                 : 'bg-stone-100 text-stone-400'
             }`}
@@ -548,24 +568,21 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
             </div>
 
             {/* 2段目：夜勤バイト（勤務の下に配置） */}
-            {activeSelShiftB?.subCustomLabel && (
+            {(activeSelShiftB?.subCustomLabel || activeSelShiftB?.subStampId) && (
               <span className="px-1.5 py-0.5 rounded bg-amber-300 text-stone-900 text-[10px] font-black shadow-2xs">
-                🌙 {activeSelShiftB.subCustomLabel}
+                🌙 {activeSelShiftB.subCustomLabel || '夜勤バイト'}
                 {activeSelShiftB.subStartTime
                   ? ` (${activeSelShiftB.subStartTime}${activeSelShiftB.subEndTime ? `〜${activeSelShiftB.subEndTime}` : ''})`
                   : ''}
               </span>
             )}
 
-            {/* 3段目：残業・休日出勤（勤務の下に配置・仮状態はオレンジ破線バッジで区別） */}
-            {(() => {
+            {/* 3段目：残業・休日出勤（操作中の本人のみ表示） */}
+            {activePartner === 'partnerB' && (() => {
               const otB = getShiftOvertimeMinutes(activeSelShiftB);
               const hwB = getShiftHolidayWorkMinutes(activeSelShiftB);
               if (otB === 0 && hwB === 0) return null;
-              const isTentB = Boolean(
-                (otB > 0 && activeSelShiftB?.isTentativeOvertime) ||
-                (hwB > 0 && activeSelShiftB?.isTentativeHolidayWork)
-              );
+              const isTentB = isShiftTentativeOvertime(activeSelShiftB) || isShiftTentativeHolidayWork(activeSelShiftB);
               return (
                 <span
                   className={`px-1.5 py-0.5 rounded text-[10px] font-black shadow-2xs ${
@@ -719,14 +736,24 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   return (
     <div
       onTouchStart={(e) => {
+        if (e.touches.length !== 1) {
+          touchStartX.current = null;
+          touchStartY.current = null;
+          return;
+        }
         touchStartX.current = e.touches[0].clientX;
         touchStartY.current = e.touches[0].clientY;
+      }}
+      onTouchCancel={() => {
+        touchStartX.current = null;
+        touchStartY.current = null;
       }}
       onTouchEnd={(e) => {
         if (touchStartX.current === null || touchStartY.current === null) return;
         const dx = e.changedTouches[0].clientX - touchStartX.current;
         const dy = e.changedTouches[0].clientY - touchStartY.current;
         if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+          lastSwipeAtRef.current = Date.now();
           if (dx > 0) {
             onSwipePrevMonth?.();
           } else {
@@ -875,13 +902,26 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                             夜バ
                           </span>
                         )}
-                        {(() => {
+                        {activePartner === 'partnerA' && (() => {
                           const otA = getShiftOvertimeMinutes(actA);
                           const hwA = getShiftHolidayWorkMinutes(actA);
                           if (otA === 0 && hwA === 0) return null;
+                          const isTentA = isShiftTentativeOvertime(actA) || isShiftTentativeHolidayWork(actA);
                           return (
-                            <span className="px-1.5 py-0.2 rounded bg-rose-500 text-white text-[10px] font-black shadow-2xs">
-                              {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `+残${formatMinutesShort(otA)}`}
+                            <span
+                              className={`px-1.5 py-0.2 rounded text-[10px] font-black shadow-2xs ${
+                                isTentA
+                                  ? 'bg-amber-500 text-white border border-dashed border-amber-300'
+                                  : 'bg-rose-500 text-white'
+                              }`}
+                            >
+                              {isTentA
+                                ? hwA > 0
+                                  ? `仮休${formatMinutesShort(hwA)}`
+                                  : `仮残+${formatMinutesShort(otA)}`
+                                : hwA > 0
+                                ? `休出${formatMinutesShort(hwA)}`
+                                : `+残${formatMinutesShort(otA)}`}
                             </span>
                           );
                         })()}
@@ -904,13 +944,26 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
                             夜バ
                           </span>
                         )}
-                        {(() => {
+                        {activePartner === 'partnerB' && (() => {
                           const otB = getShiftOvertimeMinutes(actB);
                           const hwB = getShiftHolidayWorkMinutes(actB);
                           if (otB === 0 && hwB === 0) return null;
+                          const isTentB = isShiftTentativeOvertime(actB) || isShiftTentativeHolidayWork(actB);
                           return (
-                            <span className="px-1.5 py-0.2 rounded bg-rose-500 text-white text-[10px] font-black shadow-2xs">
-                              {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `+残${formatMinutesShort(otB)}`}
+                            <span
+                              className={`px-1.5 py-0.2 rounded text-[10px] font-black shadow-2xs ${
+                                isTentB
+                                  ? 'bg-amber-500 text-white border border-dashed border-amber-300'
+                                  : 'bg-rose-500 text-white'
+                              }`}
+                            >
+                              {isTentB
+                                ? hwB > 0
+                                  ? `仮休${formatMinutesShort(hwB)}`
+                                  : `仮残+${formatMinutesShort(otB)}`
+                                : hwB > 0
+                                ? `休出${formatMinutesShort(hwB)}`
+                                : `+残${formatMinutesShort(otB)}`}
                             </span>
                           );
                         })()}

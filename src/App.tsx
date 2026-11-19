@@ -27,6 +27,7 @@ import {
   getShiftOvertimeMinutes,
   getEffectivePrivateFor,
   isEventVisibleToPartner,
+  isShiftConsideredHoliday,
   LEGACY_DEFAULT_STAMP_IDS,
 } from './utils/presets';
 import { hashPasscode } from './utils/crypto';
@@ -95,12 +96,17 @@ export const App: React.FC = () => {
   // デフォルトで「📅月間カレンダー」画面で起動（ウィジェットはヘッダーの「🏠ウィジェット」ボタンから閲覧可能）
   const [isWidgetMode, setIsWidgetMode] = useState<boolean>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('view') === 'widget';
+    return params.get('view') === 'widget' || params.get('widget') === '1';
   });
 
   // 表示中の年月・選択日
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
+  const yearMonthRef = useRef<{ year: number; month: number }>({
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+  });
+  yearMonthRef.current = { year, month };
   const [selectedDate, setSelectedDateState] = useState(initialDateStr);
   const selectedDateRef = useRef<string>(initialDateStr);
   const setSelectedDate = useCallback((next: string | ((prev: string) => string)) => {
@@ -154,6 +160,17 @@ export const App: React.FC = () => {
     loadGoogleCalendarSyncConfig()
   );
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const activeSyncCountRef = useRef<number>(0);
+  const beginSync = useCallback(() => {
+    activeSyncCountRef.current += 1;
+    setIsSyncing(true);
+  }, []);
+  const endSync = useCallback(() => {
+    activeSyncCountRef.current = Math.max(0, activeSyncCountRef.current - 1);
+    if (activeSyncCountRef.current === 0) {
+      setIsSyncing(false);
+    }
+  }, []);
 
   // トースト通知メッセージ
   const [toastText, setToastText] = useState<string | null>(null);
@@ -184,7 +201,7 @@ export const App: React.FC = () => {
   const stampDrawerOpenRef = useRef(stampDrawerOpen);
   const isWidgetModeRef = useRef(isWidgetMode);
   const lastBackPressTimeRef = useRef<number>(0);
-  const isInternalBackRef = useRef<boolean>(false);
+  const pendingInternalBackCountRef = useRef<number>(0);
 
   useEffect(() => { dayDetailOpenRef.current = dayDetailOpen; }, [dayDetailOpen]);
   useEffect(() => { settingsOpenRef.current = settingsOpen; }, [settingsOpen]);
@@ -210,12 +227,21 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  // 現在のモーダルから別のモーダルへ遷移する際に履歴を置き換える
+  const replaceNavLayer = useCallback((layerName: string) => {
+    try {
+      window.history.replaceState({ futarical_layer: layerName, time: Date.now() }, '');
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // UI上の「閉じる / ✕」ボタンを押した時のクローズ処理（履歴スタックも正常に巻き戻す）
   const closeNavLayer = useCallback((closeAction: () => void) => {
     closeAction();
     try {
       if (window.history.state && window.history.state.futarical_layer) {
-        isInternalBackRef.current = true;
+        pendingInternalBackCountRef.current += 1;
         window.history.back();
       }
     } catch {
@@ -326,39 +352,59 @@ export const App: React.FC = () => {
 
     const handlePopState = () => {
       // 内部の✕ボタン等でhistory.back()が呼ばれた場合はhandlePopStateの処理をスキップ
-      if (isInternalBackRef.current) {
-        isInternalBackRef.current = false;
+      if (pendingInternalBackCountRef.current > 0) {
+        pendingInternalBackCountRef.current -= 1;
         return;
       }
 
-      // 1. もしモーダルが開いていればモーダルを閉じる
-      if (
-        dayDetailOpenRef.current ||
-        settingsOpenRef.current ||
-        shiftManagerOpenRef.current ||
-        categoryManagerOpenRef.current ||
-        imageOcrOpenRef.current ||
-        voiceModalOpenRef.current ||
-        widgetGuideOpenRef.current ||
-        shiftExportOpenRef.current ||
-        taskManagerOpenRef.current ||
-        welcomeModalOpenRef.current ||
-        sharedKeywordModalOpenRef.current ||
-        partnerEventsModalOpenRef.current
-      ) {
-        setDayDetailOpen(false);
-        setOpenEventFormDirectly(false);
-        setSettingsOpen(false);
-        setShiftManagerOpen(false);
-        setCategoryManagerOpen(false);
-        setImageOcrOpen(false);
-        setVoiceModalOpen(false);
-        setWidgetGuideOpen(false);
-        setShiftExportOpen(false);
-        setTaskManagerOpen(false);
+      // 1. 最前面のモーダルを1つだけ閉じる
+      if (sharedKeywordModalOpenRef.current) {
+        setSharedKeywordModalOpen(false);
+        return;
+      }
+      if (welcomeModalOpenRef.current) {
         setWelcomeModalOpen(false);
         setWelcomePreviewConfig(null);
-        setSharedKeywordModalOpen(false);
+        return;
+      }
+      if (voiceModalOpenRef.current) {
+        setVoiceModalOpen(false);
+        return;
+      }
+      if (shiftManagerOpenRef.current) {
+        setShiftManagerOpen(false);
+        return;
+      }
+      if (categoryManagerOpenRef.current) {
+        setCategoryManagerOpen(false);
+        return;
+      }
+      if (imageOcrOpenRef.current) {
+        setImageOcrOpen(false);
+        return;
+      }
+      if (widgetGuideOpenRef.current) {
+        setWidgetGuideOpen(false);
+        return;
+      }
+      if (shiftExportOpenRef.current) {
+        setShiftExportOpen(false);
+        return;
+      }
+      if (taskManagerOpenRef.current) {
+        setTaskManagerOpen(false);
+        return;
+      }
+      if (settingsOpenRef.current) {
+        setSettingsOpen(false);
+        return;
+      }
+      if (dayDetailOpenRef.current) {
+        setDayDetailOpen(false);
+        setOpenEventFormDirectly(false);
+        return;
+      }
+      if (partnerEventsModalOpenRef.current) {
         setPartnerEventsModalOpen(false);
         return;
       }
@@ -645,15 +691,21 @@ export const App: React.FC = () => {
       }
       setSavedSharedKeywordState(currentKeyword);
 
-      // 合言葉が未入力の場合（初回起動・未共有端末）はまっさらな状態のカレンダーで起動
+      // 合言葉が未入力の場合（初回起動・未共有端末）もローカル保存済みの予定・シフトは保持したまま起動
       if (!currentKeyword) {
-        const freshStore = createInitialDataStore();
-        setStore(freshStore);
+        if (shouldClearAll || hasAnyPresetChange) {
+          await saveLocalStore(nextStore, activeSessionPass || undefined);
+        }
+        setStore(nextStore);
+        const guestGcalCfg = loadGoogleCalendarSyncConfig(
+          nextStore.metadata?.googleCalendarSyncConfig
+        );
+        setGcalSyncConfig(guestGcalCfg);
         setIsLoaded(true);
         // 初回ロード完了後にふんわり合言葉入力モーダルを開く
         setTimeout(() => {
           if (mounted) {
-            setSharedKeywordModalOpen(true);
+            openSharedKeywordModal();
           }
         }, 350);
         return;
@@ -674,8 +726,8 @@ export const App: React.FC = () => {
       const initialCfg = loadSyncConfig();
       let currentWorkingStore = nextStore;
       if (initialCfg.enabled && initialCfg.githubToken) {
+        beginSync();
         try {
-          setIsSyncing(true);
           const { mergedStore } = await syncWithGitHub(
             nextStore,
             initialCfg,
@@ -683,19 +735,7 @@ export const App: React.FC = () => {
           );
           if (mounted) {
             // 起動中の操作で入力されたシフト等を上書きしないよう、最新の latestStoreRef.current と差分マージ
-            const latestNow = latestStoreRef.current;
-            const remerged = mergeCalendarStores(latestNow, mergedStore);
-            const preservedWelcome =
-              latestNow.metadata?.welcomeImageConfig?.dataUrl
-                ? latestNow.metadata.welcomeImageConfig
-                : remerged.metadata?.welcomeImageConfig;
-            currentWorkingStore = {
-              ...remerged,
-              metadata: {
-                ...remerged.metadata,
-                welcomeImageConfig: preservedWelcome || remerged.metadata?.welcomeImageConfig,
-              },
-            };
+            currentWorkingStore = mergeCalendarStores(latestStoreRef.current, mergedStore);
             setStore(currentWorkingStore);
             await saveLocalStore(currentWorkingStore, activeSessionPass || undefined);
             if (currentWorkingStore.metadata?.googleCalendarSyncConfig) {
@@ -709,7 +749,7 @@ export const App: React.FC = () => {
         } catch {
           // オフライン時はローカルデータを維持
         } finally {
-          if (mounted) setIsSyncing(false);
+          endSync();
         }
       }
 
@@ -723,8 +763,8 @@ export const App: React.FC = () => {
         activeGcalCfg.autoSync &&
         (activeGcalCfg.partnerAGasUrl || activeGcalCfg.partnerBGasUrl)
       ) {
+        beginSync();
         try {
-          setIsSyncing(true);
           const gcalRes = await syncWithGoogleCalendar(
             latestStoreRef.current,
             activeGcalCfg,
@@ -737,24 +777,40 @@ export const App: React.FC = () => {
             if (safeAfterGcal.metadata?.googleCalendarSyncConfig) {
               setGcalSyncConfig(safeAfterGcal.metadata.googleCalendarSyncConfig);
             }
-            await saveLocalStore(safeAfterGcal, sessionPassword || undefined);
+            await saveLocalStore(safeAfterGcal, activeSessionPass || undefined);
             lastFocusGoogleSyncAtRef.current = Date.now();
             if (
               (gcalRes.importedCount > 0 || gcalRes.updatedCount > 0 || gcalRes.pushedCount > 0) &&
               initialCfg.enabled &&
               initialCfg.githubToken
             ) {
-              await syncWithGitHub(
-                latestStoreRef.current,
-                initialCfg,
-                activeSessionPass || undefined
-              ).catch(() => {});
+              try {
+                const { mergedStore } = await syncWithGitHub(
+                  latestStoreRef.current,
+                  initialCfg,
+                  activeSessionPass || undefined
+                );
+                if (mounted) {
+                  const safeCloudAfterGcal = mergeCalendarStores(latestStoreRef.current, mergedStore);
+                  setStore(safeCloudAfterGcal);
+                  await saveLocalStore(safeCloudAfterGcal, activeSessionPass || undefined);
+                  if (safeCloudAfterGcal.metadata?.googleCalendarSyncConfig) {
+                    const mergedGcalCfg = loadGoogleCalendarSyncConfig(
+                      safeCloudAfterGcal.metadata.googleCalendarSyncConfig
+                    );
+                    setGcalSyncConfig(mergedGcalCfg);
+                    saveGoogleCalendarSyncConfig(mergedGcalCfg);
+                  }
+                }
+              } catch {
+                // ignore
+              }
             }
           }
         } catch {
           // ignore background gcal error on startup
         } finally {
-          if (mounted) setIsSyncing(false);
+          endSync();
         }
       }
     }).catch((err) => {
@@ -777,15 +833,8 @@ export const App: React.FC = () => {
 
     const welcomeCfg = store.metadata?.welcomeImageConfig;
     if (welcomeCfg && welcomeCfg.enabled && welcomeCfg.dataUrl) {
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
-        today.getDate()
-      ).padStart(2, '0')}`;
-      if (welcomeCfg.mode === 'daily') {
-        if (welcomeCfg.lastShownDate !== todayStr) {
-          openWelcomeModal();
-        }
-      } else {
+      const todayStr = getLocalTodayStr();
+      if (welcomeCfg.lastShownDate !== todayStr) {
         openWelcomeModal();
       }
     }
@@ -800,6 +849,13 @@ export const App: React.FC = () => {
   const gcalSyncPendingRef = useRef<boolean>(false);
   const lastFocusGoogleSyncAtRef = useRef<number>(Date.now());
 
+  useEffect(() => {
+    return () => {
+      if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+      if (gcalSyncTimerRef.current) clearTimeout(gcalSyncTimerRef.current);
+    };
+  }, []);
+
   const runSerializedCloudSync = useCallback(async () => {
     if (!syncConfig.enabled || !syncConfig.autoSync || !syncConfig.githubToken) return;
     if (cloudSyncInFlightRef.current) {
@@ -809,45 +865,35 @@ export const App: React.FC = () => {
 
     cloudSyncInFlightRef.current = true;
     cloudSyncPendingRef.current = false;
-    setIsSyncing(true);
+    beginSync();
 
     try {
       const snapshotBeforeSync = latestStoreRef.current;
       const { mergedStore } = await syncWithGitHub(snapshotBeforeSync, syncConfig, sessionPassword);
 
       // 通信中に入力された最新のシフト・予定（latestStoreRef.current）を最優先でマージし、古いレスポンスで絶対に上書きしない！
-      const latestNow = latestStoreRef.current;
-      const remerged = mergeCalendarStores(latestNow, mergedStore);
-      const preservedWelcome =
-        latestNow.metadata?.welcomeImageConfig?.dataUrl
-          ? latestNow.metadata.welcomeImageConfig
-          : remerged.metadata?.welcomeImageConfig;
-      const finalMerged: CalendarDataStore = {
-        ...remerged,
-        metadata: {
-          ...remerged.metadata,
-          welcomeImageConfig: preservedWelcome || remerged.metadata?.welcomeImageConfig,
-        },
-      };
+      const finalMerged = mergeCalendarStores(latestStoreRef.current, mergedStore);
       setStore(finalMerged);
       await saveLocalStore(finalMerged, sessionPassword || undefined);
       if (finalMerged.metadata?.googleCalendarSyncConfig) {
-        setGcalSyncConfig(
-          loadGoogleCalendarSyncConfig(finalMerged.metadata.googleCalendarSyncConfig)
+        const mergedGcalCfg = loadGoogleCalendarSyncConfig(
+          finalMerged.metadata.googleCalendarSyncConfig
         );
+        setGcalSyncConfig(mergedGcalCfg);
+        saveGoogleCalendarSyncConfig(mergedGcalCfg);
       }
     } catch {
       // オフライン時はローカル保存を維持
     } finally {
       cloudSyncInFlightRef.current = false;
-      setIsSyncing(false);
+      endSync();
       // 通信中にさらなるシフト入力等が行われていた場合は、最新状態で追従同期を実行
       if (cloudSyncPendingRef.current) {
         cloudSyncPendingRef.current = false;
         void runSerializedCloudSync();
       }
     }
-  }, [sessionPassword, setStore, syncConfig]);
+  }, [beginSync, endSync, sessionPassword, setStore, syncConfig]);
 
   const runSerializedGoogleSync = useCallback(async () => {
     if (gcalSyncInFlightRef.current) {
@@ -869,7 +915,7 @@ export const App: React.FC = () => {
 
     gcalSyncInFlightRef.current = true;
     gcalSyncPendingRef.current = false;
-    setIsSyncing(true);
+    beginSync();
 
     try {
       const gcalRes = await syncWithGoogleCalendar(
@@ -880,7 +926,11 @@ export const App: React.FC = () => {
       const safeAfterGcal = mergeCalendarStores(latestStoreRef.current, gcalRes.nextStore);
       setStore(safeAfterGcal);
       if (safeAfterGcal.metadata?.googleCalendarSyncConfig) {
-        setGcalSyncConfig(safeAfterGcal.metadata.googleCalendarSyncConfig);
+        const mergedGcalCfg = loadGoogleCalendarSyncConfig(
+          safeAfterGcal.metadata.googleCalendarSyncConfig
+        );
+        setGcalSyncConfig(mergedGcalCfg);
+        saveGoogleCalendarSyncConfig(mergedGcalCfg);
       }
       await saveLocalStore(safeAfterGcal, sessionPassword || undefined);
 
@@ -900,13 +950,22 @@ export const App: React.FC = () => {
       // Googleカレンダー・Googleタスク通信失敗時もローカル・GitHub同期は継続
     } finally {
       gcalSyncInFlightRef.current = false;
-      setIsSyncing(false);
+      endSync();
       if (gcalSyncPendingRef.current) {
         gcalSyncPendingRef.current = false;
         void runSerializedGoogleSync();
       }
     }
-  }, [activePartner, gcalSyncConfig, runSerializedCloudSync, sessionPassword, setStore, syncConfig]);
+  }, [
+    activePartner,
+    beginSync,
+    endSync,
+    gcalSyncConfig,
+    runSerializedCloudSync,
+    sessionPassword,
+    setStore,
+    syncConfig,
+  ]);
 
   // 画面復帰時（Googleタスクアプリや別タブから戻ったとき等）に10秒間隔で自動同期
   useEffect(() => {
@@ -1010,21 +1069,22 @@ export const App: React.FC = () => {
       setSyncConfig(nextSyncCfg);
 
       // 直ちにクラウドから最新データを同期ダウンロード
+      beginSync();
       try {
-        setIsSyncing(true);
-        const { mergedStore } = await syncWithGitHub(store, nextSyncCfg, sessionPassword);
-        const preservedWelcome =
-          store.metadata?.welcomeImageConfig?.dataUrl
-            ? store.metadata.welcomeImageConfig
-            : mergedStore.metadata?.welcomeImageConfig;
-        const finalStore: CalendarDataStore = {
-          ...mergedStore,
-          metadata: {
-            ...mergedStore.metadata,
-            welcomeImageConfig: preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
-          },
-        };
+        const { mergedStore } = await syncWithGitHub(
+          latestStoreRef.current,
+          nextSyncCfg,
+          sessionPassword
+        );
+        const finalStore = mergeCalendarStores(latestStoreRef.current, mergedStore);
         setStore(finalStore);
+        if (finalStore.metadata?.googleCalendarSyncConfig) {
+          const mergedGcalCfg = loadGoogleCalendarSyncConfig(
+            finalStore.metadata.googleCalendarSyncConfig
+          );
+          setGcalSyncConfig(mergedGcalCfg);
+          saveGoogleCalendarSyncConfig(mergedGcalCfg);
+        }
         await saveLocalStore(finalStore, sessionPassword || undefined);
         showToast('✨ 合言葉が確認できました！カレンダーの共有を開始しました💕');
         return { success: true };
@@ -1032,10 +1092,10 @@ export const App: React.FC = () => {
         showToast('⚠️ 同期中に一時的なエラーが発生しました');
         return { success: true };
       } finally {
-        setIsSyncing(false);
+        endSync();
       }
     },
-    [sessionPassword, showToast, store]
+    [beginSync, endSync, sessionPassword, setStore, showToast]
   );
 
   // 🚪 カレンダーの共有を解除（ログアウトしてまっさらな状態に戻す）
@@ -1077,6 +1137,7 @@ export const App: React.FC = () => {
       const shiftId = `${targetDate}_${partnerId}`;
       const nowIso = new Date().toISOString();
       const existing = curStore.shifts[shiftId];
+      const activeExisting = existing && !existing.deletedAt ? existing : undefined;
 
       let nextShift: ShiftEntry;
       if (!stamp) {
@@ -1084,9 +1145,9 @@ export const App: React.FC = () => {
           id: shiftId,
           date: targetDate,
           partnerId,
-          stampId: existing?.stampId || '',
+          stampId: activeExisting?.stampId || '',
           createdBy: activePartner,
-          createdAt: existing?.createdAt || nowIso,
+          createdAt: activeExisting?.createdAt || nowIso,
           updatedAt: nowIso,
           deletedAt: nowIso,
         };
@@ -1098,25 +1159,57 @@ export const App: React.FC = () => {
         );
         const todayStr = getLocalTodayStr();
         const isFutureDate = targetDate > todayStr;
+        const existingOtMin = getShiftOvertimeMinutes(activeExisting);
+        const existingHwMin = getShiftHolidayWorkMinutes(activeExisting);
 
         nextShift = {
-          ...(existing && !existing.deletedAt ? existing : {}),
+          ...(activeExisting || {}),
           id: shiftId,
           date: targetDate,
           partnerId,
           stampId: stamp.id,
+          customLabel: undefined,
           startTime: stamp.startTime,
           endTime: stamp.endTime,
-          isHolidayWork: isHolWorkStamp ? true : (existing?.isHolidayWork || false),
-          holidayWorkMinutes: isHolWorkStamp ? (existing?.holidayWorkMinutes || 240) : existing?.holidayWorkMinutes,
-          holidayWorkHours: isHolWorkStamp ? (existing?.holidayWorkHours || 4) : existing?.holidayWorkHours,
+          isHolidayWork: isHolWorkStamp,
+          holidayWorkMinutes: isHolWorkStamp ? (existingHwMin > 0 ? existingHwMin : 240) : 0,
+          holidayWorkHours: isHolWorkStamp
+            ? Math.round(((existingHwMin > 0 ? existingHwMin : 240) / 60) * 10) / 10
+            : 0,
+          overtimeMinutes: isHolWorkStamp || stamp.isHoliday ? 0 : existingOtMin,
+          overtimeHours:
+            isHolWorkStamp || stamp.isHoliday
+              ? 0
+              : Math.round((existingOtMin / 60) * 10) / 10,
+          overtimeStartTime:
+            isHolWorkStamp || stamp.isHoliday ? undefined : activeExisting?.overtimeStartTime,
+          overtimeEndTime:
+            isHolWorkStamp || stamp.isHoliday ? undefined : activeExisting?.overtimeEndTime,
           // 未来日（登録日より後）は固定で仮予定（未確定）にする
-          isTentativeHolidayWork: isHolWorkStamp && isFutureDate ? true : existing?.isTentativeHolidayWork,
-          holidayWorkStatus: isHolWorkStamp && isFutureDate ? 'tentative' : existing?.holidayWorkStatus,
-          isTentativeOvertime: isFutureDate && ((existing?.overtimeMinutes || 0) > 0 || (existing?.overtimeHours || 0) > 0) ? true : existing?.isTentativeOvertime,
-          overtimeStatus: isFutureDate && ((existing?.overtimeMinutes || 0) > 0 || (existing?.overtimeHours || 0) > 0) ? 'tentative' : existing?.overtimeStatus,
+          isTentativeHolidayWork: isHolWorkStamp
+            ? isFutureDate
+              ? true
+              : Boolean(activeExisting?.isTentativeHolidayWork)
+            : false,
+          holidayWorkStatus: isHolWorkStamp
+            ? isFutureDate
+              ? 'tentative'
+              : activeExisting?.holidayWorkStatus || 'confirmed'
+            : 'confirmed',
+          isTentativeOvertime:
+            !isHolWorkStamp && !stamp.isHoliday && existingOtMin > 0
+              ? isFutureDate
+                ? true
+                : Boolean(activeExisting?.isTentativeOvertime)
+              : false,
+          overtimeStatus:
+            !isHolWorkStamp && !stamp.isHoliday && existingOtMin > 0
+              ? isFutureDate
+                ? 'tentative'
+                : activeExisting?.overtimeStatus || 'confirmed'
+              : 'confirmed',
           createdBy: activePartner,
-          createdAt: existing?.createdAt || nowIso,
+          createdAt: activeExisting?.createdAt || nowIso,
           updatedAt: nowIso,
           deletedAt: null,
         };
@@ -1293,7 +1386,7 @@ export const App: React.FC = () => {
       const nowIso = new Date().toISOString();
       const patch: Partial<ShiftEntry> = isHolidayWork
         ? {
-            isHolidayWork: true,
+            isHolidayWork: actualMinutes > 0,
             isTentativeHolidayWork: false,
             isTentativeOvertime: false,
             holidayWorkStatus: 'confirmed',
@@ -1332,6 +1425,7 @@ export const App: React.FC = () => {
     (dateStr: string, partnerId: PartnerId) => {
       const nowIso = new Date().toISOString();
       handleUpdateShiftDetails(dateStr, partnerId, {
+        isHolidayWork: false,
         isTentativeHolidayWork: false,
         isTentativeOvertime: false,
         holidayWorkStatus: 'confirmed',
@@ -1350,38 +1444,65 @@ export const App: React.FC = () => {
   // AI画像読取やナスカレ連携からの一括シフト＆予定登録
   const handleBulkApplyShiftsAndEvents = useCallback(
     (newShifts: ShiftEntry[], newEvents: ScheduleEvent[], summaryMsg: string) => {
-      const nextShifts = { ...store.shifts };
+      const curStore = latestStoreRef.current;
+      const nextShifts = { ...curStore.shifts };
       for (const s of newShifts) {
-        nextShifts[s.id] = s;
+        const prev = curStore.shifts[s.id];
+        const activePrev = prev && !prev.deletedAt ? prev : undefined;
+        nextShifts[s.id] = {
+          ...(activePrev || {}),
+          ...s,
+          overtimeMinutes: s.overtimeMinutes ?? activePrev?.overtimeMinutes,
+          overtimeHours: s.overtimeHours ?? activePrev?.overtimeHours,
+          overtimeStartTime: s.overtimeStartTime ?? activePrev?.overtimeStartTime,
+          overtimeEndTime: s.overtimeEndTime ?? activePrev?.overtimeEndTime,
+          isTentativeOvertime: s.isTentativeOvertime ?? activePrev?.isTentativeOvertime,
+          overtimeStatus: s.overtimeStatus ?? activePrev?.overtimeStatus,
+          isHolidayWork: s.isHolidayWork ?? activePrev?.isHolidayWork,
+          holidayWorkMinutes: s.holidayWorkMinutes ?? activePrev?.holidayWorkMinutes,
+          holidayWorkHours: s.holidayWorkHours ?? activePrev?.holidayWorkHours,
+          isTentativeHolidayWork: s.isTentativeHolidayWork ?? activePrev?.isTentativeHolidayWork,
+          holidayWorkStatus: s.holidayWorkStatus ?? activePrev?.holidayWorkStatus,
+          subStampId: s.subStampId ?? activePrev?.subStampId,
+          subCustomLabel: s.subCustomLabel ?? activePrev?.subCustomLabel,
+          subStartTime: s.subStartTime ?? activePrev?.subStartTime,
+          subEndTime: s.subEndTime ?? activePrev?.subEndTime,
+          memo: s.memo ?? activePrev?.memo,
+        };
       }
-      const nextEvents = { ...store.events };
+      const nextEvents = { ...curStore.events };
       for (const ev of newEvents) {
         nextEvents[ev.id] = ev;
       }
-      commitStore({
-        ...store,
-        shifts: nextShifts,
-        events: nextEvents,
-      });
+      void commitStore(
+        {
+          ...curStore,
+          shifts: nextShifts,
+          events: nextEvents,
+        },
+        true,
+        newEvents.length > 0
+      );
       showToast(summaryMsg);
     },
-    [commitStore, showToast, store]
+    [commitStore, showToast]
   );
 
   // 日付ごとの「🍳すれ違いサポートアイコン」をON/OFF
   const handleToggleDaySupportBadge = useCallback(
     (dateStr: string, badge: string) => {
+      const curStore = latestStoreRef.current;
       const nowIso = new Date().toISOString();
-      const existing = store.daySupports?.[dateStr];
+      const existing = curStore.daySupports?.[dateStr];
       const currentBadges = existing?.badges || [];
       const nextBadges = currentBadges.includes(badge)
         ? currentBadges.filter((b) => b !== badge)
         : [...currentBadges, badge];
 
       const nextStore: CalendarDataStore = {
-        ...store,
+        ...curStore,
         daySupports: {
-          ...(store.daySupports || {}),
+          ...(curStore.daySupports || {}),
           [dateStr]: {
             id: `support_${dateStr}`,
             date: dateStr,
@@ -1391,9 +1512,9 @@ export const App: React.FC = () => {
           },
         },
       };
-      commitStore(nextStore);
+      void commitStore(nextStore);
     },
-    [activePartner, commitStore, store]
+    [activePartner, commitStore]
   );
 
   // 月間カレンダーの日付セルを「シングルタップ」した時の処理（その日に選択移動。勝手にスタンプされるバグを完全に防止）
@@ -1415,31 +1536,17 @@ export const App: React.FC = () => {
   // 月間カレンダーの日付セルを「ダブルタップ」した時の処理（TimeTree風：その日のすべての予定を表示）
   const handleCellDoubleTap = useCallback(
     (dateStr: string) => {
-      setSelectedDate(dateStr);
-      const [ny, nm] = dateStr.split('-').map(Number);
-      if (ny !== year || nm !== month) {
-        setYear(ny);
-        setMonth(nm);
-      }
-      setOpenEventFormDirectly(false);
-      setDayDetailOpen(true);
+      openDayDetailModal(dateStr, false);
     },
-    [month, year]
+    [openDayDetailModal]
   );
 
   // 右下の「＋」ボタンから選択中の日（または指定日）に予定・タスクを直接追加する処理
   const handleQuickAddForDate = useCallback(
     (dateStr: string) => {
-      setSelectedDate(dateStr);
-      const [ny, nm] = dateStr.split('-').map(Number);
-      if (ny !== year || nm !== month) {
-        setYear(ny);
-        setMonth(nm);
-      }
-      setOpenEventFormDirectly(true);
-      setDayDetailOpen(true);
+      openDayDetailModal(dateStr, true);
     },
-    [month, year]
+    [openDayDetailModal]
   );
 
   // 予定・タスクの追加・更新
@@ -1458,6 +1565,21 @@ export const App: React.FC = () => {
       showToast(
         `${ev.isTask ? '✅' : '📅'} ${m}/${d} に「${ev.title}」を登録しました💕`
       );
+    },
+    [commitStore, showToast]
+  );
+
+  // 予定・タスクの一括更新（アトミック保存）
+  const handleSaveEvents = useCallback(
+    (evs: ScheduleEvent[]) => {
+      if (evs.length === 0) return;
+      const curStore = latestStoreRef.current;
+      const nextEvents = { ...curStore.events };
+      for (const ev of evs) {
+        nextEvents[ev.id] = ev;
+      }
+      void commitStore({ ...curStore, events: nextEvents }, true, true);
+      showToast(`✅ ${evs.length}件のタスクを更新しました💕`);
     },
     [commitStore, showToast]
   );
@@ -1517,51 +1639,78 @@ export const App: React.FC = () => {
 
   // 登録されているすべての予定・タスクを一括削除
   const handleClearAllEvents = useCallback(() => {
+    const curStore = latestStoreRef.current;
     const nowIso = new Date().toISOString();
     const deletedEvents: Record<string, ScheduleEvent> = {};
-    for (const [id, ev] of Object.entries(store.events)) {
+    for (const [id, ev] of Object.entries(curStore.events)) {
       deletedEvents[id] = {
         ...ev,
         updatedAt: nowIso,
         deletedAt: nowIso,
       };
     }
-    commitStore({
-      ...store,
-      events: deletedEvents,
-      daySupports: {},
-    });
+    const clearedSupports: CalendarDataStore['daySupports'] = {};
+    for (const [dKey, ds] of Object.entries(curStore.daySupports || {})) {
+      clearedSupports[dKey] = {
+        id: ds?.id || `support_${dKey}`,
+        date: ds?.date || dKey,
+        badges: [],
+        updatedBy: activePartner,
+        updatedAt: nowIso,
+      };
+    }
+    void commitStore(
+      {
+        ...curStore,
+        events: deletedEvents,
+        daySupports: clearedSupports,
+      },
+      true,
+      true
+    );
     showToast('🗑️ すべての予定・タスクを削除しました');
-  }, [commitStore, showToast, store]);
+  }, [activePartner, commitStore, showToast]);
 
   // 登録されているすべてのシフトデータ（残業・休出・バイト含む）を一括削除
   const handleClearAllShifts = useCallback(() => {
+    const curStore = latestStoreRef.current;
     const nowIso = new Date().toISOString();
     const deletedShifts: Record<string, ShiftEntry> = {};
-    for (const [id, s] of Object.entries(store.shifts)) {
+    for (const [id, s] of Object.entries(curStore.shifts)) {
       deletedShifts[id] = {
         ...s,
+        overtimeMinutes: 0,
         overtimeHours: 0,
+        overtimeStartTime: undefined,
+        overtimeEndTime: undefined,
+        isTentativeOvertime: false,
+        overtimeStatus: 'confirmed',
+        holidayWorkMinutes: 0,
         holidayWorkHours: 0,
         isHolidayWork: false,
+        isTentativeHolidayWork: false,
+        holidayWorkStatus: 'confirmed',
         subStampId: undefined,
         subCustomLabel: undefined,
+        subStartTime: undefined,
+        subEndTime: undefined,
         updatedAt: nowIso,
         deletedAt: nowIso,
       };
     }
-    commitStore({
-      ...store,
+    void commitStore({
+      ...curStore,
       shifts: deletedShifts,
     });
     showToast('🗑️ すべてのシフトデータを削除しました');
-  }, [commitStore, showToast, store]);
+  }, [commitStore, showToast]);
 
   // 予定データ＋シフトデータを両方すべて一括削除
   const handleClearAllData = useCallback(() => {
+    const curStore = latestStoreRef.current;
     const nowIso = new Date().toISOString();
     const deletedEvents: Record<string, ScheduleEvent> = {};
-    for (const [id, ev] of Object.entries(store.events)) {
+    for (const [id, ev] of Object.entries(curStore.events)) {
       deletedEvents[id] = {
         ...ev,
         updatedAt: nowIso,
@@ -1569,26 +1718,50 @@ export const App: React.FC = () => {
       };
     }
     const deletedShifts: Record<string, ShiftEntry> = {};
-    for (const [id, s] of Object.entries(store.shifts)) {
+    for (const [id, s] of Object.entries(curStore.shifts)) {
       deletedShifts[id] = {
         ...s,
+        overtimeMinutes: 0,
         overtimeHours: 0,
+        overtimeStartTime: undefined,
+        overtimeEndTime: undefined,
+        isTentativeOvertime: false,
+        overtimeStatus: 'confirmed',
+        holidayWorkMinutes: 0,
         holidayWorkHours: 0,
         isHolidayWork: false,
+        isTentativeHolidayWork: false,
+        holidayWorkStatus: 'confirmed',
         subStampId: undefined,
         subCustomLabel: undefined,
+        subStartTime: undefined,
+        subEndTime: undefined,
         updatedAt: nowIso,
         deletedAt: nowIso,
       };
     }
-    commitStore({
-      ...store,
-      shifts: deletedShifts,
-      events: deletedEvents,
-      daySupports: {},
-    });
+    const clearedSupports: CalendarDataStore['daySupports'] = {};
+    for (const [dKey, ds] of Object.entries(curStore.daySupports || {})) {
+      clearedSupports[dKey] = {
+        id: ds?.id || `support_${dKey}`,
+        date: ds?.date || dKey,
+        badges: [],
+        updatedBy: activePartner,
+        updatedAt: nowIso,
+      };
+    }
+    void commitStore(
+      {
+        ...curStore,
+        shifts: deletedShifts,
+        events: deletedEvents,
+        daySupports: clearedSupports,
+      },
+      true,
+      true
+    );
     showToast('🗑️ 予定データとシフトデータをすべて削除しました');
-  }, [commitStore, showToast, store]);
+  }, [activePartner, commitStore, showToast]);
 
   // 操作中パートナーの切り替え（🐻夫 ⇔ 🐰妻）
   const handleToggleActivePartner = useCallback(
@@ -1596,22 +1769,23 @@ export const App: React.FC = () => {
       setActivePartner(partnerId);
       setActivePartnerId(partnerId);
       setStampDrawerTab(partnerId === 'partnerB' ? 'partnerB_shift' : 'partnerA_shift');
-      const p = store.metadata.partners[partnerId];
+      const p = latestStoreRef.current.metadata.partners[partnerId];
       showToast(`${p.avatar} ${p.name}として操作中に切り替えました`);
     },
-    [showToast, store.metadata.partners]
+    [showToast]
   );
 
   // 自分の最終確認日時（既読ステータス）を「たった今」に更新
   const handleMarkSeenNow = useCallback(() => {
+    const curStore = latestStoreRef.current;
     const nowIso = new Date().toISOString();
-    const currentPartnerProfile = store.metadata.partners[activePartner];
+    const currentPartnerProfile = curStore.metadata.partners[activePartner];
     const nextStore: CalendarDataStore = {
-      ...store,
+      ...curStore,
       metadata: {
-        ...store.metadata,
+        ...curStore.metadata,
         partners: {
-          ...store.metadata.partners,
+          ...curStore.metadata.partners,
           [activePartner]: {
             ...currentPartnerProfile,
             lastSeenAt: nowIso,
@@ -1620,31 +1794,29 @@ export const App: React.FC = () => {
         updatedAt: nowIso,
       },
     };
-    commitStore(nextStore);
+    void commitStore(nextStore);
     showToast(
       `✅ ${currentPartnerProfile.avatar}${currentPartnerProfile.name}の最終確認時刻を更新しました！`
     );
-  }, [activePartner, commitStore, showToast, store]);
+  }, [activePartner, commitStore, showToast]);
 
   // 今月の「✨ふたり休日一致」の日付リストを自動検出
   const matchedHolidays = useMemo(() => {
     const stampMap = new Map<string, StampPreset>();
     for (const s of store.stamps) stampMap.set(s.id, s);
 
-    const isHol = (shift?: ShiftEntry) => {
-      if (!shift || shift.deletedAt) return false;
-      const st = stampMap.get(shift.stampId);
-      if (!st) return false;
-      return Boolean(st.isHoliday || /休|有休|公休|夏休|冬休/.test(st.label));
-    };
-
     const daysInMonth = new Date(year, month, 0).getDate();
     const matched: string[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const sA = store.shifts[`${dateStr}_partnerA`];
-      const sB = store.shifts[`${dateStr}_partnerB`];
-      if (isHol(sA) && isHol(sB)) {
+      const rawA = store.shifts[`${dateStr}_partnerA`];
+      const rawB = store.shifts[`${dateStr}_partnerB`];
+      const sA = rawA && !rawA.deletedAt ? rawA : undefined;
+      const sB = rawB && !rawB.deletedAt ? rawB : undefined;
+      if (
+        isShiftConsideredHoliday(sA, sA ? stampMap.get(sA.stampId) : undefined) &&
+        isShiftConsideredHoliday(sB, sB ? stampMap.get(sB.stampId) : undefined)
+      ) {
         matched.push(dateStr);
       }
     }
@@ -1787,13 +1959,17 @@ export const App: React.FC = () => {
         : loadGoogleCalendarSyncConfig(
             curStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig
           );
-      setIsSyncing(true);
+      beginSync();
       try {
         const gcalRes = await syncWithGoogleCalendar(curStore, cfg, activePartner);
         let workingStore = mergeCalendarStores(latestStoreRef.current, gcalRes.nextStore);
         setStore(workingStore);
         if (workingStore.metadata?.googleCalendarSyncConfig) {
-          setGcalSyncConfig(workingStore.metadata.googleCalendarSyncConfig);
+          const mergedGcalCfg = loadGoogleCalendarSyncConfig(
+            workingStore.metadata.googleCalendarSyncConfig
+          );
+          setGcalSyncConfig(mergedGcalCfg);
+          saveGoogleCalendarSyncConfig(mergedGcalCfg);
         }
         await saveLocalStore(workingStore, sessionPassword || undefined);
 
@@ -1805,20 +1981,15 @@ export const App: React.FC = () => {
               syncConfig,
               sessionPassword
             );
-            const safeCloud = mergeCalendarStores(latestStoreRef.current, mergedStore);
-            const preservedWelcome =
-              workingStore.metadata?.welcomeImageConfig?.dataUrl
-                ? workingStore.metadata.welcomeImageConfig
-                : safeCloud.metadata?.welcomeImageConfig;
-            workingStore = {
-              ...safeCloud,
-              metadata: {
-                ...safeCloud.metadata,
-                welcomeImageConfig:
-                  preservedWelcome || safeCloud.metadata?.welcomeImageConfig,
-              },
-            };
+            workingStore = mergeCalendarStores(latestStoreRef.current, mergedStore);
             setStore(workingStore);
+            if (workingStore.metadata?.googleCalendarSyncConfig) {
+              const mergedGcalCfg = loadGoogleCalendarSyncConfig(
+                workingStore.metadata.googleCalendarSyncConfig
+              );
+              setGcalSyncConfig(mergedGcalCfg);
+              saveGoogleCalendarSyncConfig(mergedGcalCfg);
+            }
             await saveLocalStore(workingStore, sessionPassword || undefined);
           } catch {
             // ignore github error if gcal succeeded
@@ -1835,19 +2006,19 @@ export const App: React.FC = () => {
         showToast(msg);
         throw err;
       } finally {
-        setIsSyncing(false);
+        endSync();
       }
     },
-    [activePartner, gcalSyncConfig, sessionPassword, setStore, showToast, syncConfig]
+    [activePartner, beginSync, endSync, gcalSyncConfig, sessionPassword, setStore, showToast, syncConfig]
   );
 
   const handleTriggerCloudSync = useCallback(
     async (configOverride?: CloudSyncConfig, passwordOverride?: string) => {
       const cfg = configOverride || syncConfig;
       const pass = passwordOverride || sessionPassword;
-      setIsSyncing(true);
+      beginSync();
       try {
-        let workingStore = store;
+        let workingStore = latestStoreRef.current;
         let gcalMsg = '';
         const currentGcalCfg = loadGoogleCalendarSyncConfig(
           workingStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig
@@ -1864,7 +2035,7 @@ export const App: React.FC = () => {
               currentGcalCfg,
               activePartner
             );
-            workingStore = gcalRes.nextStore;
+            workingStore = mergeCalendarStores(latestStoreRef.current, gcalRes.nextStore);
             if (
               gcalRes.importedCount > 0 ||
               gcalRes.updatedCount > 0 ||
@@ -1882,25 +2053,15 @@ export const App: React.FC = () => {
           cfg,
           pass
         );
-        const preservedWelcome =
-          workingStore.metadata?.welcomeImageConfig?.dataUrl
-            ? workingStore.metadata.welcomeImageConfig
-            : mergedStore.metadata?.welcomeImageConfig;
-        const finalStore: CalendarDataStore = {
-          ...mergedStore,
-          metadata: {
-            ...mergedStore.metadata,
-            welcomeImageConfig:
-              preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
-          },
-        };
+        const baseLatest = mergeCalendarStores(latestStoreRef.current, workingStore);
+        const finalStore = mergeCalendarStores(baseLatest, mergedStore);
         setStore(finalStore);
         if (finalStore.metadata?.googleCalendarSyncConfig) {
-          setGcalSyncConfig(
-            loadGoogleCalendarSyncConfig(
-              finalStore.metadata.googleCalendarSyncConfig
-            )
+          const mergedGcalCfg = loadGoogleCalendarSyncConfig(
+            finalStore.metadata.googleCalendarSyncConfig
           );
+          setGcalSyncConfig(mergedGcalCfg);
+          saveGoogleCalendarSyncConfig(mergedGcalCfg);
         }
         await saveLocalStore(finalStore, pass || undefined);
         showToast(`${statusMessage}${gcalMsg}`);
@@ -1908,10 +2069,10 @@ export const App: React.FC = () => {
         showToast(err instanceof Error ? err.message : '同期エラーが発生しました');
         throw err;
       } finally {
-        setIsSyncing(false);
+        endSync();
       }
     },
-    [activePartner, gcalSyncConfig, sessionPassword, showToast, store, syncConfig]
+    [activePartner, beginSync, endSync, gcalSyncConfig, sessionPassword, setStore, showToast, syncConfig]
   );
 
   // 3分おきの定期チェックで、夫婦クラウド＆Googleカレンダー/Googleタスクを安全に直列自動同期
@@ -1930,32 +2091,24 @@ export const App: React.FC = () => {
   }, [isLoaded, runSerializedCloudSync, runSerializedGoogleSync]);
 
   const handlePrevMonth = useCallback(() => {
-    setMonth((m) => {
-      let ny = year;
-      let nm = m - 1;
-      if (m === 1) {
-        ny = year - 1;
-        nm = 12;
-        setYear(ny);
-      }
-      setSelectedDate(`${ny}-${String(nm).padStart(2, '0')}-01`);
-      return nm;
-    });
-  }, [year]);
+    const { year: curY, month: curM } = yearMonthRef.current;
+    const ny = curM === 1 ? curY - 1 : curY;
+    const nm = curM === 1 ? 12 : curM - 1;
+    yearMonthRef.current = { year: ny, month: nm };
+    setYear(ny);
+    setMonth(nm);
+    setSelectedDate(`${ny}-${String(nm).padStart(2, '0')}-01`);
+  }, [setSelectedDate]);
 
   const handleNextMonth = useCallback(() => {
-    setMonth((m) => {
-      let ny = year;
-      let nm = m + 1;
-      if (m === 12) {
-        ny = year + 1;
-        nm = 1;
-        setYear(ny);
-      }
-      setSelectedDate(`${ny}-${String(nm).padStart(2, '0')}-01`);
-      return nm;
-    });
-  }, [year]);
+    const { year: curY, month: curM } = yearMonthRef.current;
+    const ny = curM === 12 ? curY + 1 : curY;
+    const nm = curM === 12 ? 1 : curM + 1;
+    yearMonthRef.current = { year: ny, month: nm };
+    setYear(ny);
+    setMonth(nm);
+    setSelectedDate(`${ny}-${String(nm).padStart(2, '0')}-01`);
+  }, [setSelectedDate]);
 
   if (!isLoaded) {
     return (
@@ -2061,7 +2214,8 @@ export const App: React.FC = () => {
             onTriggerSync={() => handleTriggerCloudSync()}
             onOpenSettings={openSettingsModal}
             onOpenWidgetHome={() => {
-              closeNavLayer(() => setIsWidgetMode(true));
+              setIsWidgetMode(true);
+              pushNavLayer('widget');
             }}
             onOpenShiftExport={() => openShiftExportModal(activePartner)}
             onOpenWelcomeImage={openWelcomeModal}
@@ -2146,7 +2300,14 @@ export const App: React.FC = () => {
             onOpenVoiceModal={() => openVoiceModal(selectedDate)}
             onOpenImageOcrModal={openImageOcrModal}
             onOpenWidgetModal={() => {
-              closeNavLayer(() => setIsWidgetMode(true));
+              if (stampDrawerOpenRef.current) {
+                setStampDrawerOpen(false);
+                setIsWidgetMode(true);
+                replaceNavLayer('widget');
+              } else {
+                setIsWidgetMode(true);
+                pushNavLayer('widget');
+              }
             }}
             onOpenTaskManager={openTaskManagerModal}
             onOpenShiftExport={() => openShiftExportModal(currentDrawerPartner)}
@@ -2159,6 +2320,8 @@ export const App: React.FC = () => {
       {/* 日付詳細＆シフト・予定・タスクモーダル */}
       {dayDetailOpen && (
         <ErrorBoundary
+          resetKey={selectedDate}
+          isModal
           fallbackTitle={`${selectedDate} の予定・シフト表示中に一時的なエラーが発生しました`}
           onReset={() =>
             closeNavLayer(() => {
@@ -2202,12 +2365,16 @@ export const App: React.FC = () => {
           metadata={store.metadata}
           onClose={() => closeNavLayer(() => setCategoryManagerOpen(false))}
           onUpdateCategories={(nextCats) => {
-            commitStore({
-              ...store,
+            const curStore = latestStoreRef.current;
+            const nowIso = new Date().toISOString();
+            void commitStore({
+              ...curStore,
               categories: nextCats,
+              categoriesUpdatedAt: nowIso,
             });
             if (
               filterCategory !== 'all' &&
+              filterCategory !== 'private' &&
               !nextCats.some((c) => c.id === filterCategory)
             ) {
               setFilterCategory('all');
@@ -2225,9 +2392,12 @@ export const App: React.FC = () => {
           metadata={store.metadata}
           onClose={() => closeNavLayer(() => setShiftManagerOpen(false))}
           onUpdateStamps={(nextStamps) => {
-            commitStore({
-              ...store,
+            const curStore = latestStoreRef.current;
+            const nowIso = new Date().toISOString();
+            void commitStore({
+              ...curStore,
               stamps: nextStamps,
+              stampsUpdatedAt: nowIso,
             });
             showToast('勤務リストを更新しました🎨');
           }}
@@ -2266,8 +2436,9 @@ export const App: React.FC = () => {
           store={store}
           onClose={() => closeNavLayer(() => setWidgetGuideOpen(false))}
           onOpenWidgetPreview={() => {
-            closeNavLayer(() => setWidgetGuideOpen(false));
+            setWidgetGuideOpen(false);
             setIsWidgetMode(true);
+            replaceNavLayer('widget');
           }}
         />
       )}
@@ -2290,11 +2461,12 @@ export const App: React.FC = () => {
           onUpdateGcalSyncConfig={(nextGcalCfg) => {
             setGcalSyncConfig(nextGcalCfg);
             saveGoogleCalendarSyncConfig(nextGcalCfg);
+            const curStore = latestStoreRef.current;
             const nowIso = new Date().toISOString();
-            commitStore({
-              ...store,
+            void commitStore({
+              ...curStore,
               metadata: {
-                ...store.metadata,
+                ...curStore.metadata,
                 googleCalendarSyncConfig: nextGcalCfg,
                 updatedAt: nowIso,
               },
@@ -2303,41 +2475,47 @@ export const App: React.FC = () => {
           onTriggerGoogleCalendarSync={handleTriggerGoogleCalendarSync}
           onUpdatePassword={async (newPass) => {
             setSessionPassword(newPass);
-            await saveLocalStore(store, newPass);
+            await saveLocalStore(latestStoreRef.current, newPass);
           }}
           onTriggerCloudSync={handleTriggerCloudSync}
           onMergeRemoteStore={(remoteStore, message) => {
-            const merged = mergeCalendarStores(store, remoteStore);
-            commitStore(merged, false);
+            const merged = mergeCalendarStores(latestStoreRef.current, remoteStore);
+            void commitStore(merged, false);
             showToast(message);
           }}
           onImportEvents={(events) => {
-            const nextEvents = { ...store.events };
+            const curStore = latestStoreRef.current;
+            const nextEvents = { ...curStore.events };
             for (const ev of events) {
               nextEvents[ev.id] = ev;
             }
-            commitStore({
-              ...store,
-              events: nextEvents,
-            });
+            void commitStore(
+              {
+                ...curStore,
+                events: nextEvents,
+              },
+              true,
+              true
+            );
           }}
           onClearAllEvents={handleClearAllEvents}
           onClearAllShifts={handleClearAllShifts}
           onClearAllData={handleClearAllData}
           onUpdatePartnerProfiles={(nameA, avatarA, nameB, avatarB) => {
+            const curStore = latestStoreRef.current;
             const nowIso = new Date().toISOString();
-            commitStore({
-              ...store,
+            void commitStore({
+              ...curStore,
               metadata: {
-                ...store.metadata,
+                ...curStore.metadata,
                 partners: {
                   partnerA: {
-                    ...store.metadata.partners.partnerA,
+                    ...curStore.metadata.partners.partnerA,
                     name: nameA,
                     avatar: avatarA,
                   },
                   partnerB: {
-                    ...store.metadata.partners.partnerB,
+                    ...curStore.metadata.partners.partnerB,
                     name: nameB,
                     avatar: avatarB,
                   },
@@ -2347,17 +2525,23 @@ export const App: React.FC = () => {
             });
           }}
           onUpdateWelcomeImageConfig={async (newCfg) => {
-            await saveDedicatedWelcomePhoto(newCfg);
-            const nextStore: CalendarDataStore = {
-              ...store,
-              metadata: {
-                ...store.metadata,
-                welcomeImageConfig: newCfg,
-                updatedAt: new Date().toISOString(),
-              },
-              updatedAt: new Date().toISOString(),
+            const nowIso = new Date().toISOString();
+            const stampedCfg: WelcomeImageConfig = {
+              ...newCfg,
+              updatedAt: nowIso,
             };
-            commitStore(nextStore);
+            await saveDedicatedWelcomePhoto(stampedCfg);
+            const curStore = latestStoreRef.current;
+            const nextStore: CalendarDataStore = {
+              ...curStore,
+              metadata: {
+                ...curStore.metadata,
+                welcomeImageConfig: stampedCfg,
+                updatedAt: nowIso,
+              },
+              updatedAt: nowIso,
+            };
+            void commitStore(nextStore);
             showToast('📸 お気に入り写真設定を保存しました✨');
           }}
           onPreviewWelcomeImage={(cfg) => {
@@ -2366,7 +2550,11 @@ export const App: React.FC = () => {
             pushNavLayer('welcomeModal');
           }}
           isShared={Boolean(savedSharedKeyword)}
-          onOpenSharedKeywordModal={openSharedKeywordModal}
+          onOpenSharedKeywordModal={() => {
+            setSettingsOpen(false);
+            setSharedKeywordModalOpen(true);
+            replaceNavLayer('sharedKeyword');
+          }}
           onUnshareCalendar={handleUnshareCalendar}
         />
       )}
@@ -2394,6 +2582,7 @@ export const App: React.FC = () => {
           categories={activeCategories}
           onClose={() => closeNavLayer(() => setTaskManagerOpen(false))}
           onSaveEvent={handleSaveEvent}
+          onSaveEvents={handleSaveEvents}
           onDeleteEvent={handleDeleteEvent}
           onToggleTaskComplete={handleToggleTaskComplete}
           onSyncGoogleTasks={() => {
@@ -2407,6 +2596,8 @@ export const App: React.FC = () => {
       {welcomeModalOpen && (
         <WelcomeImageModal
           store={store}
+          activePartner={activePartner}
+          isPreview={Boolean(welcomePreviewConfig)}
           config={
             welcomePreviewConfig ||
             store.metadata?.welcomeImageConfig || {
@@ -2422,25 +2613,30 @@ export const App: React.FC = () => {
               setWelcomePreviewConfig(null);
             })
           }
-          onOpenSettings={() =>
-            closeNavLayer(() => {
-              setWelcomeModalOpen(false);
-              setWelcomePreviewConfig(null);
-              openSettingsModal();
-            })
-          }
+          onOpenSettings={() => {
+            setWelcomeModalOpen(false);
+            setWelcomePreviewConfig(null);
+            setSettingsOpen(true);
+            replaceNavLayer('settings');
+          }}
           onUpdateConfig={async (newCfg) => {
-            await saveDedicatedWelcomePhoto(newCfg);
-            const nextStore: CalendarDataStore = {
-              ...store,
-              metadata: {
-                ...store.metadata,
-                welcomeImageConfig: newCfg,
-                updatedAt: new Date().toISOString(),
-              },
-              updatedAt: new Date().toISOString(),
+            const nowIso = new Date().toISOString();
+            const stampedCfg: WelcomeImageConfig = {
+              ...newCfg,
+              updatedAt: nowIso,
             };
-            commitStore(nextStore);
+            await saveDedicatedWelcomePhoto(stampedCfg);
+            const curStore = latestStoreRef.current;
+            const nextStore: CalendarDataStore = {
+              ...curStore,
+              metadata: {
+                ...curStore.metadata,
+                welcomeImageConfig: stampedCfg,
+                updatedAt: nowIso,
+              },
+              updatedAt: nowIso,
+            };
+            void commitStore(nextStore);
           }}
         />
       )}
@@ -2462,7 +2658,14 @@ export const App: React.FC = () => {
           activePartner={activePartner}
           onMarkSeenNow={handleMarkSeenNow}
           onSelectDate={(dateStr) => {
-            openDayDetailModal(dateStr, false);
+            setPartnerEventsModalOpen(false);
+            setSelectedDate(dateStr);
+            const [ny, nm] = dateStr.split('-').map(Number);
+            setYear(ny);
+            setMonth(nm);
+            setOpenEventFormDirectly(false);
+            setDayDetailOpen(true);
+            replaceNavLayer('dayDetail');
           }}
         />
       )}

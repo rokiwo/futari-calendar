@@ -50,9 +50,9 @@ export interface ParsedVoiceSchedule {
 export function convertKanjiNumbers(text: string): string {
   const kanjiDigits: Record<string, number> = {
     '〇': 0, '零': 0,
-    '一': 1, '壱': 1,
-    '二': 2, '弐': 2,
-    '三': 3, '参': 3,
+    '一': 1,
+    '二': 2,
+    '三': 3,
     '四': 4,
     '五': 5,
     '六': 6,
@@ -61,17 +61,35 @@ export function convertKanjiNumbers(text: string): string {
     '九': 9,
   };
 
-  let s = text;
+  const toArabic = (kanji: string): string => {
+    const m = kanji.match(/^([一二三四五六七八九])?十([一二三四五六七八九])?$/);
+    if (m) {
+      const t = m[1] ? kanjiDigits[m[1]] ?? 1 : 1;
+      const o = m[2] ? kanjiDigits[m[2]] ?? 0 : 0;
+      return String(t * 10 + o);
+    }
+    if (kanji.length === 1 && kanji in kanjiDigits) {
+      return String(kanjiDigits[kanji]);
+    }
+    return kanji;
+  };
 
-  // 「二十五」「三十五」「四十五」「十一」などの十を含む複合表現
-  s = s.replace(/([一二三四五六七八九])?十([一二三四五六七八九])?/g, (_, tens, ones) => {
-    const t = tens ? kanjiDigits[tens] ?? 1 : 1;
-    const o = ones ? kanjiDigits[ones] ?? 0 : 0;
-    return String(t * 10 + o);
-  });
-
-  // 単独の漢数字
-  s = s.replace(/[〇零一壱二弐三参四五六七八九]/g, (ch) => String(kanjiDigits[ch] ?? ch));
+  // 日付・時刻文脈（月・日・時・時間・分）の直前にある漢数字だけを算用数字に変換し、
+  // 「一時預かり」「二人でランチ」「一日中」「六本木」「十分」「参加」等の一般語の誤変換を防止
+  let s = text.replace(
+    /([一二三四五六七八九]?十[一二三四五六七八九]?|[〇零一二三四五六七八九])(?=(?:月|日(?!中|帰|ば|頃)|時間|時(?!(?:預|帰|停|保|的|払|金|代|計|期|点))|分(?!(?:か|け|担|配|別|野|割))))/g,
+    (match, numPart, offset, fullStr) => {
+      // 「十分」(形容動詞) は直前が時刻/数字でなく直後に「間・残業・遅・早」等が無い場合そのまま残す
+      if (numPart === '十' && fullStr[offset + match.length] === '分') {
+        const prevCh = offset > 0 ? fullStr[offset - 1] : '';
+        const afterNext = fullStr.slice(offset + match.length + 1);
+        if (!/[時\d]/.test(prevCh) && !/^(?:間|残業|休|遅|早|前|後|すぎ|過ぎ)/.test(afterNext)) {
+          return numPart;
+        }
+      }
+      return toArabic(numPart);
+    }
+  );
 
   return s;
 }
@@ -170,9 +188,31 @@ export function parseSpokenScheduleText(
   let targetYear = baseY;
   let targetMonth = baseM;
   let targetDay = baseD;
+  let hasExplicitYear = false;
+
+  const explicitYearMatch = text.match(/(\d{4})\s*年\s*/);
+  if (explicitYearMatch) {
+    targetYear = Number(explicitYearMatch[1]);
+    hasExplicitYear = true;
+    text = text.replace(explicitYearMatch[0], ' ');
+  }
 
   // 1. 日付表現の抽出
-  if (text.includes('今日') || text.includes('きょう')) {
+  const relWeekdayMatch = text.match(/(今週|来週|再来週)の?\s*([日月火水木金土])(?:曜日|曜)?\s*の?/);
+  const nextMonthMatch = text.match(/来月(?:の)?(?:\s*(\d{1,2})\s*日(?!間))?\s*の?/);
+  if (text.includes('一昨日') || text.includes('おととい')) {
+    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2);
+    targetYear = dt.getFullYear();
+    targetMonth = dt.getMonth() + 1;
+    targetDay = dt.getDate();
+    text = text.replace(/(一昨日|おととい)の?/g, ' ');
+  } else if (text.includes('昨日') || text.includes('きのう')) {
+    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    targetYear = dt.getFullYear();
+    targetMonth = dt.getMonth() + 1;
+    targetDay = dt.getDate();
+    text = text.replace(/(昨日|きのう)の?/g, ' ');
+  } else if (text.includes('今日') || text.includes('きょう')) {
     targetYear = now.getFullYear();
     targetMonth = now.getMonth() + 1;
     targetDay = now.getDate();
@@ -189,28 +229,68 @@ export function parseSpokenScheduleText(
     targetMonth = dt.getMonth() + 1;
     targetDay = dt.getDate();
     text = text.replace(/(明日|あした)の?/g, ' ');
+  } else if (relWeekdayMatch) {
+    const weekKw = relWeekdayMatch[1];
+    const dowMap: Record<string, number> = { 日: 0, 月: 1, 火: 2, 水: 3, 木: 4, 金: 5, 土: 6 };
+    const wantDow = dowMap[relWeekdayMatch[2]] ?? now.getDay();
+    const nowDowMon = (now.getDay() + 6) % 7;
+    const wantDowMon = (wantDow + 6) % 7;
+    const weekOffset = weekKw === '再来週' ? 2 : weekKw === '来週' ? 1 : 0;
+    const deltaDays = wantDowMon - nowDowMon + weekOffset * 7;
+    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() + deltaDays);
+    targetYear = dt.getFullYear();
+    targetMonth = dt.getMonth() + 1;
+    targetDay = dt.getDate();
+    text = text.replace(relWeekdayMatch[0], ' ');
+  } else if (/来週の?/.test(text)) {
+    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+    targetYear = dt.getFullYear();
+    targetMonth = dt.getMonth() + 1;
+    targetDay = dt.getDate();
+    text = text.replace(/来週の?/g, ' ');
+  } else if (nextMonthMatch) {
+    const nextMonthDt = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    targetYear = nextMonthDt.getFullYear();
+    targetMonth = nextMonthDt.getMonth() + 1;
+    if (nextMonthMatch[1]) {
+      targetDay = Math.max(1, Number(nextMonthMatch[1]));
+    }
+    text = text.replace(nextMonthMatch[0], ' ');
   } else {
     // 「11月24日」または「12月 1日」などの月日指定
-    const mdMatch = text.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*の?/);
+    const mdMatch = text.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*日(?!間)\s*の?/);
     if (mdMatch) {
       targetMonth = Math.min(12, Math.max(1, Number(mdMatch[1])));
-      targetDay = Math.min(31, Math.max(1, Number(mdMatch[2])));
+      targetDay = Math.max(1, Number(mdMatch[2]));
+      if (!hasExplicitYear) {
+        const candidate = new Date(targetYear, targetMonth - 1, targetDay);
+        const baseDt = new Date(baseY, baseM - 1, baseD);
+        if ((baseDt.getTime() - candidate.getTime()) / 86400000 > 180) {
+          targetYear += 1;
+        }
+      }
       text = text.replace(mdMatch[0], ' ');
     } else {
       // 「12月」のみ話した途中段階
       const mOnlyMatch = text.match(/(?:^|\s)(\d{1,2})\s*月\s*(?!日)/);
       if (mOnlyMatch) {
         targetMonth = Math.min(12, Math.max(1, Number(mOnlyMatch[1])));
+        if (!hasExplicitYear && targetMonth < baseM && baseM - targetMonth > 6) {
+          targetYear += 1;
+        }
         text = text.replace(mOnlyMatch[0], ' ');
       }
-      // 「1日」のみ
-      const dOnlyMatch = text.match(/(?:^|\s)(\d{1,2})\s*日\s*の?/);
+      // 「1日」のみ（「3日間」は除外）
+      const dOnlyMatch = text.match(/(?:^|\s)(\d{1,2})\s*日(?!間)\s*の?/);
       if (dOnlyMatch) {
-        targetDay = Math.min(31, Math.max(1, Number(dOnlyMatch[1])));
+        targetDay = Math.max(1, Number(dOnlyMatch[1]));
         text = text.replace(dOnlyMatch[0], ' ');
       }
     }
   }
+
+  const maxDayInTargetMonth = new Date(targetYear, targetMonth, 0).getDate();
+  targetDay = Math.min(maxDayInTargetMonth, Math.max(1, targetDay));
 
   const dateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(
     targetDay
@@ -264,7 +344,7 @@ export function parseSpokenScheduleText(
 
     text = text.replace(timeRange.matchedText, ' ');
   } else {
-    // 単一開始時刻「(午前|午後)?19時30分から」「14時に」
+    // 単一開始時刻「(午前|午後|朝|昼|夕方|夜)?19時30分から」「14時に」
     const formatHHMM = (h: number, m: number, isPm: boolean) => {
       let hh = h;
       if (isPm && hh < 12) hh += 12;
@@ -274,15 +354,17 @@ export function parseSpokenScheduleText(
     };
 
     const singleTimeMatch = text.match(
-      /(午前|午後)?\s*(\d{1,2})(?:時(?!間)|:)(\d{1,2})?分?\s*(?:から|に|より)?/
+      /(午前|午後|朝|昼|夕方|夜)?\s*(\d{1,2})(?:時(?!間)|:)(\d{1,2})?分?\s*(?:から|に|より)?/
     );
     if (singleTimeMatch) {
-      const isPm = singleTimeMatch[1] === '午後';
+      const prefix = singleTimeMatch[1] || '';
+      const isPm = prefix === '午後' || prefix === '夕方' || prefix === '夜';
       const h1 = Number(singleTimeMatch[2]);
       const m1 = singleTimeMatch[3] ? Number(singleTimeMatch[3]) : 0;
       startTime = formatHHMM(h1, m1, isPm);
-      const endH = Math.min(23, (isPm && h1 < 12 ? h1 + 12 : h1) + 1);
-      endTime = `${String(endH).padStart(2, '0')}:${String(m1).padStart(2, '0')}`;
+      const [startHNum, startMNum] = startTime.split(':').map(Number);
+      const endH = Math.min(23, startHNum + 1);
+      endTime = `${String(endH).padStart(2, '0')}:${String(startMNum).padStart(2, '0')}`;
       isAllDay = false;
       text = text.replace(singleTimeMatch[0], ' ');
     }
@@ -298,18 +380,37 @@ export function parseSpokenScheduleText(
     supportBadges.push('🍱お弁当あり');
     text = text.replace(/(お弁当あり|お弁当お願い|弁当いる)/g, ' ');
   }
-  if (/お迎えお願い|迎えに来て/.test(text)) {
+  if (/お迎えお願い|迎えに来て|送り迎え|送迎/.test(text)) {
     supportBadges.push('🚗お迎えお願い');
-    text = text.replace(/(お迎えお願い|迎えに来て)/g, ' ');
+    text = text.replace(/(お迎えお願い|迎えに来て|送り迎え|送迎)/g, ' ');
+  }
+  if (/お風呂(?:が|は)?(?:いらない|不要)|風呂(?:いらない|不要)/.test(text)) {
+    supportBadges.push('🛁お風呂不要');
+    text = text.replace(/(お風呂(?:が|は)?(?:いらない|不要)|風呂(?:いらない|不要))/g, ' ');
   }
 
   // 4. 「時間指定（◯時間◯分、◯◯分）」による残業・休出の追加解析（timeRangeで未抽出の場合）
   // 休日出勤の追加解析
   if (holidayWorkMinutes === undefined && isHolidayWorkIntent) {
-    const holMatch = text.match(/(?:休日出勤|休出)(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
-    if (holMatch) {
-      holidayWorkHours = parseFloat(holMatch[1]);
+    const holAfterDecMatch = text.match(/(?:休日出勤|休出)(?:を|は)?\s*(?:約)?\s*(\d+\.\d+)\s*(?:時間|h)/);
+    const holBeforeDecMatch = text.match(/(\d+\.\d+)\s*(?:時間|h)\s*(?:の)?(?:休日出勤|休出)/);
+    const holAfterIntMatch = text.match(/(?:休日出勤|休出)(?:を|は)?\s*(?:約)?\s*(?<![.\d])(\d+)\s*時間(?:(半)|(\d+)\s*分)?/);
+    const holBeforeIntMatch = text.match(/(?<![.\d])(\d+)\s*時間(?:(半)|(\d+)\s*分)?\s*(?:の)?(?:休日出勤|休出)/);
+    const holMinMatch = text.match(/(?:(?:休日出勤|休出)(?:を|は)?\s*(\d+)\s*分|(\d+)\s*分\s*(?:の)?(?:休日出勤|休出))/);
+
+    if (holAfterDecMatch || holBeforeDecMatch) {
+      const m = holAfterDecMatch || holBeforeDecMatch;
+      holidayWorkHours = parseFloat(m![1]);
       holidayWorkMinutes = Math.round(holidayWorkHours * 60);
+    } else if (holAfterIntMatch || holBeforeIntMatch) {
+      const m = holAfterIntMatch || holBeforeIntMatch;
+      const h = parseInt(m![1], 10);
+      const extraMin = m![2] ? 30 : m![3] ? parseInt(m![3], 10) : 0;
+      holidayWorkMinutes = h * 60 + extraMin;
+      holidayWorkHours = Math.round((holidayWorkMinutes / 60) * 10) / 10;
+    } else if (holMinMatch) {
+      holidayWorkMinutes = parseInt(holMinMatch[1] || holMinMatch[2], 10);
+      holidayWorkHours = Math.round((holidayWorkMinutes / 60) * 10) / 10;
     } else if (/休日出勤|休出/.test(text)) {
       holidayWorkHours = 8;
       holidayWorkMinutes = 480;
@@ -318,12 +419,17 @@ export function parseSpokenScheduleText(
 
   // 残業の解析（休日出勤ではない場合のみ実行）
   if (!isHolidayWorkIntent && holidayWorkMinutes === undefined && overtimeMinutes === undefined) {
-    const otMatch1 = text.match(/残業(?:を|は)?\s*(?:約)?\s*(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)/);
-    const otMatch2 = text.match(/(\d+(?:\.\d+)?)\s*(?:時間半|時間|h)\s*(?:の)?残業/);
-    const otHoursAndMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(\d+)\s*時間(?:半|(\d+)\s*分)?(?:の残業)?/);
-    const otMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(\d+)\s*分(?:の残業)?/);
+    const otDecMatch1 = text.match(/残業(?:を|は)?\s*(?:約)?\s*(\d+\.\d+)\s*(?:時間|h)/);
+    const otDecMatch2 = text.match(/(\d+\.\d+)\s*(?:時間|h)\s*(?:の)?残業/);
+    const otMatch1 = text.match(/残業(?:を|は)?\s*(?:約)?\s*(?<![.\d])(\d+)\s*(?:時間半|時間|h)/);
+    const otMatch2 = text.match(/(?<![.\d])(\d+)\s*(?:時間半|時間|h)\s*(?:の)?残業/);
+    const otHoursAndMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(?<![.\d])(\d+)\s*時間(?:半|(\d+)\s*分)?(?:の残業)?/);
+    const otMinutesMatch = text.match(/(?:残業(?:を|は)?\s*)?(?<![.\d])(\d+)\s*分(?:の残業)?/);
 
-    if (text.includes('1時間半残業') || text.includes('残業1時間半') || text.includes('残業一時間半')) {
+    if (otDecMatch1 || otDecMatch2) {
+      const h = parseFloat((otDecMatch1 || otDecMatch2)![1]);
+      overtimeMinutes = Math.round(h * 60);
+    } else if (text.includes('1時間半残業') || text.includes('残業1時間半') || text.includes('残業一時間半')) {
       overtimeMinutes = 90;
     } else if (text.includes('2時間半残業') || text.includes('残業2時間半')) {
       overtimeMinutes = 150;
@@ -366,12 +472,14 @@ export function parseSpokenScheduleText(
     overtimeEndTime = undefined;
   }
 
-  // 5. 対象パートナーの自動推測（「夫が」「妻が」「パパが」「ママが」）
+  // 5. 対象パートナーの自動推測（「夫が」「妻が」「パパが」「ママが」・夫婦/大丈夫/彼女は除外配慮）
   let targetPartner: PartnerId | undefined;
-  if (/夫|パパ|旦那|だんな|彼/.test(text)) {
-    targetPartner = 'partnerA';
+  if (/夫婦/.test(text)) {
+    targetPartner = undefined;
   } else if (/妻|ママ|奥さん|嫁|彼女/.test(text)) {
     targetPartner = 'partnerB';
+  } else if (/パパ|旦那|だんな|彼(?!女)|(?<![大工夫])夫/.test(text)) {
+    targetPartner = 'partnerA';
   }
 
   // 6. カテゴリの自動推測

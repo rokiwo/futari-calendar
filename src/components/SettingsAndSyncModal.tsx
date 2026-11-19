@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
   Cloud,
@@ -36,6 +36,8 @@ import {
   testGoogleCalendarGasConnection,
 } from '../utils/googleCalendar';
 import { createNewSecretGist } from '../utils/storage';
+import { getLocalTodayStr } from '../utils/presets';
+import { getDefaultCloudCredentials } from '../utils/defaultCloud';
 
 interface SettingsAndSyncModalProps {
   store: CalendarDataStore;
@@ -191,20 +193,14 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
   const handleSaveAndSyncGcal = async () => {
     setStatusMsg(null);
-    const hasAnyUrl = Boolean(partnerAGasUrl.trim() || partnerBGasUrl.trim());
-    const nextCfg: GoogleCalendarSyncConfig = {
-      ...buildCurrentGcalConfig(),
-      enabled: hasAnyUrl ? true : gcalEnabled,
-    };
-    if (hasAnyUrl && !gcalEnabled) {
-      setGcalEnabled(true);
-    }
+    const nextCfg = buildCurrentGcalConfig();
+    const normalizedHasUrl = Boolean(nextCfg.partnerAGasUrl || nextCfg.partnerBGasUrl);
     onUpdateGcalSyncConfig(nextCfg);
 
-    if (!nextCfg.enabled || !hasAnyUrl) {
+    if (!nextCfg.enabled || !normalizedHasUrl) {
       setStatusMsg({
         type: 'ok',
-        text: 'Googleカレンダー連携設定を保存しました✨（自動同期を開始するにはGAS WebアプリURLを入力してください）',
+        text: 'Googleカレンダー連携設定を保存しました✨（自動同期を開始するにはGAS WebアプリURLの入力と自動同期ONが必要です）',
       });
       return;
     }
@@ -272,16 +268,70 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   const jsonRestoreInputRef = useRef<HTMLInputElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    setGcalEnabled(gcalSyncConfig.enabled ?? false);
+    setGcalAutoSync(gcalSyncConfig.autoSync ?? true);
+    setPartnerAGasUrl(gcalSyncConfig.partnerAGasUrl || '');
+    setPartnerACalendarId(gcalSyncConfig.partnerACalendarId || 'primary');
+    setPartnerBGasUrl(gcalSyncConfig.partnerBGasUrl || '');
+    setPartnerBCalendarId(gcalSyncConfig.partnerBCalendarId || 'primary');
+    setSharedCalendarId(gcalSyncConfig.sharedCalendarId || '');
+  }, [gcalSyncConfig]);
+
+  useEffect(() => {
+    setMode(syncConfig.mode || 'gist');
+    setGithubToken(syncConfig.githubToken || '');
+    setGistId(syncConfig.gistId || '');
+    setRepoOwner(syncConfig.repoOwner || '');
+    setRepoName(syncConfig.repoName || 'futari-calendar');
+    setRepoBranch(syncConfig.repoBranch || 'main');
+    setRepoFilePath(syncConfig.repoFilePath || 'data/calendar-encrypted.json');
+    setAutoSync(syncConfig.autoSync ?? true);
+  }, [syncConfig]);
+
+  useEffect(() => {
+    setNameA(store.metadata.partners.partnerA.name);
+    setAvatarA(store.metadata.partners.partnerA.avatar);
+    setNameB(store.metadata.partners.partnerB.name);
+    setAvatarB(store.metadata.partners.partnerB.avatar);
+  }, [
+    store.metadata.partners.partnerA.name,
+    store.metadata.partners.partnerA.avatar,
+    store.metadata.partners.partnerB.name,
+    store.metadata.partners.partnerB.avatar,
+  ]);
+
+  useEffect(() => {
+    const wc = store.metadata.welcomeImageConfig;
+    if (!wc) return;
+    setWelcomeEnabled(wc.enabled);
+    setWelcomeDataUrl(wc.dataUrl || '');
+    setWelcomeMessage(wc.message || '今日も一日お疲れ様💕');
+    setWelcomeMode(wc.mode || 'always');
+  }, [store.metadata.welcomeImageConfig]);
+
   const handleSelectWelcomeImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
+    reader.onerror = () => {
+      setStatusMsg({
+        type: 'err',
+        text: '画像の読み込みに失敗しました。別の写真でお試しください',
+      });
+    };
     reader.onload = (event) => {
       const rawDataUrl = event.target?.result as string;
       if (!rawDataUrl) return;
 
       const img = new Image();
+      img.onerror = () => {
+        setStatusMsg({
+          type: 'err',
+          text: '画像のデコードに失敗しました（JPEG/PNG等の画像ファイルをお選びください）',
+        });
+      };
       img.onload = () => {
         const maxDim = 1200;
         let width = img.width;
@@ -312,6 +362,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
       img.src = rawDataUrl;
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleSaveWelcomeConfig = () => {
@@ -447,7 +498,9 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
     const repoMatch = text.match(/Repo:\s*([^\s/]+)\/([^\s]+)/);
     const tokenMatch = text.match(/GitHub Token:\s*([a-zA-Z0-9_]+)/);
 
-    const nextPass = passMatch ? passMatch[1].trim() : passwordInput.trim();
+    const nextPass = passMatch
+      ? passMatch[1].trim()
+      : passwordInput.trim() || currentPassword || getDefaultCloudCredentials().defaultPass;
     const nextToken = tokenMatch ? tokenMatch[1].trim() : githubToken.trim();
     const nextGist = gistMatch ? gistMatch[1].trim() : gistId.trim();
     const nextMode: 'gist' | 'repo' = repoMatch && !gistMatch ? 'repo' : 'gist';
@@ -509,8 +562,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
   // .ics エクスポート実行（iPhone/Android/PCのカレンダーで確実に開ける方式）
   const handleExportIcs = async () => {
-    const icsText = exportToIcs(store, icsExportTarget);
-    const filename = `futarical-${icsExportTarget}-${new Date().toISOString().slice(0, 10)}.ics`;
+    const icsText = exportToIcs(store, icsExportTarget, activePartner);
+    const filename = `futarical-${icsExportTarget}-${getLocalTodayStr()}.ics`;
     await openOrShareIcsOnDevice(icsText, filename);
     setStatusMsg({
       type: 'ok',
@@ -547,7 +600,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
       let contentStr = '';
       let suffix = 'plain';
       if (encrypt) {
-        const pass = passwordInput.trim() || currentPassword;
+        const pass =
+          passwordInput.trim() || currentPassword || getDefaultCloudCredentials().defaultPass;
         if (!pass) {
           setStatusMsg({
             type: 'err',
@@ -566,9 +620,12 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `futarical-backup-${suffix}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `futarical-backup-${suffix}-${getLocalTodayStr()}.json`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(url), 3000);
       setStatusMsg({
         type: 'ok',
         text: `JSONバックアップファイル（${encrypt ? 'AES-GCM暗号化済' : '標準JSON'}）を保存しました💾`,
@@ -588,7 +645,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
       let restoredStore: CalendarDataStore;
       if (parsed && parsed.app === 'FutariCal' && parsed.ciphertext) {
-        const pass = passwordInput.trim() || currentPassword;
+        const pass =
+          passwordInput.trim() || currentPassword || getDefaultCloudCredentials().defaultPass;
         if (!pass) {
           setStatusMsg({
             type: 'err',
@@ -762,7 +820,6 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        onClose();
                         onOpenSharedKeywordModal?.();
                       }}
                       className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-rose-400 text-white font-extrabold text-xs shadow-xs hover:opacity-95 flex items-center gap-1.5"
@@ -775,7 +832,6 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          onClose();
                           onOpenSharedKeywordModal?.();
                         }}
                         className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs flex items-center gap-1"
@@ -927,6 +983,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!window.confirm('登録済みのシフトデータ（残業・休出・バイト含む）をすべて削除しますか？')) return;
                       onClearAllShifts();
                       setStatusMsg({
                         type: 'ok',
@@ -941,6 +998,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!window.confirm('登録済みの予定・タスクデータをすべて削除しますか？')) return;
                       onClearAllEvents();
                       setStatusMsg({
                         type: 'ok',
@@ -955,6 +1013,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!window.confirm('すべてのシフトデータと予定・タスクデータを一括削除しますか？（この操作は取り消せません）')) return;
                       onClearAllData();
                       setStatusMsg({
                         type: 'ok',
@@ -1001,6 +1060,19 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     </button>
                   </div>
 
+                  <div>
+                    <label className="block font-bold text-stone-600 mb-1">
+                      🔐 GitHub Token（任意：独自保存先を使う場合）
+                    </label>
+                    <input
+                      type="password"
+                      value={githubToken}
+                      onChange={(e) => setGithubToken(e.target.value)}
+                      placeholder="ghp_...（通常は空欄のままで自動共有）"
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-mono text-xs"
+                    />
+                  </div>
+
                   {mode === 'gist' && (
                     <div className="flex gap-2">
                       <input
@@ -1019,6 +1091,39 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                         <Sparkles className="w-3.5 h-3.5" />
                         <span>新規Gist作成</span>
                       </button>
+                    </div>
+                  )}
+
+                  {mode === 'repo' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={repoOwner}
+                        onChange={(e) => setRepoOwner(e.target.value)}
+                        placeholder="GitHub ユーザー/組織名 (owner)"
+                        className="px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-mono text-xs"
+                      />
+                      <input
+                        type="text"
+                        value={repoName}
+                        onChange={(e) => setRepoName(e.target.value)}
+                        placeholder="リポジトリ名 (futari-calendar)"
+                        className="px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-mono text-xs"
+                      />
+                      <input
+                        type="text"
+                        value={repoBranch}
+                        onChange={(e) => setRepoBranch(e.target.value)}
+                        placeholder="ブランチ (main)"
+                        className="px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-mono text-xs"
+                      />
+                      <input
+                        type="text"
+                        value={repoFilePath}
+                        onChange={(e) => setRepoFilePath(e.target.value)}
+                        placeholder="ファイルパス (data/calendar-encrypted.json)"
+                        className="px-3 py-2 rounded-xl border border-stone-200 bg-[#FFFBF7] font-mono text-xs"
+                      />
                     </div>
                   )}
 
@@ -1348,7 +1453,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     type="button"
                     onClick={async () => {
                       const icsText = generatePartnerNotificationIcs(store, 'partnerA');
-                      const fname = `futarical-notify-partnerA-${new Date().toISOString().slice(0, 10)}.ics`;
+                      const fname = `futarical-notify-partnerA-${getLocalTodayStr()}.ics`;
                       await openOrShareIcsOnDevice(icsText, fname);
                       setStatusMsg({
                         type: 'ok',
@@ -1368,7 +1473,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     type="button"
                     onClick={async () => {
                       const icsText = generatePartnerNotificationIcs(store, 'partnerB');
-                      const fname = `futarical-notify-partnerB-${new Date().toISOString().slice(0, 10)}.ics`;
+                      const fname = `futarical-notify-partnerB-${getLocalTodayStr()}.ics`;
                       await openOrShareIcsOnDevice(icsText, fname);
                       setStatusMsg({
                         type: 'ok',
@@ -1501,6 +1606,15 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     <span>📄 標準JSONバックアップ保存</span>
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={() => jsonRestoreInputRef.current?.click()}
+                    className="px-3.5 py-2.5 rounded-xl bg-[#E2F9FC] hover:bg-[#56CFE1] text-[#136370] hover:text-white font-extrabold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>📂 JSONバックアップから復元</span>
+                  </button>
+
                   <input
                     ref={jsonRestoreInputRef}
                     type="file"
@@ -1545,6 +1659,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!window.confirm('登録済みのすべてのシフトデータを削除しますか？')) return;
                       onClearAllShifts();
                       setStatusMsg({
                         type: 'ok',
@@ -1559,6 +1674,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!window.confirm('登録済みのすべての予定・タスクデータを削除しますか？')) return;
                       onClearAllEvents();
                       setStatusMsg({
                         type: 'ok',
@@ -1573,6 +1689,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!window.confirm('すべてのシフトデータと予定・タスクデータを一括削除しますか？（この操作は取り消せません）')) return;
                       onClearAllData();
                       setStatusMsg({
                         type: 'ok',

@@ -275,17 +275,16 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         </div>
 
         {/* 2段目：ふたりの集計（残業時間・休一致・予定確認）※上段に更新・設定が移ったため広々と重ならずに表示 */}
-        <div className="flex items-center justify-between gap-1 sm:gap-2 overflow-x-auto no-scrollbar py-0.5">
-          {/* 左側：⏱️残業時間 ＆ ✨休一致 ＆ 💌パートナー予定 ＆ ✅既読 */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* ⏱️ 今月の残業時間バッジ */}
-            {/* ⏱️ 今月の残業時間バッジ（操作中のパートナーのみ表示） */}
-            <div className="relative shrink-0">
-              {(() => {
-                const currentPartner = metadata.partners[activePartner];
-                const activeSum = overtimeSummary[activePartner];
-                return (
-                  <>
+        <div className="relative">
+          <div className="flex items-center justify-between gap-1 sm:gap-2 overflow-x-auto no-scrollbar py-0.5">
+            {/* 左側：⏱️残業時間 ＆ ✨休一致 ＆ 💌パートナー予定 ＆ ✅既読 */}
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+              {/* ⏱️ 今月の残業時間バッジ（操作中のパートナーのみ表示） */}
+              <div className="shrink-0">
+                {(() => {
+                  const currentPartner = metadata.partners[activePartner];
+                  const activeSum = overtimeSummary[activePartner];
+                  return (
                     <button
                       type="button"
                       onClick={() => {
@@ -306,233 +305,244 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                         </span>
                       )}
                     </button>
+                  );
+                })()}
+              </div>
 
-                    {showOvertimePopup && (
-                      <div className="absolute left-0 mt-1.5 w-72 sm:w-80 bg-white rounded-2xl shadow-xl border-2 border-[#FFE28A] p-3 z-50 animate-pop text-xs space-y-2">
-                        <div className="flex items-center justify-between pb-1 border-b border-stone-100">
-                          <span className="font-extrabold text-[#8A5A00] flex items-center gap-1">
-                            <Timer className="w-4 h-4 text-[#FFB703]" />
-                            {month}月の残業・休出（{currentPartner.name}）
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setShowOvertimePopup(false)}
-                            className="text-stone-400 hover:text-stone-600 font-bold px-1"
-                          >
-                            ✕
-                          </button>
-                        </div>
+              {/* ✨今月のお休み一致バッジ */}
+              <div className="shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowHolidayPopup(!showHolidayPopup);
+                    setShowOvertimePopup(false);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FFE5EC] hover:bg-[#FFD1DC] border border-[#FFC2D1] text-[#9E2A47] text-xs font-black shadow-2xs active:scale-95 transition-all"
+                  title="ふたり共通のお休み日"
+                >
+                  <Sparkles className="w-3 h-3 text-[#FF8FAB] shrink-0" />
+                  <span>休一致</span>
+                  <span className="px-1.5 py-0.2 rounded-full bg-white text-[#D63864] font-black text-xs">
+                    {matchedHolidays.length}
+                  </span>
+                </button>
+              </div>
 
-                        {/* 現在操作中のパートナーのカードのみ表示 */}
-                        <div className="p-2.5 rounded-xl bg-[#FFFBF7] border border-stone-200/80 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="font-extrabold text-stone-800 flex items-center gap-1">
-                              <span>{currentPartner.avatar}</span>
-                              <span>{currentPartner.name}</span>
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-[#FFF6D6] text-[#8A5A00] font-black text-xs">
-                              確定 {activeSum.totalExtraMinutes}分
-                              {activeSum.totalExtraMinutes >= 60 && ` (${activeSum.totalExtraFormatted})`}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap gap-2 text-[11px] text-stone-600 font-bold">
-                            <span>
-                              ⏱️ 通常残業: {activeSum.overtimeMinutes}分
-                              {activeSum.overtimeMinutes >= 60 && ` (${activeSum.overtimeFormatted})`}
-                            </span>
-                            <span>
-                              💼 休日出勤: {activeSum.holidayWorkMinutes}分
-                              {activeSum.holidayWorkMinutes >= 60 && ` (${activeSum.holidayWorkFormatted})`}
-                            </span>
-                            <span>🏪 バイト: {activeSum.partTimeCount}回</span>
-                          </div>
+              {/* 💌 パートナーが打った予定確認ボタン */}
+              {onOpenPartnerEvents && (
+                <button
+                  type="button"
+                  onClick={onOpenPartnerEvents}
+                  className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-xs font-black shadow-2xs active:scale-95 transition-all border shrink-0 ${
+                    partnerNewCount > 0
+                      ? 'bg-gradient-to-r from-rose-500 to-[#FF8FAB] text-white border-rose-300 ring-2 ring-rose-200 animate-pulse'
+                      : 'bg-white hover:bg-stone-50 text-stone-700 border-stone-200'
+                  }`}
+                  title={`${otherPartner.name}が打った予定・シフトを確認`}
+                >
+                  <span>💌</span>
+                  <span className="hidden min-[370px]:inline">{otherPartner.name}の</span>
+                  <span>予定</span>
+                  {partnerNewCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-white text-rose-600 text-[10px] font-black">
+                      {partnerNewCount}
+                    </span>
+                  )}
+                </button>
+              )}
 
-                          {/* 💡 仮・見込み予定セクション */}
-                          {activeSum.tentativeExtraMinutes > 0 && (
-                            <div className="p-2 rounded-xl bg-[#FFF6D6]/70 border border-[#FFE28A] space-y-1">
-                              <div className="flex items-center justify-between font-extrabold text-[#8A5A00] text-[11px]">
-                                <span className="flex items-center gap-1">
-                                  <span>💡 仮・見込み残業:</span>
-                                </span>
-                                <span className="font-black text-rose-600">
-                                  +{activeSum.tentativeExtraMinutes}分 ({activeSum.tentativeExtraFormatted})
-                                </span>
-                              </div>
-                              <div className="flex flex-wrap gap-1">
-                                {activeSum.tentativeEntries.map((ten) => (
-                                  <button
-                                    key={ten.id}
-                                    type="button"
-                                    onClick={() => {
-                                      onSelectDate(ten.date);
-                                      setShowOvertimePopup(false);
-                                    }}
-                                    className="px-1.5 py-0.5 rounded bg-white border border-[#FFD0BF] text-[10px] font-bold text-[#9C3D1C] hover:border-rose-400"
-                                  >
-                                    {Number(ten.date.split('-')[2])}日(仮{ten.isTentativeHolidayWork ? '休出' : '残業'}{ten.holidayWorkMinutes || ten.overtimeMinutes}分)
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {activeSum.entries.length > 0 && (
-                            <div className="flex flex-wrap gap-1 pt-1 border-t border-stone-100">
-                              {activeSum.entries.map((en) => {
-                                const dayN = Number(en.date.split('-')[2]);
-                                const hwMin = getShiftHolidayWorkMinutes(en);
-                                let otMin = getShiftOvertimeMinutes(en);
-                                if (hwMin > 0 && otMin > 0 && (en.isHolidayWork || en.stampId === 'shift_hol_work' || otMin === hwMin)) {
-                                  otMin = 0; // 重複時は休出優先
-                                }
-
-                                const labelParts: string[] = [];
-                                if (hwMin > 0) labelParts.push(`休出${hwMin}分`);
-                                if (otMin > 0) labelParts.push(`+${otMin}分`);
-                                if (labelParts.length === 0 && (en.subCustomLabel || en.subStampId || en.stampId === 'shift_part')) {
-                                  labelParts.push('バイト');
-                                }
-
-                                return (
-                                  <button
-                                    key={en.id}
-                                    type="button"
-                                    onClick={() => {
-                                      onSelectDate(en.date);
-                                      setShowOvertimePopup(false);
-                                    }}
-                                    className="px-1.5 py-0.5 rounded-lg bg-white border border-stone-200 text-[10px] font-bold text-stone-700 hover:border-[#FF8FAB]"
-                                  >
-                                    {dayN}日({labelParts.join(' / ') || '予定'})
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+              {/* ✅ すべて既読にするクイックボタン（新着がある時だけヘッダーにも即座に表示！） */}
+              {partnerNewCount > 0 && (
+                <button
+                  type="button"
+                  onClick={onMarkSeenNow}
+                  className="hidden min-[420px]:flex items-center gap-0.5 px-2 py-1 rounded-xl bg-white hover:bg-emerald-50 text-emerald-600 border border-emerald-300 text-[11px] font-black shadow-2xs active:scale-95 transition-all shrink-0"
+                  title="相手の新着予定をすべて既読にする"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>既読</span>
+                </button>
+              )}
             </div>
 
-            {/* ✨今月のお休み一致バッジ */}
-            <div className="relative shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowHolidayPopup(!showHolidayPopup);
-                  setShowOvertimePopup(false);
-                }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FFE5EC] hover:bg-[#FFD1DC] border border-[#FFC2D1] text-[#9E2A47] text-xs font-black shadow-2xs active:scale-95 transition-all"
-                title="ふたり共通のお休み日"
-              >
-                <Sparkles className="w-3 h-3 text-[#FF8FAB] shrink-0" />
-                <span>休一致</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-white text-[#D63864] font-black text-xs">
-                  {matchedHolidays.length}
-                </span>
-              </button>
+            {/* 右側：🔑 合言葉で共有ボタン（未共有の場合にのみ表示） */}
+            {!isShared && onOpenSharedKeywordModal && (
+              <div className="flex items-center gap-1 shrink-0 pl-1">
+                <button
+                  type="button"
+                  onClick={onOpenSharedKeywordModal}
+                  className="px-2 py-1 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[10px] sm:text-xs font-black shadow-xs flex items-center gap-1 active:scale-95 animate-pulse shrink-0"
+                  title="合言葉を入力してカレンダーを共有"
+                >
+                  <span>🔑</span>
+                  <span>共有</span>
+                </button>
+              </div>
+            )}
+          </div>
 
-              {showHolidayPopup && (
-                <div className="absolute left-0 mt-1.5 w-64 bg-white rounded-2xl shadow-xl border-2 border-[#FFE5EC] p-3 z-50 animate-pop">
-                  <div className="flex items-center justify-between mb-2 pb-1 border-b border-stone-100">
-                    <span className="text-xs font-extrabold text-[#9E2A47] flex items-center gap-1">
-                      <Heart className="w-3.5 h-3.5 fill-[#FF8FAB] text-[#FF8FAB]" />
-                      {month}月のふたり休日一致 ({matchedHolidays.length}日)
+          {/* オーバーレイドロップダウン（overflow-x-autoの外に出して見切れ・クリップを防止） */}
+          {showOvertimePopup && (() => {
+            const currentPartner = metadata.partners[activePartner];
+            const activeSum = overtimeSummary[activePartner];
+            return (
+              <div className="absolute left-0 right-0 sm:right-auto mt-1.5 w-full sm:w-80 bg-white rounded-2xl shadow-xl border-2 border-[#FFE28A] p-3 z-50 animate-pop text-xs space-y-2">
+                <div className="flex items-center justify-between pb-1 border-b border-stone-100">
+                  <span className="font-extrabold text-[#8A5A00] flex items-center gap-1">
+                    <Timer className="w-4 h-4 text-[#FFB703]" />
+                    {month}月の残業・休出（{currentPartner.name}）
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowOvertimePopup(false)}
+                    className="text-stone-400 hover:text-stone-600 font-bold px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-[#FFFBF7] border border-stone-200/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-stone-800 flex items-center gap-1">
+                      <span>{currentPartner.avatar}</span>
+                      <span>{currentPartner.name}</span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowHolidayPopup(false)}
-                      className="text-stone-400 hover:text-stone-600 text-xs font-bold px-1"
-                    >
-                      ✕
-                    </button>
+                    <span className="px-2 py-0.5 rounded-full bg-[#FFF6D6] text-[#8A5A00] font-black text-xs">
+                      確定 {activeSum.totalExtraMinutes}分
+                      {activeSum.totalExtraMinutes >= 60 && ` (${activeSum.totalExtraFormatted})`}
+                    </span>
                   </div>
-                  {matchedHolidays.length === 0 ? (
-                    <p className="text-xs text-stone-500 py-2 text-center">
-                      まだ今月の2人共通のお休み日がありません🐾
-                    </p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
-                      {matchedHolidays.map((dateStr) => {
-                        const dayNum = Number(dateStr.split('-')[2]);
-                        const dt = new Date(
-                          Number(dateStr.split('-')[0]),
-                          Number(dateStr.split('-')[1]) - 1,
-                          dayNum
-                        );
-                        const w = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
+                  <div className="flex flex-wrap gap-2 text-[11px] text-stone-600 font-bold">
+                    <span>
+                      ⏱️ 通常残業: {activeSum.overtimeMinutes}分
+                      {activeSum.overtimeMinutes >= 60 && ` (${activeSum.overtimeFormatted})`}
+                    </span>
+                    <span>
+                      💼 休日出勤: {activeSum.holidayWorkMinutes}分
+                      {activeSum.holidayWorkMinutes >= 60 && ` (${activeSum.holidayWorkFormatted})`}
+                    </span>
+                    <span>🏪 バイト: {activeSum.partTimeCount}回</span>
+                  </div>
+
+                  {activeSum.tentativeExtraMinutes > 0 && (
+                    <div className="p-2 rounded-xl bg-[#FFF6D6]/70 border border-[#FFE28A] space-y-1">
+                      <div className="flex items-center justify-between font-extrabold text-[#8A5A00] text-[11px]">
+                        <span className="flex items-center gap-1">
+                          <span>💡 仮・見込み残業:</span>
+                        </span>
+                        <span className="font-black text-rose-600">
+                          +{activeSum.tentativeExtraMinutes}分 ({activeSum.tentativeExtraFormatted})
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {activeSum.tentativeEntries.map((ten) => {
+                          const hw = getShiftHolidayWorkMinutes(ten);
+                          const ot = getShiftOvertimeMinutes(ten);
+                          const isTentHw = Boolean(
+                            hw > 0 && (ten.isTentativeHolidayWork || ten.holidayWorkStatus === 'tentative')
+                          );
+                          const dispMin = isTentHw ? hw : ot > 0 ? ot : hw;
+                          return (
+                            <button
+                              key={ten.id}
+                              type="button"
+                              onClick={() => {
+                                onSelectDate(ten.date);
+                                setShowOvertimePopup(false);
+                              }}
+                              className="px-1.5 py-0.5 rounded bg-white border border-[#FFD0BF] text-[10px] font-bold text-[#9C3D1C] hover:border-rose-400"
+                            >
+                              {Number(ten.date.split('-')[2])}日(仮{isTentHw ? '休出' : '残業'}{dispMin}分)
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {activeSum.entries.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1 border-t border-stone-100">
+                      {activeSum.entries.map((en) => {
+                        const dayN = Number(en.date.split('-')[2]);
+                        const hwMin = getShiftHolidayWorkMinutes(en);
+                        let otMin = getShiftOvertimeMinutes(en);
+                        if (hwMin > 0 && otMin > 0 && (en.isHolidayWork || en.stampId === 'shift_hol_work' || otMin === hwMin)) {
+                          otMin = 0;
+                        }
+
+                        const labelParts: string[] = [];
+                        if (hwMin > 0) labelParts.push(`休出${hwMin}分`);
+                        if (otMin > 0) labelParts.push(`+${otMin}分`);
+                        if (labelParts.length === 0 && (en.subCustomLabel || en.subStampId || en.stampId === 'shift_part')) {
+                          labelParts.push('バイト');
+                        }
+
                         return (
                           <button
-                            key={dateStr}
+                            key={en.id}
                             type="button"
                             onClick={() => {
-                              onSelectDate(dateStr);
-                              setShowHolidayPopup(false);
+                              onSelectDate(en.date);
+                              setShowOvertimePopup(false);
                             }}
-                            className="px-2.5 py-1 rounded-xl bg-[#FFE5EC]/70 hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-xs font-extrabold"
+                            className="px-1.5 py-0.5 rounded-lg bg-white border border-stone-200 text-[10px] font-bold text-stone-700 hover:border-[#FF8FAB]"
                           >
-                            💕 {month}/{dayNum}({w})
+                            {dayN}日({labelParts.join(' / ') || '予定'})
                           </button>
                         );
                       })}
                     </div>
                   )}
                 </div>
+              </div>
+            );
+          })()}
+
+          {showHolidayPopup && (
+            <div className="absolute left-0 right-0 sm:right-auto mt-1.5 w-full sm:w-64 bg-white rounded-2xl shadow-xl border-2 border-[#FFE5EC] p-3 z-50 animate-pop">
+              <div className="flex items-center justify-between mb-2 pb-1 border-b border-stone-100">
+                <span className="text-xs font-extrabold text-[#9E2A47] flex items-center gap-1">
+                  <Heart className="w-3.5 h-3.5 fill-[#FF8FAB] text-[#FF8FAB]" />
+                  {month}月のふたり休日一致 ({matchedHolidays.length}日)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowHolidayPopup(false)}
+                  className="text-stone-400 hover:text-stone-600 text-xs font-bold px-1"
+                >
+                  ✕
+                </button>
+              </div>
+              {matchedHolidays.length === 0 ? (
+                <p className="text-xs text-stone-500 py-2 text-center">
+                  まだ今月の2人共通のお休み日がありません🐾
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
+                  {matchedHolidays.map((dateStr) => {
+                    const dayNum = Number(dateStr.split('-')[2]);
+                    const dt = new Date(
+                      Number(dateStr.split('-')[0]),
+                      Number(dateStr.split('-')[1]) - 1,
+                      dayNum
+                    );
+                    const w = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
+                    return (
+                      <button
+                        key={dateStr}
+                        type="button"
+                        onClick={() => {
+                          onSelectDate(dateStr);
+                          setShowHolidayPopup(false);
+                        }}
+                        className="px-2.5 py-1 rounded-xl bg-[#FFE5EC]/70 hover:bg-[#FF8FAB] text-[#9E2A47] hover:text-white text-xs font-extrabold"
+                      >
+                        💕 {month}/{dayNum}({w})
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            </div>
-
-            {/* 💌 パートナーが打った予定確認ボタン */}
-            {onOpenPartnerEvents && (
-              <button
-                type="button"
-                onClick={onOpenPartnerEvents}
-                className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-xl text-xs font-black shadow-2xs active:scale-95 transition-all border shrink-0 ${
-                  partnerNewCount > 0
-                    ? 'bg-gradient-to-r from-rose-500 to-[#FF8FAB] text-white border-rose-300 ring-2 ring-rose-200 animate-pulse'
-                    : 'bg-white hover:bg-stone-50 text-stone-700 border-stone-200'
-                }`}
-                title={`${otherPartner.name}が打った予定・シフトを確認`}
-              >
-                <span>💌</span>
-                <span className="hidden min-[370px]:inline">{otherPartner.name}の</span>
-                <span>予定</span>
-                {partnerNewCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-white text-rose-600 text-[10px] font-black">
-                    {partnerNewCount}
-                  </span>
-                )}
-              </button>
-            )}
-
-            {/* ✅ すべて既読にするクイックボタン（新着がある時だけヘッダーにも即座に表示！） */}
-            {partnerNewCount > 0 && (
-              <button
-                type="button"
-                onClick={onMarkSeenNow}
-                className="hidden min-[420px]:flex items-center gap-0.5 px-2 py-1 rounded-xl bg-white hover:bg-emerald-50 text-emerald-600 border border-emerald-300 text-[11px] font-black shadow-2xs active:scale-95 transition-all shrink-0"
-                title="相手の新着予定をすべて既読にする"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span>既読</span>
-              </button>
-            )}
-          </div>
-
-          {/* 右側：🔑 合言葉で共有ボタン（未共有の場合にのみ表示） */}
-          {!isShared && onOpenSharedKeywordModal && (
-            <div className="flex items-center gap-1 shrink-0 pl-1">
-              <button
-                type="button"
-                onClick={onOpenSharedKeywordModal}
-                className="px-2 py-1 rounded-xl bg-gradient-to-r from-[#FF8FAB] to-[#B388EB] text-white text-[10px] sm:text-xs font-black shadow-xs flex items-center gap-1 active:scale-95 animate-pulse shrink-0"
-                title="合言葉を入力してカレンダーを共有"
-              >
-                <span>🔑</span>
-                <span>共有</span>
-              </button>
             </div>
           )}
         </div>

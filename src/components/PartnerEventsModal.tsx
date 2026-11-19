@@ -125,7 +125,6 @@ export const PartnerEventsModal: React.FC<PartnerEventsModalProps> = ({
 
   const handleItemClick = (dateStr: string) => {
     onSelectDate(dateStr);
-    onClose();
   };
 
   const handleMarkAllAsSeen = () => {
@@ -241,7 +240,7 @@ export const PartnerEventsModal: React.FC<PartnerEventsModalProps> = ({
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>新着のみ ({partnerEvents.filter((i) => i.isNew).length})</span>
+              <span>新着のみ ({totalNewCount})</span>
             </button>
 
             <button
@@ -319,12 +318,6 @@ export const PartnerEventsModal: React.FC<PartnerEventsModalProps> = ({
                             夜バ
                           </span>
                         )}
-
-                        {shift.isHolidayWork && (
-                          <span className="px-2 py-0.5 rounded-lg bg-rose-500 text-white text-xs font-black">
-                            休日出勤
-                          </span>
-                        )}
                       </div>
                     </div>
 
@@ -336,18 +329,19 @@ export const PartnerEventsModal: React.FC<PartnerEventsModalProps> = ({
           ) : (
             /* 予定一覧・新着タブ */
             (() => {
-              const displayList =
+              const newShifts = activeTab === 'new' ? partnerShifts.filter((s) => s.isNew) : [];
+              const displayEvents =
                 activeTab === 'new'
                   ? partnerEvents.filter((item) => item.isNew)
                   : partnerEvents;
 
-              if (displayList.length === 0) {
+              if (displayEvents.length === 0 && newShifts.length === 0) {
                 return (
                   <div className="text-center py-12 text-stone-400 space-y-2">
                     <Calendar className="w-10 h-10 mx-auto opacity-30 text-[#FF8FAB]" />
                     <p className="text-xs font-bold">
                       {activeTab === 'new'
-                        ? '未確認の新着予定はありません✨'
+                        ? '未確認の新着予定・シフトはありません✨'
                         : `${otherPartner.name}が登録した予定はまだありません🐾`}
                     </p>
                     <p className="text-[11px] text-stone-400">
@@ -357,78 +351,135 @@ export const PartnerEventsModal: React.FC<PartnerEventsModalProps> = ({
                 );
               }
 
-              return displayList.map(({ event, isNew, updatedMs }) => {
-                const dateInfo = formatDateJa(event.date);
-                const cat = resolveCategoryInfo(event.categoryId, store.categories, store.metadata);
-                return (
-                  <div
-                    key={event.id}
-                    onClick={() => handleItemClick(event.date)}
-                    className={`p-3 rounded-2xl bg-white border transition-all cursor-pointer hover:border-[#FF8FAB] hover:shadow-xs active:scale-[0.99] flex items-center justify-between gap-2.5 ${
-                      isNew ? 'border-rose-400 bg-rose-50/30 ring-1 ring-rose-300' : 'border-stone-200/80'
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      {/* 日付・新着バッジ・更新時刻 */}
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-xs font-black ${dateInfo.weekColor}`}>
-                          {dateInfo.text}
-                        </span>
-                        {dateInfo.isToday && (
-                          <span className="px-1.5 py-0.2 rounded-full bg-[#FF8FAB] text-white text-[10px] font-black">
-                            今日
-                          </span>
-                        )}
-                        {isNew && (
-                          <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse">
-                            🆕 新着
-                          </span>
-                        )}
-                        <span className="text-[10px] text-stone-400 font-bold ml-auto">
-                          {formatUpdateTime(updatedMs)}に登録/更新
-                        </span>
+              return (
+                <>
+                  {newShifts.map(({ shift, isNew, updatedMs }) => {
+                    const dateInfo = formatDateJa(shift.date);
+                    const stamp = stampMap.get(shift.stampId);
+                    const hasSub = Boolean(shift.subCustomLabel || shift.subStampId);
+                    return (
+                      <div
+                        key={`new_shift_${shift.id}`}
+                        onClick={() => handleItemClick(shift.date)}
+                        className="p-3 rounded-2xl bg-white border transition-all cursor-pointer hover:border-[#B388EB] hover:shadow-xs active:scale-[0.99] flex items-center justify-between gap-2 border-rose-400 bg-rose-50/30 ring-1 ring-rose-300"
+                      >
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-xs font-black ${dateInfo.weekColor}`}>
+                              {dateInfo.text}
+                            </span>
+                            {dateInfo.isToday && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-[#FF8FAB] text-white text-[10px] font-black">
+                                今日
+                              </span>
+                            )}
+                            {isNew && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse">
+                                🆕 新着シフト
+                              </span>
+                            )}
+                            <span className="text-[10px] text-stone-400 font-bold ml-auto">
+                              {formatUpdateTime(updatedMs)}に登録/更新
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              style={
+                                stamp
+                                  ? { backgroundColor: stamp.color, color: stamp.textColor }
+                                  : undefined
+                              }
+                              className="px-2.5 py-1 rounded-xl text-xs font-black inline-flex items-center gap-1"
+                            >
+                              <span>{stamp?.icon || '💼'}</span>
+                              <span>{shift.customLabel || stamp?.label || 'シフト'}</span>
+                            </span>
+                            {hasSub && (
+                              <span className="px-2 py-0.5 rounded-lg bg-amber-300 text-stone-900 text-xs font-black">
+                                夜バ
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-stone-300 shrink-0" />
                       </div>
+                    );
+                  })}
 
-                      {/* 予定タイトル ＆ カテゴリ */}
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
-                          className="px-2 py-0.5 rounded-lg text-xs font-black shrink-0 flex items-center gap-0.5"
-                        >
-                          <span>{cat.icon}</span>
-                          <span>{cat.shortLabel}</span>
-                        </span>
+                  {displayEvents.map(({ event, isNew, updatedMs }) => {
+                    const dateInfo = formatDateJa(event.date);
+                    const cat = resolveCategoryInfo(event.categoryId, store.categories, store.metadata);
+                    return (
+                      <div
+                        key={event.id}
+                        onClick={() => handleItemClick(event.date)}
+                        className={`p-3 rounded-2xl bg-white border transition-all cursor-pointer hover:border-[#FF8FAB] hover:shadow-xs active:scale-[0.99] flex items-center justify-between gap-2.5 ${
+                          isNew ? 'border-rose-400 bg-rose-50/30 ring-1 ring-rose-300' : 'border-stone-200/80'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1 space-y-1">
+                          {/* 日付・新着バッジ・更新時刻 */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-xs font-black ${dateInfo.weekColor}`}>
+                              {dateInfo.text}
+                            </span>
+                            {dateInfo.isToday && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-[#FF8FAB] text-white text-[10px] font-black">
+                                今日
+                              </span>
+                            )}
+                            {isNew && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse">
+                                🆕 新着
+                              </span>
+                            )}
+                            <span className="text-[10px] text-stone-400 font-bold ml-auto">
+                              {formatUpdateTime(updatedMs)}に登録/更新
+                            </span>
+                          </div>
 
-                        <span className="text-xs sm:text-sm font-black text-stone-800 truncate">
-                          {event.title}
-                        </span>
+                          {/* 予定タイトル ＆ カテゴリ */}
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              style={{ backgroundColor: cat.bgColor, color: cat.textColor }}
+                              className="px-2 py-0.5 rounded-lg text-xs font-black shrink-0 flex items-center gap-0.5"
+                            >
+                              <span>{cat.icon}</span>
+                              <span>{cat.shortLabel}</span>
+                            </span>
+
+                            <span className="text-xs sm:text-sm font-black text-stone-800 truncate">
+                              {event.title}
+                            </span>
+                          </div>
+
+                          {/* 時間 ＆ メモ */}
+                          <div className="flex items-center gap-2 text-[11px] text-stone-500 font-bold">
+                            <span className="flex items-center gap-0.5">
+                              <Clock className="w-3 h-3 text-stone-400" />
+                              {event.isAllDay
+                                ? '終日'
+                                : `${event.startTime || ''}${event.endTime ? `〜${event.endTime}` : ''}`}
+                            </span>
+
+                            {event.memo && (
+                              <span className="flex items-center gap-0.5 truncate text-stone-400 max-w-[180px]">
+                                <FileText className="w-3 h-3" />
+                                {event.memo}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[11px] font-bold text-stone-400 hidden sm:inline">開く</span>
+                          <ChevronRight className="w-4 h-4 text-stone-300" />
+                        </div>
                       </div>
-
-                      {/* 時間 ＆ メモ */}
-                      <div className="flex items-center gap-2 text-[11px] text-stone-500 font-bold">
-                        <span className="flex items-center gap-0.5">
-                          <Clock className="w-3 h-3 text-stone-400" />
-                          {event.isAllDay
-                            ? '終日'
-                            : `${event.startTime || ''}${event.endTime ? `〜${event.endTime}` : ''}`}
-                        </span>
-
-                        {event.memo && (
-                          <span className="flex items-center gap-0.5 truncate text-stone-400 max-w-[180px]">
-                            <FileText className="w-3 h-3" />
-                            {event.memo}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-[11px] font-bold text-stone-400 hidden sm:inline">開く</span>
-                      <ChevronRight className="w-4 h-4 text-stone-300" />
-                    </div>
-                  </div>
-                );
-              });
+                    );
+                  })}
+                </>
+              );
             })()
           )}
         </div>

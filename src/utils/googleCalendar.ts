@@ -36,6 +36,8 @@ export function shouldNotifyPartner(
   devicePartnerId: PartnerId
 ): boolean {
   if (ev.deletedAt || ev.isCompleted) return false;
+  const priv = getEffectivePrivateFor(ev);
+  if (priv) return priv === devicePartnerId;
 
   const target: NotifyTarget =
     ev.notifyTarget ||
@@ -60,8 +62,10 @@ export function getNotifyTargetLabel(
 ): { target: NotifyTarget; label: string; badgeColor: string } {
   const pA = metadata.partners.partnerA;
   const pB = metadata.partners.partnerB;
+  const priv = getEffectivePrivateFor(ev);
 
   const target: NotifyTarget =
+    priv ||
     ev.notifyTarget ||
     (ev.categoryId === 'partnerA'
       ? 'partnerA'
@@ -92,6 +96,39 @@ export function getNotifyTargetLabel(
   };
 }
 
+function computeTimedEndParts(
+  dateStr: string,
+  startTime: string,
+  endTime?: string,
+  explicitEndDate?: string,
+  defaultDurationMin = 60
+): { endDateStr: string; eh: number; em: number } {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [shRaw, smRaw] = startTime.split(':').map(Number);
+  const sh = Number.isFinite(shRaw) ? shRaw : 9;
+  const sm = Number.isFinite(smRaw) ? smRaw : 0;
+  if (!endTime) {
+    const rolled = new Date(y, m - 1, d, sh, sm + defaultDurationMin);
+    return {
+      endDateStr: explicitEndDate || getLocalTodayStr(rolled),
+      eh: rolled.getHours(),
+      em: rolled.getMinutes(),
+    };
+  }
+  const parts = endTime.split(':').map(Number);
+  const eh = Number.isFinite(parts[0]) ? parts[0] : sh;
+  const em = Number.isFinite(parts[1]) ? parts[1] : 0;
+  let endDateStr = explicitEndDate || dateStr;
+  if (!explicitEndDate && eh * 60 + em <= sh * 60 + sm) {
+    endDateStr = getLocalTodayStr(new Date(y, m - 1, d + 1));
+  }
+  return {
+    endDateStr,
+    eh: Math.min(23, Math.max(0, eh)),
+    em: Math.min(59, Math.max(0, em)),
+  };
+}
+
 /**
  * Googleカレンダーの予定・タスク追加URLを生成
  * ※操作中の本人のスマホで開くことで、本人のGoogleカレンダーのみに登録され、本人の端末だけにGoogleカレンダーから通知が届きます。
@@ -111,7 +148,9 @@ export function buildGoogleCalendarUrl(
       const endStr = `${y}${pad(m)}${pad(d)}T093000`;
       datesParam = `${startStr}/${endStr}`;
     } else {
-      const nextDt = new Date(y, m - 1, d + 1);
+      const baseEndDate = ev.endDate && ev.endDate >= ev.date ? ev.endDate : ev.date;
+      const [ey, em, ed] = baseEndDate.split('-').map(Number);
+      const nextDt = new Date(ey, em - 1, ed + 1);
       const startStr = `${y}${pad(m)}${pad(d)}`;
       const endStr = `${nextDt.getFullYear()}${pad(nextDt.getMonth() + 1)}${pad(
         nextDt.getDate()
@@ -121,16 +160,9 @@ export function buildGoogleCalendarUrl(
   } else {
     const [sh, sm] = ev.startTime.split(':').map(Number);
     const startStr = `${y}${pad(m)}${pad(d)}T${pad(sh)}${pad(sm || 0)}00`;
-
-    let eh = sh + 1;
-    let em = sm || 0;
-    if (ev.endTime) {
-      const parts = ev.endTime.split(':').map(Number);
-      eh = parts[0];
-      em = parts[1] || 0;
-    }
-    if (eh >= 24) eh = 23;
-    const endStr = `${y}${pad(m)}${pad(d)}T${pad(eh)}${pad(em)}00`;
+    const endInfo = computeTimedEndParts(ev.date, ev.startTime, ev.endTime, ev.endDate, 60);
+    const [ey, emon, ed] = endInfo.endDateStr.split('-').map(Number);
+    const endStr = `${ey}${pad(emon)}${pad(ed)}T${pad(endInfo.eh)}${pad(endInfo.em)}00`;
     datesParam = `${startStr}/${endStr}`;
   }
 
@@ -215,11 +247,13 @@ export function generatePartnerNotificationIcs(
 
     const startT = s.startTime || stamp?.startTime;
     const endT = s.endTime || stamp?.endTime;
-    if (startT && endT && startT < endT) {
+    if (startT && endT) {
       const [sh, sm] = startT.split(':').map(Number);
-      const [eh, em] = endT.split(':').map(Number);
+      const endInfo = computeTimedEndParts(s.date, startT, endT, undefined, 480);
+      const [ey, emon, ed] = endInfo.endDateStr.split('-').map(Number);
+      const endCompact = `${ey}${pad(emon)}${pad(ed)}`;
       lines.push(`DTSTART:${dateCompact}T${pad(sh)}${pad(sm || 0)}00`);
-      lines.push(`DTEND:${dateCompact}T${pad(eh)}${pad(em || 0)}00`);
+      lines.push(`DTEND:${endCompact}T${pad(endInfo.eh)}${pad(endInfo.em)}00`);
     } else {
       const nextDt = new Date(y, m - 1, d + 1);
       const nextCompact = `${nextDt.getFullYear()}${pad(nextDt.getMonth() + 1)}${pad(
@@ -253,7 +287,9 @@ export function generatePartnerNotificationIcs(
     lines.push(`DTSTAMP:${nowStamp}`);
 
     if (ev.isAllDay && !ev.isTask) {
-      const nextDt = new Date(y, m - 1, d + 1);
+      const baseEnd = ev.endDate && ev.endDate >= ev.date ? ev.endDate : ev.date;
+      const [ey, emon, ed] = baseEnd.split('-').map(Number);
+      const nextDt = new Date(ey, emon - 1, ed + 1);
       const nextCompact = `${nextDt.getFullYear()}${pad(
         nextDt.getMonth() + 1
       )}${pad(nextDt.getDate())}`;
@@ -261,11 +297,12 @@ export function generatePartnerNotificationIcs(
       lines.push(`DTEND;VALUE=DATE:${nextCompact}`);
     } else {
       const startT = ev.startTime || '09:00';
-      const endT = ev.endTime || '09:30';
       const [sh, sm] = startT.split(':').map(Number);
-      const [eh, em] = endT.split(':').map(Number);
+      const endInfo = computeTimedEndParts(ev.date, startT, ev.endTime, ev.endDate, 30);
+      const [ey, emon, ed] = endInfo.endDateStr.split('-').map(Number);
+      const endCompact = `${ey}${pad(emon)}${pad(ed)}`;
       lines.push(`DTSTART:${dateCompact}T${pad(sh)}${pad(sm || 0)}00`);
-      lines.push(`DTEND:${dateCompact}T${pad(eh)}${pad(em || 0)}00`);
+      lines.push(`DTEND:${endCompact}T${pad(endInfo.eh)}${pad(endInfo.em)}00`);
     }
 
     const summary = `${ev.isTask ? '✅【タスク】' : ''}${ev.title}`.replace(
@@ -406,16 +443,25 @@ function normalizePartnerBFields(rawGasUrl?: string, rawCalId?: string): {
 export function loadGoogleCalendarSyncConfig(
   storeConfig?: GoogleCalendarSyncConfig
 ): GoogleCalendarSyncConfig {
-  if (storeConfig && (storeConfig.partnerAGasUrl || storeConfig.partnerBGasUrl || storeConfig.partnerBCalendarId)) {
+  if (
+    storeConfig &&
+    (storeConfig.updatedAt !== undefined ||
+      storeConfig.partnerAGasUrl ||
+      storeConfig.partnerBGasUrl ||
+      storeConfig.partnerBCalendarId)
+  ) {
     const normB = normalizePartnerBFields(storeConfig.partnerBGasUrl, storeConfig.partnerBCalendarId);
     return {
       enabled: storeConfig.enabled ?? true,
       autoSync: storeConfig.autoSync ?? true,
-      partnerAGasUrl: storeConfig.partnerAGasUrl || DEFAULT_PARTNER_A_GAS_URL,
-      partnerACalendarId: storeConfig.partnerACalendarId || 'primary',
+      partnerAGasUrl:
+        storeConfig.partnerAGasUrl !== undefined
+          ? storeConfig.partnerAGasUrl || (storeConfig.updatedAt ? '' : DEFAULT_PARTNER_A_GAS_URL)
+          : DEFAULT_PARTNER_A_GAS_URL,
+      partnerACalendarId: storeConfig.partnerACalendarId ?? 'primary',
       partnerBGasUrl: normB.partnerBGasUrl,
       partnerBCalendarId: normB.partnerBCalendarId,
-      sharedCalendarId: storeConfig.sharedCalendarId || '',
+      sharedCalendarId: storeConfig.sharedCalendarId ?? '',
       syncRangePastDays: storeConfig.syncRangePastDays ?? 30,
       syncRangeFutureDays: storeConfig.syncRangeFutureDays ?? 120,
       lastGoogleSyncedAt: storeConfig.lastGoogleSyncedAt,
@@ -426,17 +472,19 @@ export function loadGoogleCalendarSyncConfig(
     const raw = localStorage.getItem(LS_GCAL_SYNC_CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as GoogleCalendarSyncConfig;
-      const hadCustomUrl = Boolean(parsed.partnerAGasUrl || parsed.partnerBGasUrl);
-      const partnerAGasUrl = parsed.partnerAGasUrl || DEFAULT_PARTNER_A_GAS_URL;
+      const partnerAGasUrl =
+        parsed.partnerAGasUrl !== undefined
+          ? parsed.partnerAGasUrl || (parsed.updatedAt ? '' : DEFAULT_PARTNER_A_GAS_URL)
+          : DEFAULT_PARTNER_A_GAS_URL;
       const normB = normalizePartnerBFields(parsed.partnerBGasUrl, parsed.partnerBCalendarId);
       return {
-        enabled: hadCustomUrl ? (parsed.enabled ?? true) : true,
+        enabled: parsed.enabled ?? true,
         autoSync: parsed.autoSync ?? true,
         partnerAGasUrl,
-        partnerACalendarId: parsed.partnerACalendarId || 'primary',
+        partnerACalendarId: parsed.partnerACalendarId ?? 'primary',
         partnerBGasUrl: normB.partnerBGasUrl,
         partnerBCalendarId: normB.partnerBCalendarId,
-        sharedCalendarId: parsed.sharedCalendarId || '',
+        sharedCalendarId: parsed.sharedCalendarId ?? '',
         syncRangePastDays: parsed.syncRangePastDays ?? 30,
         syncRangeFutureDays: parsed.syncRangeFutureDays ?? 120,
         lastGoogleSyncedAt: parsed.lastGoogleSyncedAt,
@@ -618,8 +666,8 @@ function syncCalendarEvents_(payload) {
   var pastDays = Number(payload.pastDays || 30);
   var futureDays = Number(payload.futureDays || 120);
   var now = new Date();
-  var startRange = new Date(now.getTime() - pastDays * 24 * 60 * 60 * 1000);
-  var endRange = new Date(now.getTime() + futureDays * 24 * 60 * 60 * 1000);
+  var startRange = new Date(now.getFullYear(), now.getMonth(), now.getDate() - pastDays - 1, 0, 0, 0);
+  var endRange = new Date(now.getFullYear(), now.getMonth(), now.getDate() + futureDays + 1, 23, 59, 59);
 
   // 1. 期間内のGoogleカレンダー予定を一括取得してインデックス化
   var existingEvents = cal.getEvents(startRange, endRange);
@@ -644,20 +692,23 @@ function syncCalendarEvents_(payload) {
     }
   }
 
-  // 2a. ペアカレ側で削除された予定（deletions配列）をGoogleカレンダーから削除
+  // 2a. ペアカレ側で削除（またはプライベート化）された予定（deletions配列）をGoogleカレンダーから削除
   var deletions = Array.isArray(payload.deletions) ? payload.deletions : [];
   for (var di = 0; di < deletions.length; di++) {
     var delItem = deletions[di];
     if (!delItem) continue;
     var delPairId = delItem.paircalId || delItem.id || '';
+    var delGidRaw = delItem.googleEventId ? String(delItem.googleEventId).replace(/__\\d{4}-\\d{2}-\\d{2}$/, '') : '';
     var delEv = null;
     if (delItem.googleEventId && byGoogleId[delItem.googleEventId]) {
       delEv = byGoogleId[delItem.googleEventId];
+    } else if (delGidRaw && byGoogleId[delGidRaw]) {
+      delEv = byGoogleId[delGidRaw];
     } else if (delPairId && byPairCalId[delPairId]) {
       delEv = byPairCalId[delPairId];
-    } else if (delItem.googleEventId) {
+    } else if (delGidRaw) {
       try {
-        delEv = cal.getEventById(delItem.googleEventId);
+        delEv = cal.getEventById(delGidRaw);
       } catch (ignore) {}
     }
     if (delEv) {
@@ -680,14 +731,17 @@ function syncCalendarEvents_(payload) {
     var item = upserts[j];
     if (!item || !item.id || !item.date) continue;
 
+    var upGidRaw = item.googleEventId ? String(item.googleEventId).replace(/__\\d{4}-\\d{2}-\\d{2}$/, '') : '';
     var targetEv = null;
     if (item.googleEventId && byGoogleId[item.googleEventId]) {
       targetEv = byGoogleId[item.googleEventId];
+    } else if (upGidRaw && byGoogleId[upGidRaw]) {
+      targetEv = byGoogleId[upGidRaw];
     } else if (byPairCalId[item.id]) {
       targetEv = byPairCalId[item.id];
-    } else if (item.googleEventId) {
+    } else if (upGidRaw) {
       try {
-        targetEv = cal.getEventById(item.googleEventId);
+        targetEv = cal.getEventById(upGidRaw);
       } catch (ignore) {}
     }
 
@@ -699,6 +753,18 @@ function syncCalendarEvents_(payload) {
         } catch (ignore) {}
       }
       continue;
+    }
+
+    // Googleカレンダー側の更新日時がペアカレ側より新しい場合は上書きしない
+    var itemUpdatedMs = item.updatedAt ? (Date.parse(item.updatedAt) || 0) : 0;
+    if (targetEv && itemUpdatedMs > 0 && targetEv.getLastUpdated) {
+      try {
+        var remLastUpd = targetEv.getLastUpdated();
+        if (remLastUpd && remLastUpd.getTime() > itemUpdatedMs + 2000) {
+          pushedMapping[item.id] = targetEv.getId();
+          continue;
+        }
+      } catch (ignore) {}
     }
 
     var rawTitle = String(item.title || '予定');
@@ -718,16 +784,35 @@ function syncCalendarEvents_(payload) {
 
     if (item.isAllDay || !item.startTime) {
       var allDayDate = new Date(y, m, d);
+      var hasMultiEnd = item.endDate && item.endDate > item.date;
+      var allDayEndExclusive = null;
+      if (hasMultiEnd) {
+        var endP = item.endDate.split('-');
+        allDayEndExclusive = new Date(Number(endP[0]), Number(endP[1]) - 1, Number(endP[2]) + 1);
+      }
       if (targetEv) {
         var curTitle = targetEv.getTitle();
         var curAllDay = targetEv.isAllDayEvent();
         var curStart = targetEv.getAllDayStartDate ? targetEv.getAllDayStartDate() : targetEv.getStartTime();
-        var sameDay = curAllDay && curStart.getFullYear() === y && curStart.getMonth() === m && curStart.getDate() === d;
+        var sameStart = curAllDay && curStart.getFullYear() === y && curStart.getMonth() === m && curStart.getDate() === d;
+        var curEnd = targetEv.getAllDayEndDate ? targetEv.getAllDayEndDate() : null;
+        var wantEnd = allDayEndExclusive || new Date(y, m, d + 1);
+        var sameEnd = curAllDay && curEnd && curEnd.getFullYear() === wantEnd.getFullYear() && curEnd.getMonth() === wantEnd.getMonth() && curEnd.getDate() === wantEnd.getDate();
         if (curTitle !== titleText) targetEv.setTitle(titleText);
-        if (!sameDay) targetEv.setAllDayDate(allDayDate);
+        if (!sameStart || !sameEnd) {
+          if (allDayEndExclusive && targetEv.setAllDayDates) {
+            targetEv.setAllDayDates(allDayDate, allDayEndExclusive);
+          } else {
+            targetEv.setAllDayDate(allDayDate);
+          }
+        }
         if ((targetEv.getDescription() || '') !== fullDesc) targetEv.setDescription(fullDesc);
       } else {
-        targetEv = cal.createAllDayEvent(titleText, allDayDate, { description: fullDesc });
+        if (allDayEndExclusive) {
+          targetEv = cal.createAllDayEvent(titleText, allDayDate, allDayEndExclusive, { description: fullDesc });
+        } else {
+          targetEv = cal.createAllDayEvent(titleText, allDayDate, { description: fullDesc });
+        }
         try { targetEv.setTag('paircal_id', item.id); } catch (ignore) {}
         applyReminderIfNeeded_(targetEv, item.reminderMinutes);
       }
@@ -737,14 +822,25 @@ function syncCalendarEvents_(payload) {
       var sm = Number(sp[1] || 0);
       var startDt = new Date(y, m, d, sh, sm, 0);
 
-      var eh = sh + 1;
-      var em = sm;
+      var endDt;
       if (item.endTime) {
         var ep = item.endTime.split(':');
-        eh = Number(ep[0]);
-        em = Number(ep[1] || 0);
+        var eh = Number(ep[0]);
+        var em = Number(ep[1] || 0);
+        var ey = y, emon = m, ed = d;
+        if (item.endDate && item.endDate >= item.date) {
+          var edParts = item.endDate.split('-');
+          ey = Number(edParts[0]);
+          emon = Number(edParts[1]) - 1;
+          ed = Number(edParts[2]);
+        }
+        endDt = new Date(ey, emon, ed, eh, em, 0);
+        if (!item.endDate && endDt <= startDt) {
+          endDt = new Date(y, m, d + 1, eh, em, 0);
+        }
+      } else {
+        endDt = new Date(startDt.getTime() + 60 * 60 * 1000);
       }
-      var endDt = new Date(y, m, d, eh, em, 0);
       if (endDt <= startDt) {
         endDt = new Date(startDt.getTime() + 30 * 60 * 1000);
       }
@@ -774,7 +870,7 @@ function syncCalendarEvents_(payload) {
 
   for (var k = 0; k < refreshedEvents.length; k++) {
     var ev = refreshedEvents[k];
-    var gEventId = ev.getId();
+    var rawGEventId = ev.getId();
     var paircalId = '';
     try {
       paircalId = ev.getTag('paircal_id') || '';
@@ -785,14 +881,28 @@ function syncCalendarEvents_(payload) {
       if (match && match[1]) paircalId = match[1];
     }
 
-    var cleanMemo = rawDesc.replace(/\\n?\\[PAIRCAL_ID:[^\\]]+\\]/g, '').trim();
+    var cleanMemo = rawDesc
+      .replace(/\\n?\\[PAIRCAL_ID:[^\\]]+\\]/g, '')
+      .replace(/(?:^|\\n)サポート: [^\\n]*/g, '')
+      .trim();
     var isAllDay = ev.isAllDayEvent();
     var startDateObj = isAllDay ? ev.getAllDayStartDate() : ev.getStartTime();
     var endDateObj = isAllDay ? ev.getAllDayEndDate() : ev.getEndTime();
 
     var dateStr = Utilities.formatDate(startDateObj, tz, 'yyyy-MM-dd');
+    var endDateStr = null;
+    if (isAllDay && endDateObj) {
+      var inclEnd = Utilities.formatDate(new Date(endDateObj.getTime() - 12 * 60 * 60 * 1000), tz, 'yyyy-MM-dd');
+      if (inclEnd > dateStr) endDateStr = inclEnd;
+    } else if (!isAllDay && endDateObj) {
+      var timedEndDate = Utilities.formatDate(endDateObj, tz, 'yyyy-MM-dd');
+      if (timedEndDate > dateStr) endDateStr = timedEndDate;
+    }
     var startTimeStr = isAllDay ? '' : Utilities.formatDate(startDateObj, tz, 'HH:mm');
     var endTimeStr = isAllDay ? '' : Utilities.formatDate(endDateObj, tz, 'HH:mm');
+    var isRec = false;
+    try { isRec = Boolean(ev.isRecurringEvent && ev.isRecurringEvent()); } catch (ignore) {}
+    var gEventId = isRec ? (rawGEventId + '__' + dateStr) : rawGEventId;
 
     var lastUpdatedObj = ev.getLastUpdated ? ev.getLastUpdated() : new Date();
     var updatedIso = lastUpdatedObj ? lastUpdatedObj.toISOString() : new Date().toISOString();
@@ -802,6 +912,7 @@ function syncCalendarEvents_(payload) {
       paircalId: paircalId || null,
       title: ev.getTitle() || '(無題の予定)',
       date: dateStr,
+      endDate: endDateStr,
       isAllDay: isAllDay,
       startTime: startTimeStr || null,
       endTime: endTimeStr || null,
@@ -1088,11 +1199,25 @@ interface GasRemoteEventItem {
   paircalId?: string | null;
   title: string;
   date: string;
+  endDate?: string | null;
   isAllDay: boolean;
   startTime?: string | null;
   endTime?: string | null;
   memo?: string | null;
   updatedAt: string;
+}
+
+function stableGoogleIdKey(rawId: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < rawId.length; i++) {
+    const ch = rawId.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 0x01000193);
+    h2 = Math.imul(h2 ^ ch, 0x85ebca6b);
+  }
+  const hex = `${(h1 >>> 0).toString(16).padStart(8, '0')}${(h2 >>> 0).toString(16).padStart(8, '0')}`;
+  const tail = rawId.replace(/[^a-zA-Z0-9]/g, '').slice(-12);
+  return `${hex}_${tail}`;
 }
 
 interface GasRemoteTaskItem {
@@ -1359,21 +1484,24 @@ export async function syncWithGoogleCalendar(
   const categories = store.categories && store.categories.length > 0 ? store.categories : DEFAULT_CATEGORIES;
 
   const lastSyncedMs = config.lastGoogleSyncedAt ? Date.parse(config.lastGoogleSyncedAt) || 0 : 0;
+  let allTargetsSucceeded = true;
 
   for (const target of targets) {
-    // 1a. Googleカレンダーから削除すべき予定（ローカルで削除済み かつ GoogleEventId を持つもの）
+    // 1a. Googleカレンダーから削除すべき予定（削除済み または プライベート変更・別カテゴリ化等で対象外になった既存紐付け予定）
     const deletions = Object.values(nextEvents)
       .filter((ev) => {
-        if (!ev || !ev.date || !ev.deletedAt) return false;
+        if (!ev || !ev.date) return false;
         const existingGId = ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined);
-        return Boolean(existingGId);
+        if (!existingGId) return false;
+        if (ev.deletedAt) return true;
+        return !shouldSyncEventToTarget(ev, target.key, hasSharedCal);
       })
       .map((ev) => ({
         id: ev.id,
         paircalId: ev.id,
         googleEventId: ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined),
         date: ev.date,
-        deletedAt: ev.deletedAt,
+        deletedAt: ev.deletedAt || null,
       }));
 
     // 1b. このターゲットに送信（追加・更新）すべきペアカレ予定を抽出
@@ -1391,6 +1519,7 @@ export async function syncWithGoogleCalendar(
         id: ev.id,
         googleEventId: ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined),
         date: ev.date,
+        endDate: ev.endDate,
         title: (ev.isTask ? '✅ ' : '') + ev.title,
         isAllDay: ev.isAllDay,
         startTime: ev.startTime,
@@ -1400,6 +1529,7 @@ export async function syncWithGoogleCalendar(
         supportBadges: ev.supportBadges,
         isTask: ev.isTask,
         reminderMinutes: ev.reminderMinutes,
+        updatedAt: ev.updatedAt,
         deletedAt: null,
       }));
 
@@ -1460,12 +1590,18 @@ export async function syncWithGoogleCalendar(
         }),
       });
       if (!preRes.ok) {
-        if (target.key !== 'partnerA') continue;
+        if (target.key !== 'partnerA') {
+          allTargetsSucceeded = false;
+          continue;
+        }
         throw new Error(`Googleカレンダー通信エラー (${preRes.status})`);
       }
       const preData = (await preRes.json()) as GasSyncResponse;
       if (!preData.ok) {
-        if (target.key !== 'partnerA') continue;
+        if (target.key !== 'partnerA') {
+          allTargetsSucceeded = false;
+          continue;
+        }
         throw new Error(preData.error || 'Googleカレンダー同期中にエラーが発生しました');
       }
       const preRemote = preData.remoteEvents || preData.events || [];
@@ -1541,13 +1677,19 @@ export async function syncWithGoogleCalendar(
       });
 
       if (!res.ok) {
-        if (target.key !== 'partnerA') continue;
+        if (target.key !== 'partnerA') {
+          allTargetsSucceeded = false;
+          continue;
+        }
         throw new Error(`Googleカレンダー通信エラー (${res.status})`);
       }
 
       data = (await res.json()) as GasSyncResponse;
       if (!data.ok) {
-        if (target.key !== 'partnerA') continue;
+        if (target.key !== 'partnerA') {
+          allTargetsSucceeded = false;
+          continue;
+        }
         throw new Error(data.error || 'Googleカレンダー同期中にエラーが発生しました');
       }
     }
@@ -1555,16 +1697,18 @@ export async function syncWithGoogleCalendar(
     // 2. Googleカレンダー側で採番された googleEventId をペアカレ側のイベントに記録
     const mapping = data.pushedMapping || data.idMap || {};
     const seenGoogleIdsInRemote = new Set<string>();
+    const idBumpIso = new Date().toISOString();
 
     for (const delItem of deletions) {
       const localDel = nextEvents[delItem.id];
-      if (localDel && localDel.deletedAt) {
+      if (localDel) {
         const nextGIds = { ...(localDel.googleEventIds || {}) };
         delete nextGIds[target.key];
         nextEvents[delItem.id] = {
           ...localDel,
           googleEventId: target.key === 'partnerA' ? undefined : localDel.googleEventId,
           googleEventIds: nextGIds,
+          updatedAt: idBumpIso,
         };
       }
     }
@@ -1582,6 +1726,7 @@ export async function syncWithGoogleCalendar(
               ...(localEv.googleEventIds || {}),
               [target.key]: gEventId,
             },
+            ...(prevGId && prevGId !== gEventId ? { updatedAt: idBumpIso } : {}),
           };
           totalPushed++;
         }
@@ -1640,6 +1785,7 @@ export async function syncWithGoogleCalendar(
         const hasDiff =
           matchedLocal.title !== cleanTitle ||
           matchedLocal.date !== rem.date ||
+          (matchedLocal.endDate || '') !== (rem.endDate || '') ||
           matchedLocal.isAllDay !== rem.isAllDay ||
           (matchedLocal.startTime || '') !== (rem.startTime || '') ||
           (matchedLocal.endTime || '') !== (rem.endTime || '') ||
@@ -1650,10 +1796,11 @@ export async function syncWithGoogleCalendar(
             ...matchedLocal,
             title: cleanTitle,
             date: rem.date,
+            endDate: rem.endDate || undefined,
             isAllDay: rem.isAllDay,
             startTime: rem.isAllDay ? undefined : rem.startTime || undefined,
             endTime: rem.isAllDay ? undefined : rem.endTime || undefined,
-            memo: rem.memo || matchedLocal.memo,
+            memo: rem.memo || undefined,
             googleCalSynced: true,
             googleEventIds: {
               ...(matchedLocal.googleEventIds || {}),
@@ -1687,7 +1834,7 @@ export async function syncWithGoogleCalendar(
         }
 
         const catInfo = resolveCategoryInfo(inferredCat, categories, store.metadata);
-        const safeHash = rem.googleEventId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 24);
+        const safeHash = stableGoogleIdKey(rem.googleEventId);
         const newId = `gcal_${target.key}_${safeHash}`;
 
         // 万一同じIDで削除済みだった場合はスキップ
@@ -1705,6 +1852,7 @@ export async function syncWithGoogleCalendar(
         nextEvents[newId] = {
           id: newId,
           date: rem.date,
+          ...(rem.endDate ? { endDate: rem.endDate } : {}),
           title: cleanTitle,
           categoryId: inferredCat,
           color: catInfo.accentColor,
@@ -1730,10 +1878,11 @@ export async function syncWithGoogleCalendar(
       }
     }
 
-    // 4. Googleカレンダー側で削除された予定を検知してペアカレ側も論理削除する（双方向削除同期）
+    // 4. Googleカレンダー側で削除された予定を検知してペアカレ側も論理削除する（双方向削除同期：境界日除外）
     for (const [evId, localEv] of Object.entries(nextEvents)) {
       if (!localEv || localEv.deletedAt) continue;
-      if (localEv.date < minDateStr || localEv.date > maxDateStr) continue;
+      if (localEv.date <= minDateStr || localEv.date >= maxDateStr) continue;
+      if (!shouldSyncEventToTarget(localEv, target.key, hasSharedCal)) continue;
       const syncedGId = localEv.googleEventIds?.[target.key];
       if (syncedGId && !seenGoogleIdsInRemote.has(syncedGId) && !mapping[evId]) {
         const nowIso = new Date().toISOString();
@@ -1761,6 +1910,7 @@ export async function syncWithGoogleCalendar(
             googleTaskId: undefined,
             googleTaskListId: undefined,
             googleTaskSynced: false,
+            updatedAt: idBumpIso,
           };
         }
       }
@@ -1773,11 +1923,14 @@ export async function syncWithGoogleCalendar(
             localTask.googleTaskListId !== taskRef.googleTaskListId ||
             !localTask.googleTaskSynced
           ) {
+            const hadDifferentId =
+              Boolean(localTask.googleTaskId) && localTask.googleTaskId !== taskRef.googleTaskId;
             nextEvents[paircalId] = {
               ...localTask,
               googleTaskSynced: true,
               googleTaskId: taskRef.googleTaskId,
               googleTaskListId: taskRef.googleTaskListId || localTask.googleTaskListId,
+              ...(hadDifferentId ? { updatedAt: idBumpIso } : {}),
             };
             totalPushed++;
           }
@@ -1847,7 +2000,7 @@ export async function syncWithGoogleCalendar(
             };
           }
         } else {
-          const safeHash = remTask.googleTaskId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 24);
+          const safeHash = stableGoogleIdKey(remTask.googleTaskId);
           const newId = `gtask_${target.key}_${safeHash}`;
           if (nextEvents[newId]?.deletedAt) continue;
 
@@ -1905,7 +2058,7 @@ export async function syncWithGoogleCalendar(
   const nowIso = new Date().toISOString();
   const updatedGcalConfig: GoogleCalendarSyncConfig = {
     ...config,
-    lastGoogleSyncedAt: syncStartedIso,
+    lastGoogleSyncedAt: allTargetsSucceeded ? syncStartedIso : config.lastGoogleSyncedAt,
     updatedAt: nowIso,
   };
   saveGoogleCalendarSyncConfig(updatedGcalConfig);

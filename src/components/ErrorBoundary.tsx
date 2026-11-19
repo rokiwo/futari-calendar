@@ -5,6 +5,8 @@ interface Props {
   children: ReactNode;
   fallbackTitle?: string;
   onReset?: () => void;
+  resetKey?: string | number;
+  isModal?: boolean;
 }
 
 interface State {
@@ -20,6 +22,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
+  }
+
+  public componentDidUpdate(prevProps: Props) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null });
+    }
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -40,7 +48,13 @@ export class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-[220px] flex items-center justify-center p-4">
+        <div
+          className={
+            this.props.isModal
+              ? 'fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4'
+              : 'min-h-[220px] flex items-center justify-center p-4'
+          }
+        >
           <div className="w-full max-w-md bg-white rounded-3xl p-5 border-2 border-rose-200 shadow-xl space-y-3 text-center">
             <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mx-auto text-xl shadow-inner">
               <AlertCircle className="w-6 h-6" />

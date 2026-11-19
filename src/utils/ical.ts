@@ -10,6 +10,8 @@ import {
 import {
   CATEGORY_MAP,
   formatMinutesShort,
+  getEffectivePrivateFor,
+  getLocalTodayStr,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
 } from './presets';
@@ -20,14 +22,14 @@ function formatIcsDateOnly(dateStr: string): string {
   return dateStr.replace(/-/g, '');
 }
 
-// YYYY-MM-DD の翌日を計算（終日予定のDTEND用）
-function getNextDayIcs(dateStr: string): string {
+// YYYY-MM-DD の翌日を計算（終日予定のDTEND用：ハイフンなしYYYYMMDD）
+function getNextDayStr(dateStr: string, deltaDays = 1): string {
   const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + 1);
-  const yy = dt.getFullYear();
-  const mm = String(dt.getMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getDate()).padStart(2, '0');
-  return `${yy}${mm}${dd}`;
+  return getLocalTodayStr(new Date(y, m - 1, d + deltaDays));
+}
+
+function getNextDayIcs(dateStr: string): string {
+  return formatIcsDateOnly(getNextDayStr(dateStr, 1));
 }
 
 // YYYY-MM-DD と HH:mm を YYYYMMDDTHHmm00 に変換
@@ -50,7 +52,8 @@ export type IcsExportTarget = 'all' | 'shared_and_events' | 'partnerA' | 'partne
 // カレンダーデータストアを .ics (iCalendar) 文字列に変換
 export function exportToIcs(
   store: CalendarDataStore,
-  target: IcsExportTarget = 'all'
+  target: IcsExportTarget = 'all',
+  activePartner?: PartnerId
 ): string {
   const lines: string[] = [
     'BEGIN:VCALENDAR',
@@ -126,21 +129,39 @@ export function exportToIcs(
     }
   }
 
-  // 2. カレンダー予定データの出力
+  // 2. カレンダー予定データの出力（プライベート予定・個人タスクの漏洩防止）
   for (const ev of Object.values(store.events)) {
     if (ev.deletedAt) continue;
-    if (target === 'partnerA' && ev.categoryId !== 'partnerA' && ev.categoryId !== 'shared')
-      continue;
-    if (target === 'partnerB' && ev.categoryId !== 'partnerB' && ev.categoryId !== 'shared')
-      continue;
+    const priv = getEffectivePrivateFor(ev);
+    if (target === 'partnerA') {
+      if (priv && priv !== 'partnerA') continue;
+      if (!priv && ev.categoryId !== 'partnerA' && ev.categoryId !== 'shared') continue;
+    } else if (target === 'partnerB') {
+      if (priv && priv !== 'partnerB') continue;
+      if (!priv && ev.categoryId !== 'partnerB' && ev.categoryId !== 'shared') continue;
+    } else if (target === 'shared_and_events') {
+      if (priv) continue;
+    } else if (target === 'all') {
+      if (priv && (!activePartner || priv !== activePartner)) continue;
+    }
 
     lines.push('BEGIN:VEVENT');
     lines.push(`UID:futarical-event-${ev.id}@futarical.local`);
     lines.push(`DTSTAMP:${dtstamp}`);
 
     if (!ev.isAllDay && ev.startTime) {
-      const endT = ev.endTime || ev.startTime;
-      const endDateStr = ev.endDate || ev.date;
+      let endT = ev.endTime || '';
+      let endDateStr = ev.endDate || ev.date;
+      if (!endT) {
+        const [sh, sm] = ev.startTime.split(':').map(Number);
+        const endDt = new Date(2000, 0, 1, sh || 0, (sm || 0) + 60);
+        endT = `${String(endDt.getHours()).padStart(2, '0')}:${String(endDt.getMinutes()).padStart(2, '0')}`;
+        if (!ev.endDate && endDt.getDate() > 1) {
+          endDateStr = getNextDayStr(ev.date, 1);
+        }
+      } else if (!ev.endDate && endT <= ev.startTime) {
+        endDateStr = getNextDayStr(ev.date, 1);
+      }
       lines.push(`DTSTART;TZID=Asia/Tokyo:${formatIcsDateTime(ev.date, ev.startTime)}`);
       lines.push(`DTEND;TZID=Asia/Tokyo:${formatIcsDateTime(endDateStr, endT)}`);
     } else {
@@ -199,6 +220,7 @@ export function parseIcsWithShiftDetection(
   const importedEvents: ScheduleEvent[] = [];
   const importedShifts: ShiftEntry[] = [];
   let inEvent = false;
+  let inAlarm = false;
   let currentProps: Record<string, string> = {};
 
   const parseIcsTimestamp = (
@@ -247,16 +269,26 @@ export function parseIcsWithShiftDetection(
       .replace(/\\\\/g, '\\');
 
   const nowIso = new Date().toISOString();
-  const catInfo = CATEGORY_MAP[defaultCategoryId];
+  const catInfo = CATEGORY_MAP[defaultCategoryId] || CATEGORY_MAP.shared;
 
   for (const line of rawLines) {
     if (line === 'BEGIN:VEVENT') {
       inEvent = true;
+      inAlarm = false;
       currentProps = {};
+      continue;
+    }
+    if (line === 'BEGIN:VALARM') {
+      inAlarm = true;
+      continue;
+    }
+    if (line === 'END:VALARM') {
+      inAlarm = false;
       continue;
     }
     if (line === 'END:VEVENT') {
       inEvent = false;
+      inAlarm = false;
       const dtStartRaw = currentProps['DTSTART'];
       const summaryRaw = currentProps['SUMMARY'];
       if (dtStartRaw && summaryRaw) {
@@ -265,6 +297,15 @@ export function parseIcsWithShiftDetection(
 
         if (parsedStart) {
           const cleanTitle = unescapeIcsText(summaryRaw).trim();
+          let computedEndDate: string | undefined;
+          if (parsedStart.isAllDay && parsedEnd?.isAllDay && parsedEnd.date > parsedStart.date) {
+            const inclusiveEnd = getNextDayStr(parsedEnd.date, -1);
+            if (inclusiveEnd > parsedStart.date) {
+              computedEndDate = inclusiveEnd;
+            }
+          } else if (!parsedStart.isAllDay && parsedEnd && parsedEnd.date > parsedStart.date) {
+            computedEndDate = parsedEnd.date;
+          }
 
           // ナスカレ由来のシフト項目か判定（例: "[ナスカレ] 日勤", "日勤", "夜勤", "公休", "休み", "準夜" 等）
           const strippedForShift = cleanTitle
@@ -298,6 +339,7 @@ export function parseIcsWithShiftDetection(
             importedEvents.push({
               id,
               date: parsedStart.date,
+              ...(computedEndDate ? { endDate: computedEndDate } : {}),
               title: cleanTitle,
               categoryId: defaultCategoryId,
               color: catInfo.accentColor,
@@ -317,7 +359,7 @@ export function parseIcsWithShiftDetection(
       continue;
     }
 
-    if (inEvent) {
+    if (inEvent && !inAlarm) {
       const colonIdx = line.indexOf(':');
       if (colonIdx > 0) {
         const keyPart = line.slice(0, colonIdx);
@@ -358,7 +400,7 @@ export function parseNurseKarText(
   const shifts: ShiftEntry[] = [];
   const events: ScheduleEvent[] = [];
   const nowIso = new Date().toISOString();
-  const catInfo = CATEGORY_MAP[defaultCategoryId];
+  const catInfo = CATEGORY_MAP[defaultCategoryId] || CATEGORY_MAP.shared;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -382,14 +424,18 @@ export function parseNurseKarText(
       }
     }
 
-    if (!day || day < 1 || day > 31 || !rest) continue;
+    if (!month || month < 1 || month > 12 || !day || day < 1 || !rest) continue;
+    const maxDay = new Date(defaultYear, month, 0).getDate();
+    if (day > maxDay) continue;
 
     const dateStr = `${defaultYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const tokens = rest.split(/[\s\/／・,、]+/).filter(Boolean);
+    let matchedShiftInLine = false;
 
     for (const token of tokens) {
-      const matchedStamp = matchShiftStampByText(token, stamps);
+      const matchedStamp = !matchedShiftInLine ? matchShiftStampByText(token, stamps) : undefined;
       if (matchedStamp) {
+        matchedShiftInLine = true;
         shifts.push({
           id: `${dateStr}_${targetPartnerId}`,
           date: dateStr,
