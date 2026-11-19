@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, Clock, X, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { CoupleMetadata, PartnerId, ShiftEntry } from '../types/calendar';
-import { formatMinutesToJa, getShiftHolidayWorkMinutes, getShiftOvertimeMinutes } from '../utils/presets';
+import {
+  formatMinutesToJa,
+  getLocalDateStrOffset,
+  getLocalTodayStr,
+  getShiftHolidayWorkMinutes,
+  getShiftOvertimeMinutes,
+} from '../utils/presets';
 
 interface ConfirmOvertimeCardProps {
   activePartner: PartnerId;
@@ -20,33 +26,70 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
 }) => {
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [customMin, setCustomMin] = useState<string>('');
+  const [todayStr, setTodayStr] = useState<string>(() => getLocalTodayStr());
 
-  // 今日の日付 (YYYY-MM-DD)
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // 画面復帰時や日付またぎ（PWAを翌日まで開いたままにした場合など）にローカル今日日付を再評価
+  useEffect(() => {
+    const refreshToday = () => {
+      const next = getLocalTodayStr();
+      setTodayStr((prev) => (prev === next ? prev : next));
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshToday();
+      }
+    };
+    window.addEventListener('focus', refreshToday);
+    window.addEventListener('pageshow', refreshToday);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const intervalId = window.setInterval(refreshToday, 60_000);
+    return () => {
+      window.removeEventListener('focus', refreshToday);
+      window.removeEventListener('pageshow', refreshToday);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
-  // 操作中パートナーのシフトの中で、未確定（仮・見込み）かつ今日以前のものを抽出
+  // 操作中パートナーのシフトの中で、未確定（仮・見込み）かつ昨日以前（翌日以降にアプリを開いたとき対象）のものを抽出
   const pendingEntries: ShiftEntry[] = Object.values(shifts)
     .filter((s) => {
       if (s.deletedAt || s.partnerId !== activePartner) return false;
-      const isTentative = Boolean(s.isTentativeOvertime || s.isTentativeHolidayWork);
+      const otMin = getShiftOvertimeMinutes(s);
+      const hwMin = getShiftHolidayWorkMinutes(s);
+      const isTentative = Boolean(
+        (otMin > 0 && s.isTentativeOvertime) ||
+        (hwMin > 0 && s.isTentativeHolidayWork)
+      );
       if (!isTentative) return false;
-      // 今日以前（過去または今日）の日付
-      return s.date <= todayStr;
+      // 当日は表示せず、翌日以降（s.date < todayStr）になったときに確定カードを表示
+      return s.date < todayStr;
     })
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  if (pendingEntries.length === 0) {
+  // 一番古い未確定日をターゲットにする
+  const currentEntry = pendingEntries[0];
+
+  useEffect(() => {
+    setIsAdjusting(false);
+    setCustomMin('');
+  }, [currentEntry?.id]);
+
+  if (!currentEntry) {
     return null; // 未確定がなければ何も表示しない
   }
 
-  // 一番古い未確定日をターゲットにする
-  const currentEntry = pendingEntries[0];
-  const isToday = currentEntry.date === todayStr;
-  const isHw = Boolean(currentEntry.isTentativeHolidayWork || currentEntry.isHolidayWork);
-  const plannedMinutes = isHw
-    ? getShiftHolidayWorkMinutes(currentEntry)
-    : getShiftOvertimeMinutes(currentEntry);
+  const [ty, tm, td] = todayStr.split('-').map(Number);
+  const yesterdayStr = getLocalDateStrOffset(-1, new Date(ty, tm - 1, td));
+  const isYesterday = currentEntry.date === yesterdayStr;
+
+  const hwMin = getShiftHolidayWorkMinutes(currentEntry);
+  const otMin = getShiftOvertimeMinutes(currentEntry);
+  const isHw = Boolean(
+    (hwMin > 0 && currentEntry.isTentativeHolidayWork) ||
+    (hwMin > 0 && otMin === 0)
+  );
+  const plannedMinutes = isHw ? hwMin : otMin;
 
   const partner = metadata.partners[activePartner];
   const [, m, d] = currentEntry.date.split('-').map(Number);
@@ -88,7 +131,11 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
             <span className="text-sm font-black text-[#9C3D1C] flex items-center gap-1">
               <span>{partner.avatar}</span>
               <span>{partner.name}</span>
-              <span>{isToday ? 'お疲れさま！今日の残業はどうだった？' : `${m}月${d}日の残業はどうだった？`}</span>
+              <span>
+                {isYesterday
+                  ? `お疲れさま！昨日の${isHw ? '休日出勤' : '残業'}はどうだった？`
+                  : `${m}月${d}日の${isHw ? '休日出勤' : '残業'}はどうだった？`}
+              </span>
             </span>
             {pendingEntries.length > 1 && (
               <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white font-extrabold text-[10px]">
@@ -97,7 +144,7 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
             )}
           </div>
           <p className="text-xs text-stone-600 font-bold">
-            📅 {m}月{d}日({isToday ? '今日' : '過去'})の{isHw ? '休日出勤予定' : '残業予定'}:{' '}
+            📅 {m}月{d}日({isYesterday ? '昨日' : '過去'})の{isHw ? '休日出勤予定' : '残業予定'}:{' '}
             <span className="text-rose-600 font-black text-sm">{formatMinutesToJa(plannedMinutes)}</span>
             <span className="text-stone-400 text-[10px] ml-1">（仮登録中）</span>
           </p>
@@ -106,7 +153,7 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
         <button
           type="button"
           onClick={handleZeroAndComplete}
-          title="今日は残業なし（0分）にする"
+          title={isHw ? '休日出勤なし（0分）にする' : '残業なし（0分）にする'}
           className="text-stone-400 hover:text-stone-600 font-bold text-xs p-1"
         >
           ✕
@@ -143,7 +190,7 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
           onClick={handleZeroAndComplete}
           className="px-2 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 font-bold text-xs active:scale-95 transition-all"
         >
-          残業なし（0分）
+          {isHw ? '休出なし（0分）' : '残業なし（0分）'}
         </button>
       </div>
 
@@ -154,7 +201,7 @@ export const ConfirmOvertimeCard: React.FC<ConfirmOvertimeCardProps> = ({
             <div className="flex items-center justify-between">
               <span className="font-extrabold text-stone-800 text-xs flex items-center gap-1">
                 <span>⏱️</span>
-                <span>実際の実残業時間（分単位）を入力：</span>
+                <span>実際の{isHw ? '実休日出勤時間' : '実残業時間'}（分単位）を入力：</span>
               </span>
               {customMin !== '' && Number(customMin) >= 0 && (
                 <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">

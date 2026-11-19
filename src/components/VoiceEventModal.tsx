@@ -27,6 +27,7 @@ import {
 import {
   DEFAULT_CATEGORIES,
   formatMinutesToJa,
+  getLocalTodayStr,
   resolveCategoryInfo,
   SUPPORT_BADGE_PRESETS,
 } from '../utils/presets';
@@ -129,7 +130,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
   const [holidayWorkHours, setHolidayWorkHours] = useState<number | null>(null);
   const [applyToShift, setApplyToShift] = useState<boolean>(true);
   const [isTentative, setIsTentative] = useState<boolean>(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalTodayStr();
     return selectedDate > todayStr; // 未来日なら初期値で仮予定
   });
   const [isPrivate, setIsPrivate] = useState<boolean>(false); // 🔒 じぶん限定フラグ
@@ -230,7 +231,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
       if (result.parsed.isTentative) {
         setIsTentative(true);
       } else {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalTodayStr();
         if (result.date > todayStr) {
           setIsTentative(true);
         }
@@ -432,7 +433,7 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
 
     const nowIso = new Date().toISOString();
     const cat = resolveCategoryInfo(categoryId, categoryList);
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalTodayStr();
     const isFutureDate = dateStr > todayStr;
     const finalTentative = isFutureDate ? true : isTentative;
 
@@ -1005,9 +1006,9 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
             )}
           </div>
 
-          {/* 仮・見込み予定（その日の終わりに確認）トグル */}
+          {/* 仮・見込み予定（翌日以降に確認）トグル */}
           {(overtimeMinutes !== null || holidayWorkMinutes !== null || isTentative) && (() => {
-            const isFuture = dateStr > new Date().toISOString().split('T')[0];
+            const isFuture = dateStr > getLocalTodayStr();
             const isLockTentative = isFuture && (overtimeMinutes !== null || holidayWorkMinutes !== null);
             return (
               <div className="p-2.5 rounded-xl bg-[#FFFBF7] border border-[#FFE28A] flex items-center justify-between gap-2 animate-fade-in">
@@ -1020,8 +1021,8 @@ export const VoiceEventModal: React.FC<VoiceEventModalProps> = ({
                   </div>
                   <div className="text-[10px] text-stone-500 font-bold">
                     {isLockTentative
-                      ? '📅 登録日より後の予定のため固定で「仮予定」になります（その日に確認カードが出ます🐾）'
-                      : 'その日が終わる時にアプリから実残業時間の確認カードが出ます🐾'}
+                      ? '📅 登録日より後の予定のため固定で「仮予定」になります（翌日以降に確認カードが出ます🐾）'
+                      : '翌日以降にアプリを開くと実残業時間の確認カードが出ます🐾'}
                   </div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer shrink-0">

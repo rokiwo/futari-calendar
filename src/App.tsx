@@ -22,6 +22,7 @@ import {
   DEFAULT_STAMP_PRESETS,
   SAYA_DEFAULT_STAMPS,
   formatMinutesToJa,
+  getLocalTodayStr,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
   getEffectivePrivateFor,
@@ -534,7 +535,7 @@ export const App: React.FC = () => {
       // 過去の二重登録バグの修復 ＆ 未来日の残業・休日出勤をすべて固定で仮予定に補正
       let shiftsRepaired = false;
       const nextShifts = { ...nextShiftsRaw };
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalTodayStr();
       for (const [k, s] of Object.entries(nextShifts)) {
         if (!s || s.deletedAt) continue;
         const otMin = getShiftOvertimeMinutes(s);
@@ -1015,8 +1016,7 @@ export const App: React.FC = () => {
           stamp.label.includes('休出') ||
           stamp.label.includes('休日出勤')
         );
-        const todayDate = new Date();
-        const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`;
+        const todayStr = getLocalTodayStr();
         const isFutureDate = targetDate > todayStr;
 
         nextShift = {
@@ -1125,8 +1125,7 @@ export const App: React.FC = () => {
       };
 
       // 💡 ユーザー要望：登録日（今日）より後の未来日の残業・休日出勤は、固定で仮残業（未確定）にする！
-      const todayDate = new Date();
-      const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`;
+      const todayStr = getLocalTodayStr();
       const isFutureDate = dateStr > todayStr;
 
       if (isFutureDate) {
@@ -1146,6 +1145,15 @@ export const App: React.FC = () => {
           nextShift.isTentativeHolidayWork = true;
           nextShift.holidayWorkStatus = 'tentative';
         }
+      }
+
+      if (getShiftOvertimeMinutes(nextShift) === 0) {
+        nextShift.isTentativeOvertime = false;
+        nextShift.overtimeStatus = 'confirmed';
+      }
+      if (getShiftHolidayWorkMinutes(nextShift) === 0 && !nextShift.isHolidayWork) {
+        nextShift.isTentativeHolidayWork = false;
+        nextShift.holidayWorkStatus = 'confirmed';
       }
 
       void commitStore(
@@ -1195,11 +1203,11 @@ export const App: React.FC = () => {
     [activePartner, commitStore, showToast]
   );
 
-  // その日の終わりにアプリから実残業時間を確定させるコールバック
+  // 翌日以降にアプリを開いたときに実残業・休出時間を確定させるコールバック
   const handleConfirmShiftActual = useCallback(
     (dateStr: string, partnerId: PartnerId, actualMinutes: number, isHolidayWork: boolean) => {
       const shiftId = `${dateStr}_${partnerId}`;
-      const existing = store.shifts[shiftId];
+      const existing = latestStoreRef.current.shifts[shiftId];
       if (!existing) return;
 
       const nowIso = new Date().toISOString();
@@ -1208,6 +1216,8 @@ export const App: React.FC = () => {
             isHolidayWork: true,
             isTentativeHolidayWork: false,
             isTentativeOvertime: false,
+            holidayWorkStatus: 'confirmed',
+            overtimeStatus: 'confirmed',
             holidayWorkMinutes: actualMinutes,
             holidayWorkHours: Math.round((actualMinutes / 60) * 10) / 10,
             overtimeMinutes: 0,
@@ -1218,6 +1228,8 @@ export const App: React.FC = () => {
             isHolidayWork: false,
             isTentativeHolidayWork: false,
             isTentativeOvertime: false,
+            holidayWorkStatus: 'confirmed',
+            overtimeStatus: 'confirmed',
             overtimeMinutes: actualMinutes,
             overtimeHours: Math.round((actualMinutes / 60) * 10) / 10,
             holidayWorkMinutes: 0,
@@ -1228,11 +1240,11 @@ export const App: React.FC = () => {
       handleUpdateShiftDetails(dateStr, partnerId, patch);
       showToast(
         actualMinutes > 0
-          ? `🎉 お疲れさまでした！実残業 ${formatMinutesToJa(actualMinutes)} で確定しました！`
-          : `🎉 お疲れさまでした！残業なし(0分)で確定しました！`
+          ? `🎉 お疲れさまでした！${isHolidayWork ? '実休日出勤' : '実残業'} ${formatMinutesToJa(actualMinutes)} で確定しました！`
+          : `🎉 お疲れさまでした！${isHolidayWork ? '休出なし(0分)' : '残業なし(0分)'}で確定しました！`
       );
     },
-    [handleUpdateShiftDetails, showToast, store.shifts]
+    [handleUpdateShiftDetails, showToast]
   );
 
   // 仮残業のキャンセル（残業なし・0分で完了）
@@ -1242,6 +1254,8 @@ export const App: React.FC = () => {
       handleUpdateShiftDetails(dateStr, partnerId, {
         isTentativeHolidayWork: false,
         isTentativeOvertime: false,
+        holidayWorkStatus: 'confirmed',
+        overtimeStatus: 'confirmed',
         holidayWorkMinutes: 0,
         holidayWorkHours: 0,
         overtimeMinutes: 0,
@@ -2041,7 +2055,7 @@ export const App: React.FC = () => {
             onOpenPartnerEvents={openPartnerEventsModal}
           />
 
-          {/* 🌟 その日の終わりに実残業時間をそっちから確認してワンタップ確定させるお疲れさまカード */}
+          {/* 🌟 翌日以降にアプリを開いたときに実残業・休出時間をワンタップ確定させるお疲れさまカード */}
           <ConfirmOvertimeCard
             activePartner={activePartner}
             metadata={store.metadata}

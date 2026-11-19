@@ -241,8 +241,8 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
   // スマホ用のカレンダー表示スタイル切替（'grid' = 7列マス目 / 'list' = 縦1列くっきりリスト）
   const [mobileLayout, setMobileLayout] = useState<'grid' | 'list'>('grid');
 
-  // 詳細プレビューバーの表示（常にデフォルトで 'top'＝カレンダー上部にすべての詳細を表示）
-  const [previewPosition, setPreviewPosition] = useState<'top' | 'hidden'>('top');
+  // 詳細プレビューバーの表示（起動時は非表示、カレンダーで日程を選んだときだけ 'top' に展開）
+  const [previewPosition, setPreviewPosition] = useState<'top' | 'hidden'>('hidden');
 
   const handleSetPreviewPosition = (pos: 'top' | 'hidden') => {
     setPreviewPosition(pos);
@@ -478,14 +478,30 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
               </span>
             )}
 
-            {/* 3段目：残業・休日出勤（勤務の下に配置） */}
+            {/* 3段目：残業・休日出勤（勤務の下に配置・仮状態はオレンジ破線バッジで区別） */}
             {(() => {
               const otA = getShiftOvertimeMinutes(activeSelShiftA);
               const hwA = getShiftHolidayWorkMinutes(activeSelShiftA);
               if (otA === 0 && hwA === 0) return null;
+              const isTentA = Boolean(
+                (otA > 0 && activeSelShiftA?.isTentativeOvertime) ||
+                (hwA > 0 && activeSelShiftA?.isTentativeHolidayWork)
+              );
               return (
-                <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px] font-black shadow-2xs">
-                  {hwA > 0 ? `休出${formatMinutesShort(hwA)}` : `残業+${formatMinutesShort(otA)}`}
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-black shadow-2xs ${
+                    isTentA
+                      ? 'bg-amber-500 text-white border border-dashed border-amber-300'
+                      : 'bg-rose-500 text-white'
+                  }`}
+                >
+                  {isTentA
+                    ? hwA > 0
+                      ? `仮休${formatMinutesShort(hwA)}`
+                      : `仮残+${formatMinutesShort(otA)}`
+                    : hwA > 0
+                    ? `休出${formatMinutesShort(hwA)}`
+                    : `残業+${formatMinutesShort(otA)}`}
                 </span>
               );
             })()}
@@ -541,14 +557,30 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
               </span>
             )}
 
-            {/* 3段目：残業・休日出勤（勤務の下に配置） */}
+            {/* 3段目：残業・休日出勤（勤務の下に配置・仮状態はオレンジ破線バッジで区別） */}
             {(() => {
               const otB = getShiftOvertimeMinutes(activeSelShiftB);
               const hwB = getShiftHolidayWorkMinutes(activeSelShiftB);
               if (otB === 0 && hwB === 0) return null;
+              const isTentB = Boolean(
+                (otB > 0 && activeSelShiftB?.isTentativeOvertime) ||
+                (hwB > 0 && activeSelShiftB?.isTentativeHolidayWork)
+              );
               return (
-                <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px] font-black shadow-2xs">
-                  {hwB > 0 ? `休出${formatMinutesShort(hwB)}` : `残業+${formatMinutesShort(otB)}`}
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-black shadow-2xs ${
+                    isTentB
+                      ? 'bg-amber-500 text-white border border-dashed border-amber-300'
+                      : 'bg-rose-500 text-white'
+                  }`}
+                >
+                  {isTentB
+                    ? hwB > 0
+                      ? `仮休${formatMinutesShort(hwB)}`
+                      : `仮残+${formatMinutesShort(otB)}`
+                    : hwB > 0
+                    ? `休出${formatMinutesShort(hwB)}`
+                    : `残業+${formatMinutesShort(otB)}`}
                 </span>
               );
             })()}

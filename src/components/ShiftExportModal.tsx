@@ -17,6 +17,7 @@ import {
 import {
   formatMinutesShort,
   getJapaneseHoliday,
+  getLocalTodayStr,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
 } from '../utils/presets';
@@ -207,7 +208,7 @@ export const ShiftExportModal: React.FC<ShiftExportModalProps> = ({
     ctx.fillText(targetLabel, width - 24, 45);
 
     // 写真ヘッダーに対象者の月間残業サマリー（確定と仮残業を明確に区別して記載）
-    const todayIsoStr = new Date().toISOString().split('T')[0];
+    const todayIsoStr = getLocalTodayStr();
     if (exportMode === 'partnerA' || exportMode === 'partnerB') {
       const pId = exportMode;
       let confMin = 0;

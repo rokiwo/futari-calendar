@@ -34,6 +34,7 @@ import {
   formatMinutesToJa,
   getEffectivePrivateFor,
   getJapaneseHoliday,
+  getLocalTodayStr,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
   isEventVisibleToPartner,
@@ -129,6 +130,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
   const [editingOtPartner, setEditingOtPartner] = useState<PartnerId | null>(null);
   const [otInputMinutes, setOtInputMinutes] = useState<string>('');
   const [isOtHolidayWork, setIsOtHolidayWork] = useState<boolean>(false);
+  const [otIsTentative, setOtIsTentative] = useState<boolean>(false);
 
   // 残業入力パネルを開く処理
   const handleOpenOvertimeEditor = (partnerId: PartnerId) => {
@@ -136,17 +138,22 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
     const curOt = getShiftOvertimeMinutes(shift);
     const curHw = getShiftHolidayWorkMinutes(shift);
     const isHw = Boolean(shift?.isHolidayWork || curHw > 0);
+    const isFuture = dateStr > getLocalTodayStr();
+    const isExistingTentative = Boolean(
+      isHw ? shift?.isTentativeHolidayWork : shift?.isTentativeOvertime
+    );
     setIsOtHolidayWork(isHw);
     setOtInputMinutes(String(isHw ? curHw : curOt || 30));
+    setOtIsTentative(isFuture || isExistingTentative);
     setEditingOtPartner(partnerId);
   };
 
   // 残業・休日出勤の保存
   const handleSaveOvertime = (targetPartner: PartnerId, minutes: number, isHw: boolean) => {
     if (!onUpdateShiftDetails) return;
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalTodayStr();
     const isFuture = dateStr > todayStr;
-    const finalTentative = isFuture ? true : false;
+    const finalTentative = isFuture ? true : dateStr === todayStr ? otIsTentative : false;
 
     if (minutes === 0) {
       onUpdateShiftDetails(dateStr, targetPartner, {
@@ -190,7 +197,9 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
   const renderOvertimeEditor = (targetPartner: PartnerId) => {
     const targetPartnerInfo = targetPartner === 'partnerB' ? partnerB : partnerA;
-    const isFuture = dateStr > new Date().toISOString().split('T')[0];
+    const todayStr = getLocalTodayStr();
+    const isFuture = dateStr > todayStr;
+    const isToday = dateStr === todayStr;
 
     return (
       <div className="mt-2.5 bg-linear-to-r from-[#FFF4EA] to-[#FFEBEF] p-3 rounded-2xl border-2 border-[#FFD0BF] space-y-2.5 animate-pop text-xs">
@@ -210,8 +219,20 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
         {isFuture && (
           <div className="text-[10px] text-amber-800 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200 font-bold">
-            📅 明日以降の予定のため固定で「仮予定（見込み）」として記録されます🐾（当日に確定できます）
+            📅 明日以降の予定のため固定で「仮予定（見込み）」として記録されます🐾（翌日以降にアプリを開くと確定できます）
           </div>
+        )}
+
+        {isToday && (
+          <label className="flex items-center gap-2 text-[11px] font-bold text-amber-900 bg-amber-50/90 px-2.5 py-1.5 rounded-lg border border-amber-200 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={otIsTentative}
+              onChange={(e) => setOtIsTentative(e.target.checked)}
+              className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-400"
+            />
+            <span>仮の残業予定にする（翌日以降に確定カードを表示）</span>
+          </label>
         )}
 
         {/* 分数直接入力 ＆ 保存ボタン */}
@@ -1280,7 +1301,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     const hw = getShiftHolidayWorkMinutes(shiftA);
                     const ot = getShiftOvertimeMinutes(shiftA);
                     const isTentative = Boolean((ot > 0 && shiftA?.isTentativeOvertime) || (hw > 0 && shiftA?.isTentativeHolidayWork));
-                    const todayStr = new Date().toISOString().split('T')[0];
+                    const todayStr = getLocalTodayStr();
                     const isFuture = dateStr > todayStr;
                     return (
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -1311,7 +1332,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                         )}
                         {isTentative && isFuture && (
                           <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                            💡 未来日のため仮登録中（当日に確認カードが出ます🐾）
+                            💡 未来日のため仮登録中（翌日以降に確認カードが出ます🐾）
                           </span>
                         )}
                       </div>
@@ -1370,7 +1391,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                     const hw = getShiftHolidayWorkMinutes(shiftB);
                     const ot = getShiftOvertimeMinutes(shiftB);
                     const isTentative = Boolean((ot > 0 && shiftB?.isTentativeOvertime) || (hw > 0 && shiftB?.isTentativeHolidayWork));
-                    const todayStr = new Date().toISOString().split('T')[0];
+                    const todayStr = getLocalTodayStr();
                     const isFuture = dateStr > todayStr;
                     return (
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -1401,7 +1422,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
                         )}
                         {isTentative && isFuture && (
                           <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                            💡 未来日のため仮登録中（当日に確認カードが出ます🐾）
+                            💡 未来日のため仮登録中（翌日以降に確認カードが出ます🐾）
                           </span>
                         )}
                       </div>

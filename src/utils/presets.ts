@@ -634,6 +634,29 @@ export function createInitialDataStore(): CalendarDataStore {
 }
 
 // ==========================================
+// 📅 ローカルタイム基準の日付ヘルパー（JST 0時〜9時のUTCズレ防止）
+// ==========================================
+
+export function getLocalTodayStr(baseDate: Date = new Date()): string {
+  const y = baseDate.getFullYear();
+  const m = String(baseDate.getMonth() + 1).padStart(2, '0');
+  const d = String(baseDate.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function getLocalDateStrOffset(
+  deltaDays: number,
+  baseDate: Date = new Date()
+): string {
+  const dt = new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate() + deltaDays
+  );
+  return getLocalTodayStr(dt);
+}
+
+// ==========================================
 // ⏱️ 残業・休日出勤の分単位計算＆フォーマットユーティリティ
 // ==========================================
 

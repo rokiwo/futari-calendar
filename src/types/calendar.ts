@@ -42,6 +42,7 @@ export interface ShiftEntry {
   partnerId: PartnerId;
   stampId: string;        // メインのシフト（例: 日勤、休み、休日出勤）
   customLabel?: string;
+  customColor?: string;
   startTime?: string;
   endTime?: string;
 
