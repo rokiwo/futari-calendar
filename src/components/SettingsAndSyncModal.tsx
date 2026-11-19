@@ -178,7 +178,10 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
         text: res.ok
           ? res.tasksSupported
             ? `✅ Googleカレンダー「${res.calendarName || calId}」＆Googleタスクの接続に成功しました！✨`
-            : `✅ Googleカレンダー「${res.calendarName || calId}」に接続成功（⚠️ Googleタスク自動連携を有効にするにはGASの「サービス ＋」で「Tasks API」を追加し最新コードを貼り付けて再デプロイしてください）`
+            : `✅ Googleカレンダー「${res.calendarName || calId}」に接続成功（⚠️ Googleタスク未連携: ${
+                res.tasksError ||
+                'GASの「サービス ＋」で「Tasks API」を追加し setupAndCheckAuth を実行・再デプロイしてください'
+              }）`
           : `❌ 接続エラー: ${res.error || 'カレンダーの共有設定をご確認ください'}`,
       });
     } finally {
