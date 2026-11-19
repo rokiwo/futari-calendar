@@ -402,7 +402,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
 
   const dayEvents = Object.values(store.events || {})
     .filter((e): e is ScheduleEvent =>
-      Boolean(e && !e.deletedAt && e.date === dateStr && isEventVisibleToPartner(e, activePartner))
+      Boolean(e && !e.deletedAt && !e.isTask && e.date === dateStr && isEventVisibleToPartner(e, activePartner))
     )
     .sort((a, b) => {
       if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1;
@@ -639,7 +639,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
           <div className="space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-1.5">
               <h3 className="text-sm font-extrabold text-stone-800">
-                📅 この日の予定・タスク ({dayEvents.length}件)
+                📅 この日の予定 ({dayEvents.length}件)
               </h3>
               <div className="flex flex-wrap items-center gap-1">
                 <button
@@ -1105,7 +1105,7 @@ export const DayDetailModal: React.FC<DayDetailModalProps> = ({
             {/* 予定＆タスク一覧表示 */}
             {dayEvents.length === 0 ? (
               <div className="bg-white rounded-2xl p-4 text-center border border-dashed border-stone-200 text-xs text-stone-400">
-                この日の予定・タスクはまだありません🐾 上の「＋予定」「＋タスク」からすぐ登録できます。
+                この日の予定はまだありません🐾 上の「＋予定」からすぐ登録できます。（タスクは「タスク」カレンダーに表示されます）
               </div>
             ) : (
               <div className="space-y-2">

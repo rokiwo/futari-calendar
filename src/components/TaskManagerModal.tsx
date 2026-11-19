@@ -893,23 +893,18 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
                           </span>
                         ) : cell.tasks.length > 0 ? (
                           <span className="text-[8px] font-extrabold text-stone-400">
-                            {pendingCount > 0 ? `🔴${pendingCount}` : '✅'}
+                            {pendingCount > 0 ? `🔴${pendingCount}` : '済'}
                           </span>
                         ) : null}
                       </div>
 
-                      {/* タスク一覧（マス目内プレビュー） */}
+                      {/* タスク一覧（マス目内プレビュー：チェック枠・タップ完了なし、セルタップで日程選択＆詳細展開） */}
                       <div className="flex-1 space-y-0.5 overflow-hidden">
                         {cell.tasks.slice(0, 3).map((t) => (
                           <div
                             key={t.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedTaskDate(cell.dateStr);
-                              onToggleTaskComplete(t.id);
-                            }}
-                            title={`${t.title}（タップで完了切替）`}
-                            className={`px-1 py-0.5 rounded text-[9px] font-black truncate flex items-center gap-0.5 transition-all ${
+                            title={t.title}
+                            className={`px-1 py-0.5 rounded text-[9px] font-black truncate flex items-center transition-all ${
                               t.isCompleted
                                 ? 'bg-stone-100 text-stone-400 line-through'
                                 : activePartner === 'partnerA'
@@ -917,7 +912,6 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
                                 : 'bg-[#F3EAFF] text-[#6638A6]'
                             }`}
                           >
-                            <span className="shrink-0">{t.isCompleted ? '✅' : '⬜'}</span>
                             <span className="truncate">{t.title}</span>
                           </div>
                         ))}

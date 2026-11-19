@@ -72,7 +72,7 @@ export const PartnerEventsModal: React.FC<PartnerEventsModalProps> = ({
     }> = [];
 
     for (const ev of Object.values(store.events || {})) {
-      if (!ev || ev.deletedAt) continue;
+      if (!ev || ev.deletedAt || ev.isTask) continue;
       // 🔒 操作者限定プライベート予定＆個人タスク：相手の秘密予定・タスクは相手の予定一覧にも絶対に表示しない
       if (!isEventVisibleToPartner(ev, activePartner)) continue;
       // 相手が作成した予定、もしくは相手専用カテゴリの予定

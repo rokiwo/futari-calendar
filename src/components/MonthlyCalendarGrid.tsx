@@ -206,7 +206,7 @@ export const MonthlyCalendarGrid: React.FC<MonthlyCalendarGridProps> = ({
 
   const eventsByDate = new Map<string, ScheduleEvent[]>();
   for (const ev of Object.values(store.events || {})) {
-    if (!ev || ev.deletedAt) continue;
+    if (!ev || ev.deletedAt || ev.isTask) continue;
 
     // 🔒 操作者限定プライベート予定＆個人タスク：他人の秘密予定・タスクは完全に除外！
     if (!isEventVisibleToPartner(ev, activePartner)) continue;

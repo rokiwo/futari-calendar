@@ -310,7 +310,7 @@ export const WidgetCompactView: React.FC<WidgetCompactViewProps> = ({
             isShiftConsideredHoliday(shiftB, stampB);
 
           const events = Object.values(store.events)
-            .filter((e) => !e.deletedAt && e.date === day.dateStr && isEventVisibleToPartner(e, activePartner))
+            .filter((e) => !e.deletedAt && !e.isTask && e.date === day.dateStr && isEventVisibleToPartner(e, activePartner))
             .sort((a, b) => {
               if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1;
               return (a.startTime || '00:00').localeCompare(b.startTime || '00:00');
@@ -686,7 +686,7 @@ export const WidgetGuideModal: React.FC<WidgetGuideModalProps> = ({
       const stA = sA && !sA.deletedAt ? stampMap.get(sA.stampId) : undefined;
       const stB = sB && !sB.deletedAt ? stampMap.get(sB.stampId) : undefined;
       const evs = Object.values(store.events)
-        .filter((e) => !e.deletedAt && e.date === d.dateStr && !getEffectivePrivateFor(e))
+        .filter((e) => !e.deletedAt && !e.isTask && e.date === d.dateStr && !getEffectivePrivateFor(e))
         .map((e) => e.title)
         .join(' / ');
       return {
