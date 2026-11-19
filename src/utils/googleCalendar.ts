@@ -1878,16 +1878,39 @@ export async function syncWithGoogleCalendar(
       }
     }
 
-    // 4. Googleカレンダー側で削除された予定を検知してペアカレ側も論理削除する（双方向削除同期：境界日除外）
+    // 4. Googleカレンダー側で削除された予定を検知してペアカレ側も論理削除する（双方向削除同期：境界日除外＋大量誤削除ガード）
+    let totalSyncedInRange = 0;
+    const calDeleteCandidates: string[] = [];
     for (const [evId, localEv] of Object.entries(nextEvents)) {
       if (!localEv || localEv.deletedAt) continue;
       if (localEv.date <= minDateStr || localEv.date >= maxDateStr) continue;
       if (!shouldSyncEventToTarget(localEv, target.key, hasSharedCal)) continue;
       const syncedGId = localEv.googleEventIds?.[target.key];
-      if (syncedGId && !seenGoogleIdsInRemote.has(syncedGId) && !mapping[evId]) {
+      if (!syncedGId) continue;
+      totalSyncedInRange++;
+      if (!seenGoogleIdsInRemote.has(syncedGId) && !mapping[evId]) {
+        calDeleteCandidates.push(evId);
+      }
+    }
+    const abortCalMassDelete =
+      calDeleteCandidates.length >= 5 &&
+      (seenGoogleIdsInRemote.size === 0 ||
+        calDeleteCandidates.length / Math.max(1, totalSyncedInRange) >= 0.6);
+    if (abortCalMassDelete) {
+      console.warn(
+        `[PairCal] Aborted suspicious mass calendar deletion on ${target.key}: ${calDeleteCandidates.length}/${totalSyncedInRange}`
+      );
+    } else {
+      for (const evId of calDeleteCandidates) {
+        const localEv = nextEvents[evId];
+        if (!localEv) continue;
         const nowIso = new Date().toISOString();
+        const nextGIds = { ...(localEv.googleEventIds || {}) };
+        delete nextGIds[target.key];
         nextEvents[evId] = {
           ...localEv,
+          googleEventId: target.key === 'partnerA' ? undefined : localEv.googleEventId,
+          googleEventIds: nextGIds,
           deletedAt: nowIso,
           updatedAt: nowIso,
         };
@@ -2031,20 +2054,37 @@ export async function syncWithGoogleCalendar(
         }
       }
 
-      // Google Tasks 側で完全削除されたタスクをペアカレ側でも論理削除する（エラー時はスキップ）
+      // Google Tasks 側で完全削除されたタスクをペアカレ側でも論理削除する（エラー時はスキップ＋大量誤削除ガード）
       if (!data.tasksError) {
+        let totalSyncedTasks = 0;
+        const taskDeleteCandidates: string[] = [];
         for (const [evId, localEv] of Object.entries(nextEvents)) {
           if (!localEv || localEv.deletedAt || !localEv.isTask) continue;
           if (getEffectivePrivateFor(localEv) !== target.defaultCreator) continue;
-          if (
-            localEv.googleTaskSynced &&
-            localEv.googleTaskId &&
-            !seenGoogleTaskIds.has(localEv.googleTaskId) &&
-            !pushedTaskMap[evId]
-          ) {
+          if (!localEv.googleTaskSynced || !localEv.googleTaskId) continue;
+          totalSyncedTasks++;
+          if (!seenGoogleTaskIds.has(localEv.googleTaskId) && !pushedTaskMap[evId]) {
+            taskDeleteCandidates.push(evId);
+          }
+        }
+        const abortTaskMassDelete =
+          taskDeleteCandidates.length >= 5 &&
+          (seenGoogleTaskIds.size === 0 ||
+            taskDeleteCandidates.length / Math.max(1, totalSyncedTasks) >= 0.6);
+        if (abortTaskMassDelete) {
+          console.warn(
+            `[PairCal] Aborted suspicious mass task deletion on ${target.key}: ${taskDeleteCandidates.length}/${totalSyncedTasks}`
+          );
+        } else {
+          for (const evId of taskDeleteCandidates) {
+            const localEv = nextEvents[evId];
+            if (!localEv) continue;
             const nowIso = new Date().toISOString();
             nextEvents[evId] = {
               ...localEv,
+              googleTaskId: undefined,
+              googleTaskListId: undefined,
+              googleTaskSynced: false,
               deletedAt: nowIso,
               updatedAt: nowIso,
             };
