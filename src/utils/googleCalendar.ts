@@ -1283,6 +1283,7 @@ export async function syncWithGoogleCalendar(
   const pastDays = config.syncRangePastDays ?? 30;
   const futureDays = config.syncRangeFutureDays ?? 120;
   const now = new Date();
+  const syncStartedIso = now.toISOString();
   const minDateObj = new Date(now.getTime() - pastDays * 86400000);
   const maxDateObj = new Date(now.getTime() + futureDays * 86400000);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -1384,7 +1385,7 @@ export async function syncWithGoogleCalendar(
         const existingGId = ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined);
         if (!existingGId || !ev.googleCalSynced) return true;
         const evUpdatedMs = Date.parse(ev.updatedAt || '') || 0;
-        return evUpdatedMs > lastSyncedMs - 5000;
+        return evUpdatedMs > lastSyncedMs;
       })
       .map((ev) => ({
         id: ev.id,
@@ -1423,7 +1424,7 @@ export async function syncWithGoogleCalendar(
             if (getEffectivePrivateFor(ev) !== target.defaultCreator) return false;
             if (!ev.googleTaskId || !ev.googleTaskSynced) return true;
             const evUpdatedMs = Date.parse(ev.updatedAt || '') || 0;
-            return evUpdatedMs > lastSyncedMs - 5000;
+            return evUpdatedMs > lastSyncedMs;
           })
           .map((ev) => ({
             id: ev.id,
@@ -1749,6 +1750,7 @@ export async function syncWithGoogleCalendar(
     if (target.syncTasks && data.tasksSupported) {
       anyTasksSupported = true;
       const pushedTaskMap = data.pushedTaskMapping || {};
+      const pushedTaskIdsNow = new Set(taskUpserts.map((tu) => tu.id));
       const seenGoogleTaskIds = new Set<string>();
 
       for (const delTask of taskDeletions) {
@@ -1814,7 +1816,13 @@ export async function syncWithGoogleCalendar(
             matchedLocal.date !== nextTaskDate ||
             (matchedLocal.memo || '') !== (remTask.memo || '');
 
-          if (hasTaskDiff && remTimeMs > locTimeMs + 2000) {
+          const wasPushedNow = pushedTaskIdsNow.has(matchedLocal.id);
+          const hasNoUnpushedLocalEdit =
+            Boolean(matchedLocal.googleTaskSynced) &&
+            !wasPushedNow &&
+            (lastSyncedMs === 0 || locTimeMs <= lastSyncedMs);
+
+          if (hasTaskDiff && (remTimeMs > locTimeMs + 2000 || hasNoUnpushedLocalEdit)) {
             nextEvents[matchedLocal.id] = {
               ...matchedLocal,
               title: cleanTaskTitle,
@@ -1897,7 +1905,7 @@ export async function syncWithGoogleCalendar(
   const nowIso = new Date().toISOString();
   const updatedGcalConfig: GoogleCalendarSyncConfig = {
     ...config,
-    lastGoogleSyncedAt: nowIso,
+    lastGoogleSyncedAt: syncStartedIso,
     updatedAt: nowIso,
   };
   saveGoogleCalendarSyncConfig(updatedGcalConfig);

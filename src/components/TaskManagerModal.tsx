@@ -89,7 +89,7 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
   const [calYear, setCalYear] = useState(initY || now.getFullYear());
   const [calMonth, setCalMonth] = useState(initM || now.getMonth() + 1);
   const [selectedTaskDate, setSelectedTaskDate] = useState<string>(defaultDate);
-  const [dayCardMinimized, setDayCardMinimized] = useState(false);
+  const [dayCardMinimized, setDayCardMinimized] = useState(true);
 
   // 新規タスク入力フォーム（常時サクサク連続入力対応）
   const [newTitle, setNewTitle] = useState('');
@@ -546,8 +546,10 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
               type="button"
               onClick={() => {
                 setDayCardMinimized(false);
-                const inputEl = document.getElementById('quick-task-title-input');
-                if (inputEl) inputEl.focus();
+                setTimeout(() => {
+                  const inputEl = document.getElementById('quick-task-title-input');
+                  if (inputEl) inputEl.focus();
+                }, 0);
               }}
               className="px-3 py-1.5 rounded-2xl bg-gradient-to-r from-[#FF6B8B] to-[#9B5DE5] text-white text-xs font-black flex items-center gap-1 whitespace-nowrap shadow-sm hover:opacity-95 active:scale-95 transition-all"
             >
@@ -605,9 +607,12 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
           </label>
         </div>
 
-        {/* 選択中の日のタスク追加＆一覧パネル（常時上部に表示・右上の「⌄」で最小化も可能） */}
-        <div className="bg-white border-b-2 border-[#FFE5EC] px-3 py-2.5 space-y-2">
-          <div className="flex items-center justify-between gap-2">
+        {/* 選択中の日のタスク追加＆一覧アコーディオン（起動時は閉じた状態・見出し/日付/＋タスク追加で展開） */}
+        <div className="bg-white border-b-2 border-[#FFE5EC] px-3 py-2 space-y-2">
+          <div
+            onClick={() => setDayCardMinimized((prev) => !prev)}
+            className="flex items-center justify-between gap-2 cursor-pointer select-none"
+          >
             <div className="flex items-center gap-1.5 flex-wrap min-w-0">
               <span className="text-xs sm:text-sm font-black text-stone-800">
                 📅 {formatJapaneseDateWithDow(selectedTaskDate)} のタスク
@@ -628,17 +633,24 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
               <span className="text-[10px] font-extrabold text-stone-500">
                 （未完了 {selectedDateTasks.filter((t) => !t.isCompleted).length} / 全 {selectedDateTasks.length}件）
               </span>
+              {dayCardMinimized && overdueTasks.length > 0 && (
+                <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 shrink-0">
+                  📌 過去残 {overdueTasks.length}件
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
               {selectedTaskDate !== todayStr && (
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setSelectedTaskDate(todayStr);
                     const [ty, tm] = todayStr.split('-').map(Number);
                     setCalYear(ty);
                     setCalMonth(tm);
+                    setDayCardMinimized(false);
                   }}
                   className="px-2 py-0.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-black whitespace-nowrap"
                 >
@@ -647,111 +659,116 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
               )}
               <button
                 type="button"
-                onClick={() => setDayCardMinimized(!dayCardMinimized)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDayCardMinimized(!dayCardMinimized);
+                }}
                 className="p-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600"
-                title={dayCardMinimized ? '詳細を開く' : '詳細を最小化'}
+                title={dayCardMinimized ? '詳細を開く' : '詳細を閉じる'}
               >
                 <ChevronDown
                   className={`w-4 h-4 stroke-[2.5] transition-transform ${
-                    dayCardMinimized ? 'rotate-180' : ''
+                    !dayCardMinimized ? 'rotate-180' : ''
                   }`}
                 />
               </button>
             </div>
           </div>
 
-          {/* サクサク1行連続タスク追加フォーム */}
-          <form onSubmit={handleCreateTask} className="space-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <input
-                id="quick-task-title-input"
-                type="text"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder={`${formatJapaneseDateWithDow(selectedTaskDate)} のやること・事務所タスクを入力...`}
-                className="flex-1 min-w-0 px-3 py-2 rounded-xl border-2 border-stone-200 bg-[#FFFBF7] font-black text-xs text-stone-800 focus:border-[#FF8FAB] focus:bg-white focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => setShowDetailInputs(!showDetailInputs)}
-                className={`px-2 py-2 rounded-xl border text-[10px] font-black whitespace-nowrap shrink-0 ${
-                  showDetailInputs || newTime || newMemo
-                    ? 'bg-purple-50 border-purple-300 text-purple-700'
-                    : 'bg-stone-50 border-stone-200 text-stone-500'
-                }`}
-              >
-                時間/メモ
-              </button>
-              <button
-                type="submit"
-                disabled={!newTitle.trim()}
-                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#FF6B8B] to-[#9B5DE5] text-white text-xs font-black flex items-center gap-1 whitespace-nowrap shadow-xs disabled:opacity-40 active:scale-95 transition-all shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5 stroke-[2.75]" />
-                <span>追加</span>
-              </button>
-            </div>
-
-            {showDetailInputs && (
-              <div className="flex items-center gap-1.5 pt-0.5">
-                <input
-                  type="date"
-                  value={selectedTaskDate}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setSelectedTaskDate(e.target.value);
-                      const [ny, nm] = e.target.value.split('-').map(Number);
-                      if (ny && nm) {
-                        setCalYear(ny);
-                        setCalMonth(nm);
-                      }
-                    }
-                  }}
-                  className="px-2 py-1 rounded-lg border border-stone-200 bg-[#FFFBF7] font-bold text-[11px]"
-                />
-                <input
-                  type="time"
-                  value={newTime}
-                  onChange={(e) => setNewTime(e.target.value)}
-                  className="px-2 py-1 rounded-lg border border-stone-200 bg-[#FFFBF7] font-bold text-[11px]"
-                />
-                <input
-                  type="text"
-                  value={newMemo}
-                  onChange={(e) => setNewMemo(e.target.value)}
-                  placeholder="メモ（任意）"
-                  className="flex-1 min-w-0 px-2.5 py-1 rounded-lg border border-stone-200 bg-[#FFFBF7] font-bold text-[11px]"
-                />
-              </div>
-            )}
-          </form>
-
-          {/* 過去の未完了タスク繰越バナー（前の勤務日にやり残したタスクを1タップで今日/選択日に集約） */}
-          {overdueTasks.length > 0 && (
-            <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px]">
-              <span className="font-extrabold text-amber-900">
-                📌 過去の未完了タスクが {overdueTasks.length}件 残っています
-              </span>
-              <button
-                type="button"
-                onClick={moveAllOverdueToSelectedDate}
-                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-black text-[10px] whitespace-nowrap shadow-2xs active:scale-95"
-              >
-                {formatJapaneseDateWithDow(selectedTaskDate)}へまとめて繰越
-              </button>
-            </div>
-          )}
-
-          {/* 選択日のタスク一覧（最小化されていない時） */}
           {!dayCardMinimized && (
-            <div className="max-h-[26vh] overflow-y-auto space-y-1.5 pr-0.5">
-              {selectedDateTasks.length === 0 ? (
-                <div className="text-center py-2.5 text-[11px] font-bold text-stone-400 bg-stone-50/70 rounded-xl border border-dashed border-stone-200">
-                  この日のタスクはまだありません（上の入力欄からすぐ追加できます✨）
+            <div className="space-y-2 pt-0.5">
+              {/* サクサク1行連続タスク追加フォーム */}
+              <form onSubmit={handleCreateTask} className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    id="quick-task-title-input"
+                    type="text"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder={`${formatJapaneseDateWithDow(selectedTaskDate)} のやること・事務所タスクを入力...`}
+                    className="flex-1 min-w-0 px-3 py-2 rounded-xl border-2 border-stone-200 bg-[#FFFBF7] font-black text-xs text-stone-800 focus:border-[#FF8FAB] focus:bg-white focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDetailInputs(!showDetailInputs)}
+                    className={`px-2 py-2 rounded-xl border text-[10px] font-black whitespace-nowrap shrink-0 ${
+                      showDetailInputs || newTime || newMemo
+                        ? 'bg-purple-50 border-purple-300 text-purple-700'
+                        : 'bg-stone-50 border-stone-200 text-stone-500'
+                    }`}
+                  >
+                    時間/メモ
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!newTitle.trim()}
+                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#FF6B8B] to-[#9B5DE5] text-white text-xs font-black flex items-center gap-1 whitespace-nowrap shadow-xs disabled:opacity-40 active:scale-95 transition-all shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[2.75]" />
+                    <span>追加</span>
+                  </button>
                 </div>
-              ) : (
-                selectedDateTasks.map((t) => renderTaskRow(t, false))
+
+                {showDetailInputs && (
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <input
+                      type="date"
+                      value={selectedTaskDate}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setSelectedTaskDate(e.target.value);
+                          const [ny, nm] = e.target.value.split('-').map(Number);
+                          if (ny && nm) {
+                            setCalYear(ny);
+                            setCalMonth(nm);
+                          }
+                        }
+                      }}
+                      className="px-2 py-1 rounded-lg border border-stone-200 bg-[#FFFBF7] font-bold text-[11px]"
+                    />
+                    <input
+                      type="time"
+                      value={newTime}
+                      onChange={(e) => setNewTime(e.target.value)}
+                      className="px-2 py-1 rounded-lg border border-stone-200 bg-[#FFFBF7] font-bold text-[11px]"
+                    />
+                    <input
+                      type="text"
+                      value={newMemo}
+                      onChange={(e) => setNewMemo(e.target.value)}
+                      placeholder="メモ（任意）"
+                      className="flex-1 min-w-0 px-2.5 py-1 rounded-lg border border-stone-200 bg-[#FFFBF7] font-bold text-[11px]"
+                    />
+                  </div>
+                )}
+              </form>
+
+              {/* 過去の未完了タスク繰越バナー（前の勤務日にやり残したタスクを1タップで今日/選択日に集約） */}
+              {overdueTasks.length > 0 && (
+                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px]">
+                  <span className="font-extrabold text-amber-900">
+                    📌 過去の未完了タスクが {overdueTasks.length}件 残っています
+                  </span>
+                  <button
+                    type="button"
+                    onClick={moveAllOverdueToSelectedDate}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-black text-[10px] whitespace-nowrap shadow-2xs active:scale-95"
+                  >
+                    {formatJapaneseDateWithDow(selectedTaskDate)}へまとめて繰越
+                  </button>
+                </div>
               )}
+
+              {/* 選択日のタスク一覧 */}
+              <div className="max-h-[26vh] overflow-y-auto space-y-1.5 pr-0.5">
+                {selectedDateTasks.length === 0 ? (
+                  <div className="text-center py-2.5 text-[11px] font-bold text-stone-400 bg-stone-50/70 rounded-xl border border-dashed border-stone-200">
+                    この日のタスクはまだありません（上の入力欄からすぐ追加できます✨）
+                  </div>
+                ) : (
+                  selectedDateTasks.map((t) => renderTaskRow(t, false))
+                )}
+              </div>
             </div>
           )}
         </div>

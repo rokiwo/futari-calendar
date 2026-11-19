@@ -908,12 +908,12 @@ export const App: React.FC = () => {
     }
   }, [activePartner, gcalSyncConfig, runSerializedCloudSync, sessionPassword, setStore, syncConfig]);
 
-  // 画面復帰時（Googleタスクアプリや別タブから戻ったとき等）に30秒間隔で自動同期
+  // 画面復帰時（Googleタスクアプリや別タブから戻ったとき等）に10秒間隔で自動同期
   useEffect(() => {
     if (!isLoaded) return;
     const triggerFocusSync = () => {
       const nowMs = Date.now();
-      if (nowMs - lastFocusGoogleSyncAtRef.current < 30_000) return;
+      if (nowMs - lastFocusGoogleSyncAtRef.current < 10_000) return;
       lastFocusGoogleSyncAtRef.current = nowMs;
       void runSerializedGoogleSync();
     };
@@ -1914,87 +1914,20 @@ export const App: React.FC = () => {
     [activePartner, gcalSyncConfig, sessionPassword, showToast, store, syncConfig]
   );
 
-  // スマホでアプリ画面を開き直した時（フォーカス復帰時）＋3分おきの定期チェックで、夫婦クラウド＆Googleカレンダー（Gemini追加予定）を自動同期
+  // 3分おきの定期チェックで、夫婦クラウド＆Googleカレンダー/Googleタスクを安全に直列自動同期
   useEffect(() => {
     if (!isLoaded) return;
 
-    const runBackgroundSync = async () => {
-      let currentStore = store;
-      const activeGcalCfg = loadGoogleCalendarSyncConfig(
-        currentStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig
-      );
-      let gcalChanged = false;
-
-      if (
-        activeGcalCfg?.enabled &&
-        activeGcalCfg?.autoSync &&
-        (activeGcalCfg.partnerAGasUrl || activeGcalCfg.partnerBGasUrl)
-      ) {
-        try {
-          const gcalRes = await syncWithGoogleCalendar(
-            currentStore,
-            activeGcalCfg,
-            activePartner
-          );
-          currentStore = gcalRes.nextStore;
-          if (
-            gcalRes.importedCount > 0 ||
-            gcalRes.updatedCount > 0 ||
-            gcalRes.pushedCount > 0
-          ) {
-            gcalChanged = true;
-            setStore(currentStore);
-            await saveLocalStore(currentStore, sessionPassword || undefined);
-            if (gcalRes.importedCount > 0) {
-              showToast(
-                `✨ Googleカレンダー/Geminiから新しい予定 ${gcalRes.importedCount}件 を自動取り込みしました！`
-              );
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      if (syncConfig.enabled && syncConfig.githubToken) {
-        try {
-          const { mergedStore } = await syncWithGitHub(
-            currentStore,
-            syncConfig,
-            sessionPassword
-          );
-          const preservedWelcome =
-            currentStore.metadata?.welcomeImageConfig?.dataUrl
-              ? currentStore.metadata.welcomeImageConfig
-              : mergedStore.metadata?.welcomeImageConfig;
-          const finalStore: CalendarDataStore = {
-            ...mergedStore,
-            metadata: {
-              ...mergedStore.metadata,
-              welcomeImageConfig:
-                preservedWelcome || mergedStore.metadata?.welcomeImageConfig,
-            },
-          };
-          setStore(finalStore);
-          if (gcalChanged) {
-            await saveLocalStore(finalStore, sessionPassword || undefined);
-          }
-        } catch {
-          // ignore
-        }
-      }
+    const runBackgroundSync = () => {
+      void runSerializedGoogleSync();
+      void runSerializedCloudSync();
     };
 
-    const onFocus = () => {
-      runBackgroundSync();
-    };
-    window.addEventListener('focus', onFocus);
     const intervalId = window.setInterval(runBackgroundSync, 180_000);
     return () => {
-      window.removeEventListener('focus', onFocus);
       window.clearInterval(intervalId);
     };
-  }, [activePartner, gcalSyncConfig, isLoaded, sessionPassword, showToast, store, syncConfig]);
+  }, [isLoaded, runSerializedCloudSync, runSerializedGoogleSync]);
 
   const handlePrevMonth = useCallback(() => {
     setMonth((m) => {
