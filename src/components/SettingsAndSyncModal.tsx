@@ -176,7 +176,9 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
       setStatusMsg({
         type: res.ok ? 'ok' : 'err',
         text: res.ok
-          ? `✅ Googleカレンダー「${res.calendarName || calId}」への接続に成功しました！✨`
+          ? res.tasksSupported
+            ? `✅ Googleカレンダー「${res.calendarName || calId}」＆Googleタスクの接続に成功しました！✨`
+            : `✅ Googleカレンダー「${res.calendarName || calId}」に接続成功（⚠️ Googleタスク自動連携を有効にするにはGASの「サービス ＋」で「Tasks API」を追加し最新コードを貼り付けて再デプロイしてください）`
           : `❌ 接続エラー: ${res.error || 'カレンダーの共有設定をご確認ください'}`,
       });
     } finally {
@@ -1067,10 +1069,10 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     <span className="text-xl">🔄</span>
                     <div>
                       <h3 className="text-sm font-black text-stone-800 flex items-center gap-1.5">
-                        <span>Googleカレンダー ＆ Gemini 自動双方向同期</span>
+                        <span>Googleカレンダー ＆ Googleタスク 双方向自動同期</span>
                       </h3>
                       <p className="text-[11px] text-stone-500">
-                        ペアカレ ⇄ Googleカレンダーを双方向同期！スマホのGeminiに入れた予定も自動でペアカレに入ります✨
+                        ペアカレ ⇄ Googleカレンダー＆Googleタスク(ToDoリスト)を双方向同期！アプリ内・Googleのどちらで完了しても双方に反映されます✨
                       </p>
                     </div>
                   </div>
@@ -1087,18 +1089,18 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                   </span>
                 </div>
 
-                {/* Gemini → Googleカレンダー → ペアカレ の流れガイド */}
+                {/* Gemini → Googleカレンダー／タスク → ペアカレ の流れガイド */}
                 <div className="p-3 rounded-2xl bg-gradient-to-r from-[#E2F9FC]/70 via-[#FFF0F5]/70 to-[#F3EAFF]/70 border border-[#BCEBF5] space-y-1.5">
                   <div className="font-extrabold text-[#136370] text-xs flex items-center gap-1.5">
                     <span>✨</span>
-                    <span>スマホのGeminiから自動でペアカレに予定を入れる方法</span>
+                    <span>スマホのGemini・Googleタスクから自動でペアカレに反映する方法</span>
                   </div>
                   <p className="text-[11px] text-stone-700 leading-relaxed font-bold">
-                    ① スマホのGeminiアプリに<strong>「来週土曜18時から焼肉をGoogleカレンダーに入れて」</strong>と話す／入力する
+                    ① スマホのGeminiアプリに<strong>「来週土曜18時から焼肉をGoogleカレンダーに入れて」</strong>、タスクなら<strong>「〇〇をGoogleタスク（ToDo）に追加して」</strong>と話す／入力する
                     <br />
-                    ② Googleカレンダーに予定が入ると、<strong>ペアカレが自動で検知してカレンダーに取り込み＆パートナーのスマホにも自動共有</strong>されます！
+                    ② Google側に入ると<strong>ペアカレが自動で検知して取り込み</strong>、タスクは🔒自分専用として反映されます！
                     <br />
-                    ③ 逆に<strong>ペアカレで追加・変更・削除した予定やタスクも、自動でGoogleカレンダーへ双方向反映</strong>されます🔄
+                    ③ <strong>ペアカレでタスクを完了✅（または未完了へ戻す／追加／編集／削除）するとGoogleタスク側も即完了になり、Googleタスク側で完了してもペアカレに反映</strong>されます🔄
                   </p>
                 </div>
 
@@ -1143,7 +1145,10 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                         を開き、<strong>「新しいプロジェクト」</strong>を押して、最初から書いてあるコードを消して貼り付け、保存（💾）します。
                       </li>
                       <li>
-                        右上の<strong>「デプロイ」＞「新しいデプロイ」</strong>を押し、種類の選択（⚙️）で<strong>「ウェブアプリ」</strong>を選びます。
+                        左メニューの<strong>「サービス ＋」</strong>から<strong>「Tasks API」</strong>を選んで追加します（※ペアカレとGoogleタスクの完了・追加を自動双方向連携するために必要）。
+                      </li>
+                      <li>
+                        右上の<strong>「デプロイ」＞「新しいデプロイ」</strong>（既存GASの更新時は<strong>「デプロイを管理」＞✏️＞「新バージョン」</strong>）を押し、種類の選択（⚙️）で<strong>「ウェブアプリ」</strong>を選びます。
                       </li>
                       <li>
                         次の設定にして<strong>「デプロイ」</strong>を押します：

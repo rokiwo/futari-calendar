@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Check,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import {
   CalendarCategoryItem,
@@ -37,6 +38,8 @@ interface TaskManagerModalProps {
   onSaveEvent: (ev: ScheduleEvent) => void;
   onDeleteEvent: (id: string) => void;
   onToggleTaskComplete: (id: string) => void;
+  onSyncGoogleTasks?: () => void;
+  isSyncing?: boolean;
 }
 
 type TabType = 'calendar' | 'list';
@@ -69,6 +72,8 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
   onSaveEvent,
   onDeleteEvent,
   onToggleTaskComplete,
+  onSyncGoogleTasks,
+  isSyncing = false,
 }) => {
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -128,7 +133,7 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
     };
   };
 
-  // 自分のタスクのみ抽出（ペアカレ内完結・相手には見えない個人カレンダー）
+  // 自分のタスクのみ抽出（Googleタスクと双方向自動連係・相手には見えない個人カレンダー）
   const allTasks = useMemo(() => {
     return Object.values(events)
       .filter((ev) => ev && ev.isTask && !ev.deletedAt && isEventVisibleToPartner(ev, activePartner))
@@ -439,7 +444,7 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
             >
               {t.title}
             </div>
-            {(showDateBadge || t.startTime || t.memo) && (
+            {(showDateBadge || t.startTime || t.memo || t.googleTaskSynced || t.googleTaskId) && (
               <div className="flex flex-wrap items-center gap-1.5 mt-0.5 text-[10px] font-bold text-stone-500">
                 {showDateBadge && (
                   <span className="text-rose-600 bg-rose-50 px-1.5 py-0.2 rounded font-extrabold">
@@ -449,6 +454,11 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
                 {t.startTime && (
                   <span className="text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded font-extrabold">
                     ⏰ {t.startTime}
+                  </span>
+                )}
+                {(t.googleTaskSynced || t.googleTaskId) && (
+                  <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.2 rounded font-extrabold">
+                    ✓ Googleタスク
                   </span>
                 )}
                 {t.memo && <span className="text-stone-500 truncate">📝 {t.memo}</span>}
@@ -521,6 +531,17 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {onSyncGoogleTasks && (
+              <button
+                type="button"
+                onClick={onSyncGoogleTasks}
+                disabled={isSyncing}
+                className="p-2 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 font-black flex items-center justify-center shrink-0 active:scale-95 disabled:opacity-60 transition-all"
+                title="Googleタスクと双方向同期"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

@@ -206,13 +206,37 @@ export function mergeCalendarStores(
     }
   }
 
-  // 2. 予定イベントのマージ（IDごと）
+  // 2. 予定イベントのマージ（IDごと：更新時刻が新しい方を優先しつつ同期メタデータを欠落させない）
   const mergedEvents: Record<string, ScheduleEvent> = { ...local.events };
   for (const [id, remoteEvent] of Object.entries(remote.events || {})) {
     const localEvent = mergedEvents[id];
-    if (!localEvent || toTimeMs(remoteEvent.updatedAt) > toTimeMs(localEvent.updatedAt)) {
+    if (!localEvent) {
       mergedEvents[id] = remoteEvent;
+      continue;
     }
+    const remoteIsNewer = toTimeMs(remoteEvent.updatedAt) > toTimeMs(localEvent.updatedAt);
+    const primary = remoteIsNewer ? remoteEvent : localEvent;
+    const secondary = remoteIsNewer ? localEvent : remoteEvent;
+
+    if (primary.deletedAt) {
+      mergedEvents[id] = primary;
+      continue;
+    }
+
+    const mergedGEventIds =
+      primary.googleEventIds || secondary.googleEventIds
+        ? { ...(secondary.googleEventIds || {}), ...(primary.googleEventIds || {}) }
+        : undefined;
+
+    mergedEvents[id] = {
+      ...primary,
+      googleEventId: primary.googleEventId || secondary.googleEventId,
+      googleEventIds: mergedGEventIds,
+      googleCalSynced: Boolean(primary.googleCalSynced || secondary.googleCalSynced),
+      googleTaskId: primary.googleTaskId || secondary.googleTaskId,
+      googleTaskListId: primary.googleTaskListId || secondary.googleTaskListId,
+      googleTaskSynced: Boolean(primary.googleTaskSynced || secondary.googleTaskSynced),
+    };
   }
 
   // 3. すれ違いサポートアイコン（日付ごと）のマージ

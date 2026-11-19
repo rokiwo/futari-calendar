@@ -107,6 +107,9 @@ export interface ScheduleEvent {
     partnerB?: string;
     shared?: string;
   };
+  googleTaskId?: string;      // Google Tasks (ToDoリスト) のタスクID
+  googleTaskListId?: string;  // Google Tasks のタスクリストID（既定: '@default'）
+  googleTaskSynced?: boolean; // Google Tasks へ同期済みフラグ
   syncedFromGoogle?: boolean; // Googleカレンダー（またはGemini→Googleカレンダー）から自動取り込みされた予定フラグ
 
   // 🔒 操作者限定プライベート予定（相手の画面・通知・カレンダーには一切表示しない特別な予定）

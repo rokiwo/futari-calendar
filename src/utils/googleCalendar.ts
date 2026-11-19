@@ -11,6 +11,7 @@ import {
   DEFAULT_CATEGORIES,
   formatMinutesShort,
   getEffectivePrivateFor,
+  getLocalTodayStr,
   getShiftHolidayWorkMinutes,
   getShiftOvertimeMinutes,
   resolveCategoryInfo,
@@ -468,29 +469,39 @@ export function saveGoogleCalendarSyncConfig(config: GoogleCalendarSyncConfig): 
 
 /**
  * Google Apps Script (GAS) にコピペして「ウェブアプリとしてデプロイ」するだけで
- * Googleカレンダーとペアカレの完全双方向同期（＆Geminiからの予定自動取り込み）を実現するスクリプト
+ * Googleカレンダー＆Googleタスク(ToDoリスト)とペアカレの完全双方向同期を実現するスクリプト
  */
 export function getGoogleAppsScriptTemplateCode(): string {
   return `/**
- * 🐻💕🐰 ペアカレ (PairCal) ⇄ Googleカレンダー 双方向自動同期ブリッジ (GAS)
- * スマホの Gemini（「@Googleカレンダー 明日の19時から焼肉を追加して」等）で入れた予定も
+ * 🐻💕🐰 ペアカレ (PairCal) ⇄ Googleカレンダー ＆ Googleタスク 双方向自動同期ブリッジ (GAS)
+ * スマホの Gemini や Googleカレンダー／Google ToDoリストで追加・完了した内容も
  * 自動的にペアカレへ双方向同期されます！
  *
  * 【使い方（1分で完了・APIキー不要）】
  * 1. https://script.google.com/ を開いて「新しいプロジェクト」を作成
  * 2. このコードをすべて貼り付けて保存（Ctrl+S / ⌘+S）
- * 3. 右上の「デプロイ」＞「新しいデプロイ」をクリック
- * 4. 種類の選択（歯車アイコン）で「ウェブアプリ」を選択
- * 5. 次のユーザーとして実行：「自分」 ／ アクセスできるユーザー：「全員」にして「デプロイ」
- * 6. 発行された「ウェブアプリURL (https://script.google.com/macros/s/.../exec)」をペアカレに貼り付けるだけ！
+ * 3. ★重要★ 左メニューの「サービス ＋」から「Tasks API」を追加（Googleタスク自動連携に必要）
+ * 4. 右上の「デプロイ」＞「新しいデプロイ」（更新時は「デプロイを管理」＞✏️＞新バージョン）
+ * 5. 種類の選択（歯車アイコン）で「ウェブアプリ」を選択
+ * 6. 次のユーザーとして実行：「自分」 ／ アクセスできるユーザー：「全員」にして「デプロイ」
+ * 7. 発行された「ウェブアプリURL (https://script.google.com/macros/s/.../exec)」をペアカレに貼り付けるだけ！
  */
 
 function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify({
     ok: true,
-    app: 'PairCal-GoogleCalendar-Bridge',
-    message: 'ペアカレ Googleカレンダー双方向同期ブリッジが正常に稼働しています✨'
+    app: 'PairCal-GoogleCalendar-Tasks-Bridge',
+    tasksSupported: isTasksApiAvailable(),
+    message: 'ペアカレ Googleカレンダー＆Googleタスク双方向同期ブリッジが正常に稼働しています✨'
   })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function isTasksApiAvailable() {
+  try {
+    return typeof Tasks !== 'undefined' && Tasks && Boolean(Tasks.Tasks) && Boolean(Tasks.Tasklists);
+  } catch (ignore) {
+    return false;
+  }
 }
 
 function doPost(e) {
@@ -508,12 +519,20 @@ function doPost(e) {
       return jsonResponse({
         ok: true,
         calendarName: cal.getName(),
-        timeZone: cal.getTimeZone()
+        timeZone: cal.getTimeZone(),
+        tasksSupported: isTasksApiAvailable()
       });
     }
 
     if (action === 'sync') {
       var result = syncCalendarEvents(body);
+      if (result && result.ok && body.syncTasks) {
+        var taskRes = syncGoogleTasks(body);
+        result.tasksSupported = taskRes.tasksSupported;
+        result.pushedTaskMapping = taskRes.pushedTaskMapping;
+        result.remoteTasks = taskRes.remoteTasks;
+        result.tasksError = taskRes.tasksError || null;
+      }
       return jsonResponse(result);
     }
 
@@ -719,6 +738,255 @@ function applyReminderIfNeeded(ev, reminderMinutes) {
   } catch (ignore) {}
 }
 
+function fetchAllGoogleTasksMap(taskLists) {
+  var items = [];
+  var byGoogleTaskId = {};
+  var byPairCalId = {};
+
+  for (var li = 0; li < taskLists.length; li++) {
+    var listId = taskLists[li] && taskLists[li].id ? taskLists[li].id : '';
+    if (!listId) continue;
+    var pageToken = null;
+    do {
+      var opts = {
+        showCompleted: true,
+        showHidden: true,
+        maxResults: 100
+      };
+      if (pageToken) {
+        opts.pageToken = pageToken;
+      }
+      var res = Tasks.Tasks.list(listId, opts);
+      var listItems = (res && res.items) ? res.items : [];
+      for (var ti = 0; ti < listItems.length; ti++) {
+        var t = listItems[ti];
+        if (!t || !t.id || t.deleted) continue;
+        var entry = { task: t, listId: listId };
+        items.push(entry);
+        byGoogleTaskId[t.id] = entry;
+        var notes = t.notes || '';
+        var m = notes.match(/\\[PAIRCAL_ID:([^\\]]+)\\]/);
+        if (m && m[1]) {
+          byPairCalId[m[1]] = entry;
+        }
+      }
+      pageToken = res && res.nextPageToken ? res.nextPageToken : null;
+    } while (pageToken);
+  }
+
+  return {
+    items: items,
+    byGoogleTaskId: byGoogleTaskId,
+    byPairCalId: byPairCalId
+  };
+}
+
+function cloneGasTaskObject(src) {
+  var out = {};
+  for (var key in src) {
+    if (Object.prototype.hasOwnProperty.call(src, key)) {
+      out[key] = src[key];
+    }
+  }
+  return out;
+}
+
+function syncGoogleTasks(payload) {
+  if (!isTasksApiAvailable()) {
+    return {
+      tasksSupported: false,
+      pushedTaskMapping: {},
+      remoteTasks: [],
+      tasksError: 'GASエディタの「サービス ＋」から Tasks API を追加するとGoogleタスク連携が有効になります。'
+    };
+  }
+
+  try {
+    var listsRes = Tasks.Tasklists.list({ maxResults: 100 });
+    var taskLists = (listsRes && listsRes.items) ? listsRes.items.slice() : [];
+    var defaultListId = '@default';
+    try {
+      var defList = Tasks.Tasklists.get('@default');
+      if (defList && defList.id) {
+        defaultListId = defList.id;
+      }
+    } catch (ignore) {
+      if (taskLists.length > 0 && taskLists[0].id) {
+        defaultListId = taskLists[0].id;
+      }
+    }
+    var hasDefaultInLists = false;
+    for (var dl = 0; dl < taskLists.length; dl++) {
+      if (taskLists[dl].id === defaultListId) {
+        hasDefaultInLists = true;
+        break;
+      }
+    }
+    if (!hasDefaultInLists && defaultListId) {
+      taskLists.unshift({ id: defaultListId });
+    }
+
+    var state = fetchAllGoogleTasksMap(taskLists);
+
+    // 1. ペアカレで削除されたタスクを Google Tasks から削除
+    var taskDeletions = payload.taskDeletions || [];
+    for (var di = 0; di < taskDeletions.length; di++) {
+      var delItem = taskDeletions[di];
+      if (!delItem) continue;
+      var foundDel = (delItem.googleTaskId && state.byGoogleTaskId[delItem.googleTaskId]) ||
+        (delItem.id && state.byPairCalId[delItem.id]) ||
+        null;
+      var delListId = foundDel ? foundDel.listId : (delItem.googleTaskListId || defaultListId);
+      var delTaskId = foundDel ? foundDel.task.id : delItem.googleTaskId;
+      if (delListId && delTaskId) {
+        try {
+          Tasks.Tasks.remove(delListId, delTaskId);
+        } catch (ignore) {}
+      }
+    }
+
+    // 2. ペアカレのタスク（追加・編集・完了/未完了）を Google Tasks へ反映
+    var taskUpserts = payload.taskUpserts || [];
+    var pushedTaskMapping = {};
+
+    for (var ui = 0; ui < taskUpserts.length; ui++) {
+      var item = taskUpserts[ui];
+      if (!item || !item.id) continue;
+
+      var target = (item.googleTaskId && state.byGoogleTaskId[item.googleTaskId]) ||
+        state.byPairCalId[item.id] ||
+        null;
+
+      if (!target && item.googleTaskId) {
+        try {
+          var fallbackListId = item.googleTaskListId || defaultListId;
+          var fetched = Tasks.Tasks.get(fallbackListId, item.googleTaskId);
+          if (fetched && fetched.id && !fetched.deleted) {
+            target = { task: fetched, listId: fallbackListId };
+          }
+        } catch (ignore) {}
+      }
+
+      var titleText = (item.title || 'タスク').trim();
+      var descLines = [];
+      if (item.memo) descLines.push(String(item.memo).trim());
+      descLines.push('[PAIRCAL_ID:' + item.id + ']');
+      var fullNotes = descLines.join('\\n').trim();
+      var wantDueDate = item.date ? String(item.date).slice(0, 10) : '';
+      var dueIso = wantDueDate ? (wantDueDate + 'T00:00:00.000Z') : null;
+      var wantCompleted = Boolean(item.isCompleted);
+
+      if (target) {
+        var remUpdatedMs = target.task.updated ? (Date.parse(target.task.updated) || 0) : 0;
+        var itemUpdatedMs = item.updatedAt ? (Date.parse(item.updatedAt) || 0) : Date.now();
+        if (remUpdatedMs > itemUpdatedMs + 2000) {
+          pushedTaskMapping[item.id] = {
+            googleTaskId: target.task.id,
+            googleTaskListId: target.listId
+          };
+          continue;
+        }
+
+        var curStatus = target.task.status === 'completed';
+        var curTitle = (target.task.title || '').trim();
+        var curNotes = (target.task.notes || '').trim();
+        var curDueDate = target.task.due ? String(target.task.due).slice(0, 10) : '';
+        var hasDiff = curTitle !== titleText ||
+          curStatus !== wantCompleted ||
+          curNotes !== fullNotes ||
+          (wantDueDate && curDueDate !== wantDueDate);
+
+        if (hasDiff) {
+          var resObj = cloneGasTaskObject(target.task);
+          resObj.title = titleText;
+          resObj.notes = fullNotes;
+          if (dueIso) {
+            resObj.due = dueIso;
+          }
+          if (wantCompleted) {
+            resObj.status = 'completed';
+            resObj.completed = target.task.completed || item.updatedAt || new Date().toISOString();
+          } else {
+            resObj.status = 'needsAction';
+            delete resObj.completed;
+            delete resObj.hidden;
+          }
+          var updatedTask = Tasks.Tasks.update(resObj, target.listId, target.task.id);
+          pushedTaskMapping[item.id] = {
+            googleTaskId: (updatedTask && updatedTask.id) ? updatedTask.id : target.task.id,
+            googleTaskListId: target.listId
+          };
+        } else {
+          pushedTaskMapping[item.id] = {
+            googleTaskId: target.task.id,
+            googleTaskListId: target.listId
+          };
+        }
+      } else {
+        var newTaskRes = {
+          title: titleText,
+          notes: fullNotes,
+          status: wantCompleted ? 'completed' : 'needsAction'
+        };
+        if (dueIso) {
+          newTaskRes.due = dueIso;
+        }
+        if (wantCompleted) {
+          newTaskRes.completed = item.updatedAt || new Date().toISOString();
+        }
+        var createdTask = Tasks.Tasks.insert(newTaskRes, defaultListId);
+        if (createdTask && createdTask.id) {
+          pushedTaskMapping[item.id] = {
+            googleTaskId: createdTask.id,
+            googleTaskListId: defaultListId
+          };
+        }
+      }
+    }
+
+    // 3. Google Tasks 側の最新タスクリストを再取得してペアカレへ返す
+    var refreshed = fetchAllGoogleTasksMap(taskLists);
+    var remoteTasks = [];
+
+    for (var ri = 0; ri < refreshed.items.length; ri++) {
+      var entry = refreshed.items[ri];
+      var gt = entry.task;
+      var rawNotes = gt.notes || '';
+      var pMatch = rawNotes.match(/\\[PAIRCAL_ID:([^\\]]+)\\]/);
+      var pId = (pMatch && pMatch[1]) ? pMatch[1] : null;
+      var cleanMemo = rawNotes.replace(/\\n?\\[PAIRCAL_ID:[^\\]]+\\]/g, '').trim();
+      var dueStr = gt.due ? String(gt.due).slice(0, 10) : null;
+      var completedFlag = gt.status === 'completed';
+
+      remoteTasks.push({
+        googleTaskId: gt.id,
+        googleTaskListId: entry.listId,
+        paircalId: pId,
+        title: (gt.title || '').trim() || '(無題のタスク)',
+        date: dueStr,
+        memo: cleanMemo || null,
+        isCompleted: completedFlag,
+        completedAt: gt.completed || null,
+        updatedAt: gt.updated || gt.completed || new Date().toISOString()
+      });
+    }
+
+    return {
+      tasksSupported: true,
+      pushedTaskMapping: pushedTaskMapping,
+      remoteTasks: remoteTasks,
+      tasksError: null
+    };
+  } catch (err) {
+    return {
+      tasksSupported: false,
+      pushedTaskMapping: {},
+      remoteTasks: [],
+      tasksError: String(err && err.message ? err.message : err)
+    };
+  }
+}
+
 function jsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
@@ -738,6 +1006,23 @@ interface GasRemoteEventItem {
   updatedAt: string;
 }
 
+interface GasRemoteTaskItem {
+  googleTaskId: string;
+  googleTaskListId?: string | null;
+  paircalId?: string | null;
+  title: string;
+  date?: string | null;
+  memo?: string | null;
+  isCompleted: boolean;
+  completedAt?: string | null;
+  updatedAt: string;
+}
+
+interface GasPushedTaskMappingEntry {
+  googleTaskId: string;
+  googleTaskListId?: string;
+}
+
 interface GasSyncResponse {
   ok: boolean;
   error?: string;
@@ -746,6 +1031,10 @@ interface GasSyncResponse {
   idMap?: Record<string, string>;
   remoteEvents?: GasRemoteEventItem[];
   events?: GasRemoteEventItem[];
+  tasksSupported?: boolean;
+  pushedTaskMapping?: Record<string, GasPushedTaskMappingEntry>;
+  remoteTasks?: GasRemoteTaskItem[];
+  tasksError?: string | null;
   syncedAt?: string;
 }
 
@@ -755,7 +1044,7 @@ interface GasSyncResponse {
 export async function testGoogleCalendarGasConnection(
   gasUrl: string,
   calendarId = 'primary'
-): Promise<{ ok: boolean; calendarName?: string; error?: string }> {
+): Promise<{ ok: boolean; calendarName?: string; tasksSupported?: boolean; error?: string }> {
   const cleanUrl = gasUrl.trim();
   if (!cleanUrl) {
     return { ok: false, error: 'GAS ウェブアプリURLを入力してください' };
@@ -792,7 +1081,11 @@ export async function testGoogleCalendarGasConnection(
     if (!data.ok) {
       return { ok: false, error: data.error || 'カレンダーの接続に失敗しました' };
     }
-    return { ok: true, calendarName: data.calendarName || 'Googleカレンダー' };
+    return {
+      ok: true,
+      calendarName: data.calendarName || 'Googleカレンダー',
+      tasksSupported: data.tasksSupported,
+    };
   } catch (err) {
     return {
       ok: false,
@@ -815,11 +1108,17 @@ function shouldSyncEventToTarget(
   const priv = getEffectivePrivateFor(ev);
 
   // タスクの場合：
-  // ・ペアカレ上で直接作成したタスクはペアカレ内だけで管理し、Googleカレンダーには書き出さない
-  // ・Gemini（Googleカレンダー）から取り込んだタスクのみ、日付変更や編集が本人のGoogleカレンダーにも連動するようにする
+  // Google Tasks (ToDoリスト) 側へ同期するためGoogleカレンダーには重複書き出ししない。
+  // ただし従来のGoogleカレンダー由来レガシータスク（googleTaskId未紐付けかつgoogleEventIdあり）のみ維持する。
   if (ev.isTask) {
-    if (!ev.syncedFromGoogle) return false;
-    return priv === targetKey;
+    if (
+      ev.syncedFromGoogle &&
+      !ev.googleTaskId &&
+      Boolean(ev.googleEventId || ev.googleEventIds?.[targetKey])
+    ) {
+      return priv === targetKey;
+    }
+    return false;
   }
 
   // プライベート予定は本人のカレンダーのみに同期し、相手や共有カレンダーには出さない
@@ -864,6 +1163,7 @@ export async function syncWithGoogleCalendar(
   importedCount: number;
   updatedCount: number;
   pushedCount: number;
+  tasksSupported?: boolean;
   statusMessage: string;
 }> {
   if (!config.enabled) {
@@ -896,12 +1196,14 @@ export async function syncWithGoogleCalendar(
   const hasSharedCal = Boolean(config.sharedCalendarId?.trim() && (urlA || urlB));
 
   // 同期ターゲット一覧を構築（ゆうと用 / さや用 / 共有カレンダー用）
+  // Google Tasks はGAS所有者アカウントに紐づくため、専用GAS URLを持つターゲットでのみ同期し混在を防ぐ
   const targets: {
     key: 'partnerA' | 'partnerB' | 'shared';
     gasUrl: string;
     calendarId: string;
     defaultCategory: CalendarCategoryId;
     defaultCreator: PartnerId;
+    syncTasks: boolean;
   }[] = [];
 
   if (urlA) {
@@ -911,6 +1213,7 @@ export async function syncWithGoogleCalendar(
       calendarId: config.partnerACalendarId?.trim() || 'primary',
       defaultCategory: 'partnerA',
       defaultCreator: 'partnerA',
+      syncTasks: true,
     });
   }
 
@@ -925,6 +1228,7 @@ export async function syncWithGoogleCalendar(
         calendarId: calB,
         defaultCategory: 'partnerB',
         defaultCreator: 'partnerB',
+        syncTasks: urlB !== urlA,
       });
     }
   } else if (urlA && calBId && calBId !== 'primary') {
@@ -935,6 +1239,7 @@ export async function syncWithGoogleCalendar(
       calendarId: calBId,
       defaultCategory: 'partnerB',
       defaultCreator: 'partnerB',
+      syncTasks: false,
     });
   }
 
@@ -945,6 +1250,7 @@ export async function syncWithGoogleCalendar(
       calendarId: config.sharedCalendarId.trim(),
       defaultCategory: 'shared',
       defaultCreator: activePartner,
+      syncTasks: false,
     });
   }
 
@@ -952,6 +1258,7 @@ export async function syncWithGoogleCalendar(
   let totalImported = 0;
   let totalUpdated = 0;
   let totalPushed = 0;
+  let anyTasksSupported = false;
   const categories = store.categories && store.categories.length > 0 ? store.categories : DEFAULT_CATEGORIES;
 
   const lastSyncedMs = config.lastGoogleSyncedAt ? Date.parse(config.lastGoogleSyncedAt) || 0 : 0;
@@ -999,11 +1306,47 @@ export async function syncWithGoogleCalendar(
         deletedAt: null,
       }));
 
-    // 未紐付けのローカル予定がある場合、先にGoogleカレンダー側の最新予定を取得して
-    // Google側で既に移動・更新された予定を古いローカルデータで上書きしないようにする
+    // 1c. このターゲットの Google Tasks (ToDoリスト) へ送信すべきタスク（削除／追加・更新・完了）を抽出
+    const taskDeletions = target.syncTasks
+      ? Object.values(nextEvents)
+          .filter((ev) => {
+            if (!ev || !ev.isTask || !ev.deletedAt || !ev.googleTaskId) return false;
+            return getEffectivePrivateFor(ev) === target.defaultCreator;
+          })
+          .map((ev) => ({
+            id: ev.id,
+            googleTaskId: ev.googleTaskId,
+            googleTaskListId: ev.googleTaskListId,
+          }))
+      : [];
+
+    let taskUpserts = target.syncTasks
+      ? Object.values(nextEvents)
+          .filter((ev) => {
+            if (!ev || !ev.isTask || ev.deletedAt) return false;
+            if (getEffectivePrivateFor(ev) !== target.defaultCreator) return false;
+            if (!ev.googleTaskId || !ev.googleTaskSynced) return true;
+            const evUpdatedMs = Date.parse(ev.updatedAt || '') || 0;
+            return evUpdatedMs > lastSyncedMs - 5000;
+          })
+          .map((ev) => ({
+            id: ev.id,
+            googleTaskId: ev.googleTaskId,
+            googleTaskListId: ev.googleTaskListId,
+            date: ev.date,
+            title: ev.title,
+            memo: ev.memo,
+            isCompleted: Boolean(ev.isCompleted),
+            updatedAt: ev.updatedAt,
+          }))
+      : [];
+
+    // 未紐付けのローカル予定またはローカルタスクがある場合、先にGoogle側の最新を取得して
+    // Google側で既に移動・完了・更新されたデータを古いローカルデータで上書きしないようにする
     let data: GasSyncResponse | null = null;
     const hasUnlinkedUpserts = upserts.some((u) => !u.googleEventId);
-    if (hasUnlinkedUpserts) {
+    const hasUnlinkedTaskUpserts = taskUpserts.some((tu) => !tu.googleTaskId);
+    if (hasUnlinkedUpserts || hasUnlinkedTaskUpserts) {
       const preRes = await fetch(target.gasUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -1012,8 +1355,11 @@ export async function syncWithGoogleCalendar(
           calendarId: target.calendarId,
           pastDays,
           futureDays,
+          syncTasks: target.syncTasks,
           upserts: [],
           deletions: [],
+          taskUpserts: [],
+          taskDeletions: [],
         }),
       });
       if (!preRes.ok) {
@@ -1047,7 +1393,33 @@ export async function syncWithGoogleCalendar(
         return true;
       });
 
-      if (upserts.length === 0 && deletions.length === 0) {
+      const preRemoteTasks = preData.remoteTasks || [];
+      const remoteTaskByPairCalId = new Map<string, GasRemoteTaskItem>();
+      for (const rt of preRemoteTasks) {
+        if (rt.paircalId) remoteTaskByPairCalId.set(rt.paircalId, rt);
+      }
+
+      taskUpserts = taskUpserts.filter((tu) => {
+        if (tu.googleTaskId) return true;
+        const matchedRemTask = remoteTaskByPairCalId.get(tu.id);
+        if (!matchedRemTask) return true;
+        const localEv = nextEvents[tu.id];
+        const remTimeMs = Date.parse(matchedRemTask.updatedAt || '') || 0;
+        const locTimeMs = Date.parse(localEv?.updatedAt || '') || 0;
+        if (remTimeMs > locTimeMs + 2000) {
+          return false;
+        }
+        tu.googleTaskId = matchedRemTask.googleTaskId;
+        tu.googleTaskListId = matchedRemTask.googleTaskListId || undefined;
+        return true;
+      });
+
+      if (
+        upserts.length === 0 &&
+        deletions.length === 0 &&
+        taskUpserts.length === 0 &&
+        taskDeletions.length === 0
+      ) {
         data = preData;
       }
     }
@@ -1063,8 +1435,11 @@ export async function syncWithGoogleCalendar(
           calendarId: target.calendarId,
           pastDays,
           futureDays,
+          syncTasks: target.syncTasks,
           upserts,
           deletions,
+          taskUpserts,
+          taskDeletions,
         }),
       });
 
@@ -1273,6 +1648,154 @@ export async function syncWithGoogleCalendar(
         totalUpdated++;
       }
     }
+
+    // 5. Google Tasks (Google ToDoリスト) との双方向同期（Tasks API有効時）
+    if (target.syncTasks && data.tasksSupported) {
+      anyTasksSupported = true;
+      const pushedTaskMap = data.pushedTaskMapping || {};
+      const seenGoogleTaskIds = new Set<string>();
+
+      for (const delTask of taskDeletions) {
+        const localDel = nextEvents[delTask.id];
+        if (localDel && localDel.deletedAt) {
+          nextEvents[delTask.id] = {
+            ...localDel,
+            googleTaskId: undefined,
+            googleTaskListId: undefined,
+            googleTaskSynced: false,
+          };
+        }
+      }
+
+      for (const [paircalId, taskRef] of Object.entries(pushedTaskMap)) {
+        const localTask = nextEvents[paircalId];
+        if (localTask && !localTask.deletedAt && taskRef?.googleTaskId) {
+          if (
+            localTask.googleTaskId !== taskRef.googleTaskId ||
+            localTask.googleTaskListId !== taskRef.googleTaskListId ||
+            !localTask.googleTaskSynced
+          ) {
+            nextEvents[paircalId] = {
+              ...localTask,
+              googleTaskSynced: true,
+              googleTaskId: taskRef.googleTaskId,
+              googleTaskListId: taskRef.googleTaskListId || localTask.googleTaskListId,
+            };
+            totalPushed++;
+          }
+        }
+      }
+
+      const remoteTasks = data.remoteTasks || [];
+      for (const remTask of remoteTasks) {
+        if (!remTask.googleTaskId) continue;
+        seenGoogleTaskIds.add(remTask.googleTaskId);
+
+        let matchedLocal: ScheduleEvent | undefined;
+        if (remTask.paircalId && nextEvents[remTask.paircalId]) {
+          matchedLocal = nextEvents[remTask.paircalId];
+        } else {
+          matchedLocal = Object.values(nextEvents).find(
+            (e) =>
+              e.googleTaskId === remTask.googleTaskId &&
+              getEffectivePrivateFor(e) === target.defaultCreator
+          );
+        }
+
+        const cleanTaskTitle = (remTask.title || '').trim() || '(無題のタスク)';
+        const nextTaskCompleted = Boolean(remTask.isCompleted);
+
+        if (matchedLocal) {
+          if (matchedLocal.deletedAt) continue;
+
+          const remTimeMs = Date.parse(remTask.updatedAt || '') || 0;
+          const locTimeMs = Date.parse(matchedLocal.updatedAt || '') || 0;
+          const nextTaskDate = remTask.date || matchedLocal.date;
+
+          const hasTaskDiff =
+            matchedLocal.title !== cleanTaskTitle ||
+            Boolean(matchedLocal.isCompleted) !== nextTaskCompleted ||
+            matchedLocal.date !== nextTaskDate ||
+            (matchedLocal.memo || '') !== (remTask.memo || '');
+
+          if (hasTaskDiff && remTimeMs > locTimeMs + 2000) {
+            nextEvents[matchedLocal.id] = {
+              ...matchedLocal,
+              title: cleanTaskTitle,
+              date: nextTaskDate,
+              isCompleted: nextTaskCompleted,
+              memo: remTask.memo || undefined,
+              googleTaskSynced: true,
+              googleTaskId: remTask.googleTaskId,
+              googleTaskListId: remTask.googleTaskListId || matchedLocal.googleTaskListId,
+              updatedAt: remTask.updatedAt || new Date().toISOString(),
+            };
+            totalUpdated++;
+          } else if (
+            matchedLocal.googleTaskId !== remTask.googleTaskId ||
+            !matchedLocal.googleTaskSynced
+          ) {
+            nextEvents[matchedLocal.id] = {
+              ...matchedLocal,
+              googleTaskSynced: true,
+              googleTaskId: remTask.googleTaskId,
+              googleTaskListId: remTask.googleTaskListId || matchedLocal.googleTaskListId,
+            };
+          }
+        } else {
+          const safeHash = remTask.googleTaskId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 24);
+          const newId = `gtask_${target.key}_${safeHash}`;
+          if (nextEvents[newId]?.deletedAt) continue;
+
+          const catInfo = resolveCategoryInfo(target.defaultCreator, categories, store.metadata);
+          const nowIso = new Date().toISOString();
+
+          nextEvents[newId] = {
+            id: newId,
+            date: remTask.date || getLocalTodayStr(),
+            title: cleanTaskTitle,
+            categoryId: target.defaultCreator,
+            color: catInfo.accentColor,
+            isAllDay: true,
+            memo: remTask.memo || undefined,
+            isTask: true,
+            isCompleted: nextTaskCompleted,
+            notifyTarget: target.defaultCreator,
+            privateFor: target.defaultCreator,
+            googleTaskSynced: true,
+            syncedFromGoogle: true,
+            googleTaskId: remTask.googleTaskId,
+            googleTaskListId: remTask.googleTaskListId || undefined,
+            createdBy: target.defaultCreator,
+            createdAt: remTask.updatedAt || nowIso,
+            updatedAt: remTask.updatedAt || nowIso,
+          };
+          totalImported++;
+        }
+      }
+
+      // Google Tasks 側で完全削除されたタスクをペアカレ側でも論理削除する（エラー時はスキップ）
+      if (!data.tasksError) {
+        for (const [evId, localEv] of Object.entries(nextEvents)) {
+          if (!localEv || localEv.deletedAt || !localEv.isTask) continue;
+          if (getEffectivePrivateFor(localEv) !== target.defaultCreator) continue;
+          if (
+            localEv.googleTaskSynced &&
+            localEv.googleTaskId &&
+            !seenGoogleTaskIds.has(localEv.googleTaskId) &&
+            !pushedTaskMap[evId]
+          ) {
+            const nowIso = new Date().toISOString();
+            nextEvents[evId] = {
+              ...localEv,
+              deletedAt: nowIso,
+              updatedAt: nowIso,
+            };
+            totalUpdated++;
+          }
+        }
+      }
+    }
   }
 
   const nowIso = new Date().toISOString();
@@ -1299,16 +1822,18 @@ export async function syncWithGoogleCalendar(
   if (totalPushed > 0) parts.push(`Googleへ${totalPushed}件反映`);
   if (totalUpdated > 0) parts.push(`${totalUpdated}件更新`);
 
+  const syncLabel = anyTasksSupported ? 'Googleカレンダー＆Googleタスク' : 'Googleカレンダー';
   const statusMessage =
     parts.length > 0
-      ? `📅 Googleカレンダー双方向同期完了（${parts.join('・')}）✨`
-      : '📅 Googleカレンダーと双方向同期しました（最新の状態です✨）';
+      ? `📅 ${syncLabel}同期完了（${parts.join('・')}）✨`
+      : `📅 ${syncLabel}と双方向同期しました（最新の状態です✨）`;
 
   return {
     nextStore,
     importedCount: totalImported,
     updatedCount: totalUpdated,
     pushedCount: totalPushed,
+    tasksSupported: anyTasksSupported,
     statusMessage,
   };
 }
