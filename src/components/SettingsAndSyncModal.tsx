@@ -18,6 +18,7 @@ import {
   Trash2,
   History,
   RotateCcw,
+  ChevronDown,
 } from 'lucide-react';
 import {
   CalendarCategoryId,
@@ -1350,189 +1351,227 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
 
           {/* タブ2：Googleカレンダー・Gemini双方向自動同期 ＆ iCal連携 ＆ JSONバックアップ */}
           {activeTab === 'ical_backup' && (
-            <div className="space-y-4">
-              {/* 🛡️ 自動バックアップ ＆ いつでも復元（タイムマシン） */}
-              <div className="bg-white rounded-3xl p-4 border-2 border-[#34D399] space-y-3.5 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">🛡️</span>
-                    <div>
-                      <h3 className="text-sm font-black text-stone-800 flex items-center gap-1.5">
-                        <span>自動バックアップ ＆ いつでも復元（タイムマシン）</span>
+            <div className="space-y-3">
+              {/* 🛡️ 自動バックアップ ＆ 最後のバックアップから復元（アコーディオン・デフォルト閉じ） */}
+              <details className="group bg-white rounded-2xl border-2 border-[#34D399] shadow-sm overflow-hidden">
+                <summary className="list-none cursor-pointer p-3.5 flex items-center justify-between gap-2 select-none hover:bg-emerald-50/40 transition-colors">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-lg shrink-0">🛡️</span>
+                    <div className="min-w-0">
+                      <h3 className="text-xs sm:text-sm font-black text-stone-800 truncate">
+                        自動バックアップ ＆ 1タップ復元
                       </h3>
-                      <p className="text-[11px] text-stone-500">
-                        起動時・同期前・一括削除前・復元前に端末へ自動保存（最大20世代＋データ最多の控えを永久保護）。万が一消えても1タップで復活できます！
+                      <p className="text-[10px] text-stone-500 truncate">
+                        {localBackups[0]
+                          ? `最終保存: ${formatBackupDateTime(localBackups[0].createdAt)}（シフト${localBackups[0].counts.shifts}・予定${localBackups[0].counts.events}・タスク${localBackups[0].counts.tasks}）`
+                          : '起動時・同期前・削除前に自動保存'}
                       </p>
                     </div>
                   </div>
-                  <span className="px-2.5 py-1 rounded-full font-extrabold text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                    現在：シフト{currentCounts.shifts}・予定{currentCounts.events}・タスク{currentCounts.tasks}
-                  </span>
-                </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="px-2 py-0.5 rounded-full font-extrabold text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      {localBackups.length}件保存済
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-emerald-700 transition-transform group-open:rotate-180" />
+                  </div>
+                </summary>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={backupBusy}
-                    onClick={handleCreateManualSnapshot}
-                    className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs active:scale-98 transition-all disabled:opacity-60"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>{backupBusy ? '保存中...' : '📸 今すぐバックアップを保存'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={loadingCloudRevisions}
-                    onClick={handleLoadCloudRevisions}
-                    className="px-3.5 py-2.5 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 font-extrabold text-xs flex items-center gap-1.5 transition-colors disabled:opacity-60"
-                  >
-                    <History className={`w-4 h-4 ${loadingCloudRevisions ? 'animate-spin' : ''}`} />
+                <div className="px-4 pb-4 pt-1 space-y-3 border-t border-emerald-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-stone-500 pt-1">
                     <span>
-                      {loadingCloudRevisions
-                        ? 'クラウド履歴を読込中...'
-                        : '☁️ クラウド過去履歴（タイムマシン）を見る'}
+                      起動時・同期前・一括削除前に自動保存。復元するとクラウド＆Googleにも自動反映されます。
                     </span>
-                  </button>
-                </div>
-
-                {/* 端末内の自動・手動バックアップ一覧 */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] font-extrabold text-stone-700">
-                    <span>📱 この端末のバックアップ履歴（{localBackups.length}件）</span>
-                    <span className="text-[10px] font-normal text-stone-400">
-                      復元するとクラウド＆Googleにも自動反映
+                    <span className="px-2 py-0.5 rounded-full font-extrabold text-[10px] bg-stone-100 text-stone-600 shrink-0">
+                      現在：シフト{currentCounts.shifts}・予定{currentCounts.events}・タスク{currentCounts.tasks}
                     </span>
                   </div>
-                  {localBackups.length === 0 ? (
-                    <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/80 text-[11px] text-stone-500">
-                      まだバックアップがありません。上の「📸 今すぐバックアップを保存」を押すか、次回起動・同期時に自動で保存されます。
-                    </div>
-                  ) : (
-                    <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
-                      {localBackups.map((snap) => (
-                        <div
-                          key={snap.id}
-                          className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-[#F8FDFB] border border-emerald-200/70"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-extrabold text-stone-800 text-xs">
-                                {formatBackupDateTime(snap.createdAt)}
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                                {snap.reason}
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-stone-500 mt-0.5">
-                              シフト {snap.counts.shifts}件 ／ 予定 {snap.counts.events}件 ／ タスク{' '}
-                              {snap.counts.tasks}件
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              disabled={restoringBackupId !== null}
-                              onClick={() => handleRestoreLocalSnapshot(snap)}
-                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] flex items-center gap-1 disabled:opacity-50"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>{restoringBackupId === snap.id ? '復元中...' : '復元'}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleExportSnapshotJson(snap)}
-                              title="JSONファイルとして保存"
-                              className="px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-[11px] flex items-center gap-1"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteLocalSnapshot(snap)}
-                              title="このバックアップを削除"
-                              className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
 
-                {/* ☁️ クラウド（GitHub Gist）過去リビジョン一覧 */}
-                {cloudRevisions.length > 0 && (
-                  <div className="space-y-1.5 pt-2 border-t border-stone-200/80">
-                    <div className="text-[11px] font-extrabold text-sky-900">
-                      ☁️ クラウドに保存された過去履歴（最新{cloudRevisions.length}件・別端末からも復元OK）
-                    </div>
-                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-                      {cloudRevisions.map((rev, idx) => (
-                        <div
-                          key={rev.version}
-                          className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-sky-50/70 border border-sky-200/70"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-extrabold text-stone-800 text-xs">
-                                {formatBackupDateTime(rev.committedAt)}
-                              </span>
-                              {idx === 0 && (
-                                <span className="px-1.5 py-0.5 rounded-md bg-sky-200 text-sky-900 text-[10px] font-bold">
-                                  最新
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-stone-400 font-mono">
-                              ID: {rev.version.slice(0, 8)}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            disabled={restoringBackupId !== null}
-                            onClick={() => handleRestoreCloudRevision(rev)}
-                            className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[11px] flex items-center gap-1 shrink-0 disabled:opacity-50"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>
-                              {restoringBackupId === rev.version ? '読込・復元中...' : 'この時点から復元'}
-                            </span>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+                  {/* メイン：最後のバックアップから1タップ復元 ＆ 今すぐ保存 */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={!localBackups[0] || restoringBackupId !== null}
+                      onClick={() => localBackups[0] && handleRestoreLocalSnapshot(localBackups[0])}
+                      className="w-full py-3 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex flex-col items-center justify-center gap-0.5 shadow-sm active:scale-98 transition-all disabled:opacity-50"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <RotateCcw className="w-4 h-4" />
+                        <span>
+                          {restoringBackupId
+                            ? '復元中...'
+                            : '♻️ 最後のバックアップから復元'}
+                        </span>
+                      </span>
+                      <span className="text-[10px] font-bold text-emerald-100">
+                        {localBackups[0]
+                          ? `${formatBackupDateTime(localBackups[0].createdAt)}（シフト${localBackups[0].counts.shifts}・予定${localBackups[0].counts.events}・タスク${localBackups[0].counts.tasks}）`
+                          : 'まだバックアップがありません'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={backupBusy}
+                      onClick={handleCreateManualSnapshot}
+                      className="w-full py-3 px-3.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-60"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>{backupBusy ? '保存中...' : '📸 今すぐバックアップを保存'}</span>
+                    </button>
                   </div>
-                )}
-              </div>
 
-              {/* 🔄 Googleカレンダー ＆ Gemini 完全自動・双方向同期（APIキー不要・GAS Webアプリ方式） */}
-              <div className="bg-white rounded-3xl p-4 border-2 border-[#56CFE1] space-y-3.5 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">🔄</span>
-                    <div>
-                      <h3 className="text-sm font-black text-stone-800 flex items-center gap-1.5">
-                        <span>Googleカレンダー ＆ Googleタスク 双方向自動同期</span>
+                  {/* 非常用：過去の履歴・クラウド履歴（折りたたみ） */}
+                  <details className="rounded-xl bg-stone-50/80 border border-stone-200/80">
+                    <summary className="cursor-pointer px-3 py-2 text-[11px] font-bold text-stone-600 select-none">
+                      📂 過去の履歴・クラウド履歴から選ぶ（非常用）
+                    </summary>
+                    <div className="px-3 pb-3 pt-1 space-y-3 border-t border-stone-200/60">
+                      {localBackups.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="text-[11px] font-extrabold text-stone-700">
+                            📱 端末内の保存履歴（{localBackups.length}件）
+                          </div>
+                          <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                            {localBackups.map((snap, idx) => (
+                              <div
+                                key={snap.id}
+                                className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-white border border-emerald-200/70"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-extrabold text-stone-800 text-xs">
+                                      {formatBackupDateTime(snap.createdAt)}
+                                    </span>
+                                    <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                      {idx === 0 ? `最新・${snap.reason}` : snap.reason}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-stone-500 mt-0.5">
+                                    シフト {snap.counts.shifts}件 ／ 予定 {snap.counts.events}件 ／ タスク{' '}
+                                    {snap.counts.tasks}件
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    disabled={restoringBackupId !== null}
+                                    onClick={() => handleRestoreLocalSnapshot(snap)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] flex items-center gap-1 disabled:opacity-50"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    <span>復元</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleExportSnapshotJson(snap)}
+                                    title="JSONファイルとして保存"
+                                    className="px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-[11px]"
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteLocalSnapshot(snap)}
+                                    title="削除"
+                                    className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2 pt-1 border-t border-stone-200/70">
+                        <button
+                          type="button"
+                          disabled={loadingCloudRevisions}
+                          onClick={handleLoadCloudRevisions}
+                          className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 font-extrabold text-[11px] flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                        >
+                          <History className={`w-3.5 h-3.5 ${loadingCloudRevisions ? 'animate-spin' : ''}`} />
+                          <span>
+                            {loadingCloudRevisions
+                              ? 'クラウド履歴を読込中...'
+                              : '☁️ クラウド過去履歴（別端末の控え）を表示'}
+                          </span>
+                        </button>
+
+                        {cloudRevisions.length > 0 && (
+                          <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                            {cloudRevisions.map((rev, idx) => (
+                              <div
+                                key={rev.version}
+                                className="flex items-center justify-between gap-2 p-2 rounded-xl bg-sky-50/70 border border-sky-200/70"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-extrabold text-stone-800 text-xs">
+                                      {formatBackupDateTime(rev.committedAt)}
+                                    </span>
+                                    {idx === 0 && (
+                                      <span className="px-1.5 py-0.5 rounded-md bg-sky-200 text-sky-900 text-[10px] font-bold">
+                                        最新
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-stone-400 font-mono">
+                                    ID: {rev.version.slice(0, 8)}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={restoringBackupId !== null}
+                                  onClick={() => handleRestoreCloudRevision(rev)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[11px] flex items-center gap-1 shrink-0 disabled:opacity-50"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>
+                                    {restoringBackupId === rev.version ? '復元中...' : '復元'}
+                                  </span>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </details>
+
+              {/* 🔄 Googleカレンダー ＆ Gemini 完全自動・双方向同期（アコーディオン・デフォルト閉じ） */}
+              <details className="group bg-white rounded-2xl border-2 border-[#56CFE1] shadow-sm overflow-hidden">
+                <summary className="list-none cursor-pointer p-3.5 flex items-center justify-between gap-2 select-none hover:bg-sky-50/40 transition-colors">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-lg shrink-0">🔄</span>
+                    <div className="min-w-0">
+                      <h3 className="text-xs sm:text-sm font-black text-stone-800 truncate">
+                        Googleカレンダー ＆ Googleタスク 双方向自動同期
                       </h3>
-                      <p className="text-[11px] text-stone-500">
-                        ペアカレ ⇄ Googleカレンダー＆Googleタスク(ToDoリスト)を双方向同期！アプリ内・Googleのどちらで完了しても双方に反映されます✨
+                      <p className="text-[10px] text-stone-500 truncate">
+                        予定・タスク・シフトの自動連携設定
                       </p>
                     </div>
                   </div>
-                  <span
-                    className={`px-2.5 py-1 rounded-full font-extrabold text-[10px] shrink-0 ${
-                      gcalEnabled && (partnerAGasUrl.trim() || partnerBGasUrl.trim())
-                        ? 'bg-[#E6F7EF] text-[#1E6645]'
-                        : 'bg-stone-100 text-stone-500'
-                    }`}
-                  >
-                    {gcalEnabled && (partnerAGasUrl.trim() || partnerBGasUrl.trim())
-                      ? '✅ 双方向自動同期 ON'
-                      : '⚪ 未設定（URLを入力してON）'}
-                  </span>
-                </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span
+                      className={`px-2 py-0.5 rounded-full font-extrabold text-[10px] ${
+                        gcalEnabled && (partnerAGasUrl.trim() || partnerBGasUrl.trim())
+                          ? 'bg-[#E6F7EF] text-[#1E6645]'
+                          : 'bg-stone-100 text-stone-500'
+                      }`}
+                    >
+                      {gcalEnabled && (partnerAGasUrl.trim() || partnerBGasUrl.trim())
+                        ? '✅ ON'
+                        : '⚪ 未設定'}
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-[#126875] transition-transform group-open:rotate-180" />
+                  </div>
+                </summary>
+                <div className="px-4 pb-4 pt-2 space-y-3.5 border-t border-[#56CFE1]/30">
 
                 {/* Gemini → Googleカレンダー／タスク → ペアカレ の流れガイド */}
                 <div className="p-3 rounded-2xl bg-gradient-to-r from-[#E2F9FC]/70 via-[#FFF0F5]/70 to-[#F3EAFF]/70 border border-[#BCEBF5] space-y-1.5">
@@ -1801,13 +1840,19 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     </span>
                   </button>
                 </div>
-              </div>
+                </div>
+              </details>
 
-              {/* 🔔 スマホのカレンダー＆Googleカレンダー通知連携（夫の端末専用 ／ 妻の端末専用） */}
-              <div className="bg-[#F6F9FF] rounded-2xl p-4 border border-sky-200/90 space-y-2.5 shadow-2xs">
-                <h3 className="text-sm font-extrabold text-sky-900 flex items-center gap-1.5">
-                  🔔 スマホのカレンダーに通知付きで取り込む（夫専用 ／ 妻専用）
-                </h3>
+              {/* 🔔 スマホのカレンダー＆Googleカレンダー通知連携（アコーディオン・デフォルト閉じ） */}
+              <details className="group bg-[#F6F9FF] rounded-2xl border border-sky-200/90 shadow-2xs overflow-hidden">
+                <summary className="list-none cursor-pointer p-3.5 flex items-center justify-between gap-2 select-none hover:bg-sky-50 transition-colors">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-sky-900 flex items-center gap-1.5">
+                    <span>🔔</span>
+                    <span>スマホのカレンダーに通知付きで取り込む（夫専用 ／ 妻専用）</span>
+                  </h3>
+                  <ChevronDown className="w-4 h-4 text-sky-700 shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="px-4 pb-4 pt-1 space-y-2.5 border-t border-sky-200/60">
                 <p className="text-stone-600 leading-relaxed">
                   下のボタンを押すと、<strong>夫のボタンなら夫のシフト・予定・タスクだけ</strong>、<strong>妻のボタンなら妻のシフト・予定・タスクだけ</strong>に通知アラーム（VALARM）が入ったカレンダーがスマホで直接開きます！
                 </p>
@@ -1856,13 +1901,19 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                 <div className="pt-1 text-[11px] text-stone-500">
                   💡 <strong>1件ずつGoogleカレンダーアプリへ直接通知を入れる場合</strong>は、各予定やタスクの横にある <strong>「🔔 Googleカレンダー通知登録」</strong> ボタンを押すとGoogleカレンダーアプリが直接開きます！
                 </div>
-              </div>
+                </div>
+              </details>
 
-              {/* iCal (.ics) エクスポート＆インポート */}
-              <div className="bg-white rounded-2xl p-4 border border-stone-200/90 space-y-3 shadow-2xs">
-                <h3 className="text-sm font-extrabold text-stone-800 flex items-center gap-1.5">
-                  📅 カレンダーファイル（.ics）の書き出し＆取り込み
-                </h3>
+              {/* iCal (.ics) エクスポート＆インポート（アコーディオン・デフォルト閉じ） */}
+              <details className="group bg-white rounded-2xl border border-stone-200/90 shadow-2xs overflow-hidden">
+                <summary className="list-none cursor-pointer p-3.5 flex items-center justify-between gap-2 select-none hover:bg-stone-50 transition-colors">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-stone-800 flex items-center gap-1.5">
+                    <span>📅</span>
+                    <span>カレンダーファイル（.ics）の書き出し＆取り込み</span>
+                  </h3>
+                  <ChevronDown className="w-4 h-4 text-stone-500 shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="px-4 pb-4 pt-1 space-y-3 border-t border-stone-200/70">
                 <p className="text-stone-500">
                   iPhone標準カレンダー・Googleカレンダー・ナスカレ等とカレンダーデータを入出力できます。
                 </p>
@@ -1940,13 +1991,19 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     </button>
                   </div>
                 </div>
-              </div>
+                </div>
+              </details>
 
-              {/* 1タップ JSONバックアップ保存・復元 */}
-              <div className="bg-white rounded-2xl p-4 border border-stone-200/90 space-y-3 shadow-2xs">
-                <h3 className="text-sm font-extrabold text-stone-800">
-                  💾 ワンタップ JSON バックアップ保存 ＆ 差分マージ復元
-                </h3>
+              {/* 1タップ JSONバックアップ保存・復元（アコーディオン・デフォルト閉じ） */}
+              <details className="group bg-white rounded-2xl border border-stone-200/90 shadow-2xs overflow-hidden">
+                <summary className="list-none cursor-pointer p-3.5 flex items-center justify-between gap-2 select-none hover:bg-stone-50 transition-colors">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-stone-800 flex items-center gap-1.5">
+                    <span>💾</span>
+                    <span>JSONファイル保存・復元 ／ アプリ最新版へ更新</span>
+                  </h3>
+                  <ChevronDown className="w-4 h-4 text-stone-500 shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="px-4 pb-4 pt-1 space-y-3 border-t border-stone-200/70">
                 <p className="text-stone-500">
                   機種変更時や念のための控えとして、すべてのシフト・予定・スタンプ設定を1ファイルに保存・復元できます（復元時も既存データを消さずに差分マージします）。
                 </p>
@@ -2008,13 +2065,19 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     <span>🔄 最新版へ完全更新（キャッシュ破棄＆再読込）</span>
                   </button>
                 </div>
-              </div>
+                </div>
+              </details>
 
-              {/* 🗑️ 全シフト・全予定一括削除（リセット） */}
-              <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 space-y-2.5">
-                <h3 className="text-sm font-extrabold text-rose-700">
-                  🗑️ 既存のシフトデータ・予定データの削除（リセット）
-                </h3>
+              {/* 🗑️ 全シフト・全予定一括削除（アコーディオン・デフォルト閉じ） */}
+              <details className="group bg-rose-50/70 rounded-2xl border border-rose-200 overflow-hidden">
+                <summary className="list-none cursor-pointer p-3.5 flex items-center justify-between gap-2 select-none hover:bg-rose-100/50 transition-colors">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-rose-700 flex items-center gap-1.5">
+                    <span>🗑️</span>
+                    <span>既存のシフトデータ・予定データの削除（リセット）</span>
+                  </h3>
+                  <ChevronDown className="w-4 h-4 text-rose-500 shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="px-4 pb-4 pt-1 space-y-2.5 border-t border-rose-200/70">
                 <p className="text-stone-600">
                   現在登録されているシフトデータ（残業・休出・バイト含む）や予定・タスクを一括で空にします（シフト種類の設定は残ります）。
                 </p>
@@ -2064,7 +2127,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                     🗑️ 予定＋シフトをすべて一括削除
                   </button>
                 </div>
-              </div>
+                </div>
+              </details>
             </div>
           )}
 
