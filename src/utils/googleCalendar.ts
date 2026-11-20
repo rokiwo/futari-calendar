@@ -2350,15 +2350,22 @@ export async function syncWithGoogleCalendar(
         if (!remTask.googleTaskId) continue;
         seenGoogleTaskIds.add(remTask.googleTaskId);
 
-        let matchedLocal: ScheduleEvent | undefined;
-        if (remTask.paircalId && nextEvents[remTask.paircalId]) {
-          matchedLocal = nextEvents[remTask.paircalId];
-        } else {
-          matchedLocal = Object.values(nextEvents).find(
-            (e) =>
-              e.googleTaskId === remTask.googleTaskId &&
-              getEffectivePrivateFor(e) === target.defaultCreator
-          );
+        // GoogleタスクIDの完全一致を最優先（繰り返しタスクで次回分が前回の [PAIRCAL_ID:...] を引き継いでも別タスクとして確実に取り込む）
+        let matchedLocal: ScheduleEvent | undefined = Object.values(nextEvents).find(
+          (e) =>
+            e.googleTaskId === remTask.googleTaskId &&
+            getEffectivePrivateFor(e) === target.defaultCreator
+        );
+        if (!matchedLocal && remTask.paircalId && nextEvents[remTask.paircalId]) {
+          const candidate = nextEvents[remTask.paircalId];
+          const isDifferentRecurringInstance =
+            Boolean(candidate.googleTaskId) &&
+            candidate.googleTaskId !== remTask.googleTaskId &&
+            (Boolean(candidate.isCompleted) !== Boolean(remTask.isCompleted) ||
+              Boolean(remTask.date && candidate.date && remTask.date !== candidate.date));
+          if (!isDifferentRecurringInstance) {
+            matchedLocal = candidate;
+          }
         }
 
         const cleanTaskTitle = (remTask.title || '').trim() || '(無題のタスク)';
