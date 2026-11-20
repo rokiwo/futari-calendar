@@ -16,6 +16,8 @@ import {
   Camera,
   Eye,
   Trash2,
+  History,
+  RotateCcw,
 } from 'lucide-react';
 import {
   CalendarCategoryId,
@@ -35,7 +37,17 @@ import {
   openOrShareIcsOnDevice,
   testGoogleCalendarGasConnection,
 } from '../utils/googleCalendar';
-import { createNewSecretGist } from '../utils/storage';
+import {
+  CloudBackupRevision,
+  LocalBackupSnapshot,
+  countActiveStoreItems,
+  createNewSecretGist,
+  deleteLocalBackupSnapshot,
+  fetchCloudBackupRevisions,
+  loadCloudBackupRevision,
+  loadLocalBackupSnapshots,
+  saveLocalBackupSnapshot,
+} from '../utils/storage';
 import { getLocalTodayStr } from '../utils/presets';
 import { getDefaultCloudCredentials } from '../utils/defaultCloud';
 
@@ -51,7 +63,7 @@ interface SettingsAndSyncModalProps {
   onTriggerGoogleCalendarSync: (configOverride?: GoogleCalendarSyncConfig) => Promise<string>;
   onUpdatePassword: (newPassword: string) => Promise<void>;
   onTriggerCloudSync: (configOverride?: CloudSyncConfig, passwordOverride?: string) => Promise<void>;
-  onMergeRemoteStore: (remoteStore: CalendarDataStore, message: string) => void;
+  onMergeRemoteStore: (remoteStore: CalendarDataStore, message: string) => void | Promise<void>;
   onImportEvents: (events: ScheduleEvent[]) => void;
   onClearAllEvents: () => void;
   onClearAllShifts: () => void;
@@ -263,6 +275,167 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   const [busy, setBusy] = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
   const [welcomeSavedSuccess, setWelcomeSavedSuccess] = useState(false);
+
+  // 🛡️ 自動バックアップ ＆ クラウドタイムマシン状態
+  const [localBackups, setLocalBackups] = useState<LocalBackupSnapshot[]>([]);
+  const [cloudRevisions, setCloudRevisions] = useState<CloudBackupRevision[]>([]);
+  const [loadingCloudRevisions, setLoadingCloudRevisions] = useState(false);
+  const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+
+  const currentCounts = countActiveStoreItems(store);
+
+  const formatBackupDateTime = (iso: string): string => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${m}/${day} ${hh}:${mm}`;
+  };
+
+  const refreshLocalBackups = async () => {
+    try {
+      const list = await loadLocalBackupSnapshots();
+      setLocalBackups(list);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    void refreshLocalBackups();
+  }, []);
+
+  const handleCreateManualSnapshot = async () => {
+    setBackupBusy(true);
+    setStatusMsg(null);
+    try {
+      await saveLocalBackupSnapshot(store, '手動保存', { force: true });
+      await refreshLocalBackups();
+      setStatusMsg({
+        type: 'ok',
+        text: `📸 現在のデータ（シフト${currentCounts.shifts}件・予定${currentCounts.events}件・タスク${currentCounts.tasks}件）を端末にバックアップ保存しました！`,
+      });
+    } catch (err) {
+      setStatusMsg({
+        type: 'err',
+        text: `バックアップの保存に失敗しました: ${err instanceof Error ? err.message : '不明なエラー'}`,
+      });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleRestoreLocalSnapshot = async (snap: LocalBackupSnapshot) => {
+    const label = `${formatBackupDateTime(snap.createdAt)}（${snap.reason}）`;
+    const ok = window.confirm(
+      `【バックアップから復元】\n${label}\n\nシフト: ${snap.counts.shifts}件 ／ 予定: ${snap.counts.events}件 ／ タスク: ${snap.counts.tasks}件\n\n消えてしまったデータを復活させ、クラウド＆Googleカレンダーへも自動で再同期します（復元前の現在データも自動でバックアップされます）。実行しますか？`
+    );
+    if (!ok) return;
+    setRestoringBackupId(snap.id);
+    setStatusMsg(null);
+    try {
+      await onMergeRemoteStore(
+        snap.store,
+        `♻️ ${label} のバックアップから復元しました（シフト${snap.counts.shifts}・予定${snap.counts.events}・タスク${snap.counts.tasks}）`
+      );
+      await refreshLocalBackups();
+      setStatusMsg({
+        type: 'ok',
+        text: `✅ ${label} のバックアップからデータを復元しました！クラウド＆Googleカレンダーにも自動で反映されます。`,
+      });
+    } catch (err) {
+      setStatusMsg({
+        type: 'err',
+        text: `復元に失敗しました: ${err instanceof Error ? err.message : '不明なエラー'}`,
+      });
+    } finally {
+      setRestoringBackupId(null);
+    }
+  };
+
+  const handleExportSnapshotJson = (snap: LocalBackupSnapshot) => {
+    try {
+      const jsonStr = JSON.stringify(snap.store, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const datePart = (snap.createdAt || getLocalTodayStr()).slice(0, 10);
+      a.download = `futarical-backup-${datePart}-${snap.id.slice(-4)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+      setStatusMsg({
+        type: 'ok',
+        text: `💾 ${formatBackupDateTime(snap.createdAt)} のバックアップをJSONファイルとして保存しました。`,
+      });
+    } catch {
+      setStatusMsg({ type: 'err', text: 'JSONファイルの書き出しに失敗しました。' });
+    }
+  };
+
+  const handleDeleteLocalSnapshot = async (snap: LocalBackupSnapshot) => {
+    const ok = window.confirm(
+      `${formatBackupDateTime(snap.createdAt)}（${snap.reason}）のローカルバックアップを削除しますか？`
+    );
+    if (!ok) return;
+    const next = await deleteLocalBackupSnapshot(snap.id);
+    setLocalBackups(next);
+  };
+
+  const handleLoadCloudRevisions = async () => {
+    setLoadingCloudRevisions(true);
+    setStatusMsg(null);
+    try {
+      const revisions = await fetchCloudBackupRevisions(syncConfig, 15);
+      setCloudRevisions(revisions);
+      if (revisions.length === 0) {
+        setStatusMsg({ type: 'err', text: 'クラウド履歴が見つかりませんでした。' });
+      }
+    } catch (err) {
+      setStatusMsg({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'クラウド履歴の取得に失敗しました。',
+      });
+    } finally {
+      setLoadingCloudRevisions(false);
+    }
+  };
+
+  const handleRestoreCloudRevision = async (rev: CloudBackupRevision) => {
+    setRestoringBackupId(rev.version);
+    setStatusMsg(null);
+    try {
+      const pass = passwordInput.trim() || currentPassword || undefined;
+      const loadedStore = await loadCloudBackupRevision(syncConfig, rev.version, pass);
+      const counts = countActiveStoreItems(loadedStore);
+      const label = formatBackupDateTime(rev.committedAt);
+      const ok = window.confirm(
+        `【クラウド履歴から復元】\n${label} 時点のデータ\n\nシフト: ${counts.shifts}件 ／ 予定: ${counts.events}件 ／ タスク: ${counts.tasks}件\n\nこの時点のデータを復活させ、クラウド＆Googleカレンダーへ再同期します（復元前の現在データも自動でバックアップされます）。実行しますか？`
+      );
+      if (!ok) return;
+      await onMergeRemoteStore(
+        loadedStore,
+        `☁️ ${label} のクラウド履歴から復元しました（シフト${counts.shifts}・予定${counts.events}・タスク${counts.tasks}）`
+      );
+      await refreshLocalBackups();
+      setStatusMsg({
+        type: 'ok',
+        text: `✅ ${label} のクラウド履歴から復元しました！（シフト${counts.shifts}件・予定${counts.events}件・タスク${counts.tasks}件）`,
+      });
+    } catch (err) {
+      setStatusMsg({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'クラウド履歴からの復元に失敗しました。',
+      });
+    } finally {
+      setRestoringBackupId(null);
+    }
+  };
 
   const icsFileInputRef = useRef<HTMLInputElement>(null);
   const jsonRestoreInputRef = useRef<HTMLInputElement>(null);
@@ -1170,6 +1343,162 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
           {/* タブ2：Googleカレンダー・Gemini双方向自動同期 ＆ iCal連携 ＆ JSONバックアップ */}
           {activeTab === 'ical_backup' && (
             <div className="space-y-4">
+              {/* 🛡️ 自動バックアップ ＆ いつでも復元（タイムマシン） */}
+              <div className="bg-white rounded-3xl p-4 border-2 border-[#34D399] space-y-3.5 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🛡️</span>
+                    <div>
+                      <h3 className="text-sm font-black text-stone-800 flex items-center gap-1.5">
+                        <span>自動バックアップ ＆ いつでも復元（タイムマシン）</span>
+                      </h3>
+                      <p className="text-[11px] text-stone-500">
+                        起動時・同期前・一括削除前・復元前に端末へ自動保存（最大20世代＋データ最多の控えを永久保護）。万が一消えても1タップで復活できます！
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full font-extrabold text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                    現在：シフト{currentCounts.shifts}・予定{currentCounts.events}・タスク{currentCounts.tasks}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={backupBusy}
+                    onClick={handleCreateManualSnapshot}
+                    className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs active:scale-98 transition-all disabled:opacity-60"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>{backupBusy ? '保存中...' : '📸 今すぐバックアップを保存'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={loadingCloudRevisions}
+                    onClick={handleLoadCloudRevisions}
+                    className="px-3.5 py-2.5 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 font-extrabold text-xs flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                  >
+                    <History className={`w-4 h-4 ${loadingCloudRevisions ? 'animate-spin' : ''}`} />
+                    <span>
+                      {loadingCloudRevisions
+                        ? 'クラウド履歴を読込中...'
+                        : '☁️ クラウド過去履歴（タイムマシン）を見る'}
+                    </span>
+                  </button>
+                </div>
+
+                {/* 端末内の自動・手動バックアップ一覧 */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-extrabold text-stone-700">
+                    <span>📱 この端末のバックアップ履歴（{localBackups.length}件）</span>
+                    <span className="text-[10px] font-normal text-stone-400">
+                      復元するとクラウド＆Googleにも自動反映
+                    </span>
+                  </div>
+                  {localBackups.length === 0 ? (
+                    <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/80 text-[11px] text-stone-500">
+                      まだバックアップがありません。上の「📸 今すぐバックアップを保存」を押すか、次回起動・同期時に自動で保存されます。
+                    </div>
+                  ) : (
+                    <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
+                      {localBackups.map((snap) => (
+                        <div
+                          key={snap.id}
+                          className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-[#F8FDFB] border border-emerald-200/70"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-extrabold text-stone-800 text-xs">
+                                {formatBackupDateTime(snap.createdAt)}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                {snap.reason}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-stone-500 mt-0.5">
+                              シフト {snap.counts.shifts}件 ／ 予定 {snap.counts.events}件 ／ タスク{' '}
+                              {snap.counts.tasks}件
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={restoringBackupId !== null}
+                              onClick={() => handleRestoreLocalSnapshot(snap)}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] flex items-center gap-1 disabled:opacity-50"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>{restoringBackupId === snap.id ? '復元中...' : '復元'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleExportSnapshotJson(snap)}
+                              title="JSONファイルとして保存"
+                              className="px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-[11px] flex items-center gap-1"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteLocalSnapshot(snap)}
+                              title="このバックアップを削除"
+                              className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ☁️ クラウド（GitHub Gist）過去リビジョン一覧 */}
+                {cloudRevisions.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-stone-200/80">
+                    <div className="text-[11px] font-extrabold text-sky-900">
+                      ☁️ クラウドに保存された過去履歴（最新{cloudRevisions.length}件・別端末からも復元OK）
+                    </div>
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                      {cloudRevisions.map((rev, idx) => (
+                        <div
+                          key={rev.version}
+                          className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-sky-50/70 border border-sky-200/70"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-extrabold text-stone-800 text-xs">
+                                {formatBackupDateTime(rev.committedAt)}
+                              </span>
+                              {idx === 0 && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-sky-200 text-sky-900 text-[10px] font-bold">
+                                  最新
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-stone-400 font-mono">
+                              ID: {rev.version.slice(0, 8)}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={restoringBackupId !== null}
+                            onClick={() => handleRestoreCloudRevision(rev)}
+                            className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[11px] flex items-center gap-1 shrink-0 disabled:opacity-50"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>
+                              {restoringBackupId === rev.version ? '読込・復元中...' : 'この時点から復元'}
+                            </span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* 🔄 Googleカレンダー ＆ Gemini 完全自動・双方向同期（APIキー不要・GAS Webアプリ方式） */}
               <div className="bg-white rounded-3xl p-4 border-2 border-[#56CFE1] space-y-3.5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">

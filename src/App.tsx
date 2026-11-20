@@ -32,6 +32,7 @@ import {
 } from './utils/presets';
 import { hashPasscode } from './utils/crypto';
 import {
+  buildRestoredStoreFromBackup,
   getActivePartnerId,
   getSavedPassHash,
   loadLocalStore,
@@ -39,6 +40,7 @@ import {
   mergeCalendarStores,
   saveDedicatedWelcomePhoto,
   loadDedicatedWelcomePhoto,
+  saveLocalBackupSnapshot,
   saveLocalStore,
   saveSyncConfig,
   setActivePartnerId,
@@ -715,6 +717,9 @@ export const App: React.FC = () => {
         await saveLocalStore(nextStore, activeSessionPass || undefined);
       }
 
+      // 🛡️ 起動時自動バックアップ（同期で万が一消えても復元できるようローカル保存）
+      void saveLocalBackupSnapshot(nextStore, '起動時自動', { minIntervalMs: 30 * 60 * 1000 });
+
       setStore(nextStore);
       const initialGcalCfg = loadGoogleCalendarSyncConfig(
         nextStore.metadata?.googleCalendarSyncConfig
@@ -918,6 +923,9 @@ export const App: React.FC = () => {
     beginSync();
 
     try {
+      void saveLocalBackupSnapshot(latestStoreRef.current, 'Google同期前自動', {
+        minIntervalMs: 10 * 60 * 1000,
+      });
       const gcalRes = await syncWithGoogleCalendar(
         latestStoreRef.current,
         currentGcalCfg,
@@ -1640,6 +1648,7 @@ export const App: React.FC = () => {
   // 登録されているすべての予定・タスクを一括削除
   const handleClearAllEvents = useCallback(() => {
     const curStore = latestStoreRef.current;
+    void saveLocalBackupSnapshot(curStore, '予定一括削除前', { force: true });
     const nowIso = new Date().toISOString();
     const deletedEvents: Record<string, ScheduleEvent> = {};
     for (const [id, ev] of Object.entries(curStore.events)) {
@@ -1674,6 +1683,7 @@ export const App: React.FC = () => {
   // 登録されているすべてのシフトデータ（残業・休出・バイト含む）を一括削除
   const handleClearAllShifts = useCallback(() => {
     const curStore = latestStoreRef.current;
+    void saveLocalBackupSnapshot(curStore, 'シフト一括削除前', { force: true });
     const nowIso = new Date().toISOString();
     const deletedShifts: Record<string, ShiftEntry> = {};
     for (const [id, s] of Object.entries(curStore.shifts)) {
@@ -1708,6 +1718,7 @@ export const App: React.FC = () => {
   // 予定データ＋シフトデータを両方すべて一括削除
   const handleClearAllData = useCallback(() => {
     const curStore = latestStoreRef.current;
+    void saveLocalBackupSnapshot(curStore, '全データ削除前', { force: true });
     const nowIso = new Date().toISOString();
     const deletedEvents: Record<string, ScheduleEvent> = {};
     for (const [id, ev] of Object.entries(curStore.events)) {
@@ -1961,6 +1972,9 @@ export const App: React.FC = () => {
           );
       beginSync();
       try {
+        void saveLocalBackupSnapshot(curStore, 'Google手動同期前', {
+          minIntervalMs: 10 * 60 * 1000,
+        });
         const gcalRes = await syncWithGoogleCalendar(curStore, cfg, activePartner);
         let workingStore = mergeCalendarStores(latestStoreRef.current, gcalRes.nextStore);
         setStore(workingStore);
@@ -2019,6 +2033,9 @@ export const App: React.FC = () => {
       beginSync();
       try {
         let workingStore = latestStoreRef.current;
+        void saveLocalBackupSnapshot(workingStore, 'クラウド同期前', {
+          minIntervalMs: 10 * 60 * 1000,
+        });
         let gcalMsg = '';
         const currentGcalCfg = loadGoogleCalendarSyncConfig(
           workingStore.metadata?.googleCalendarSyncConfig || gcalSyncConfig
@@ -2478,9 +2495,10 @@ export const App: React.FC = () => {
             await saveLocalStore(latestStoreRef.current, newPass);
           }}
           onTriggerCloudSync={handleTriggerCloudSync}
-          onMergeRemoteStore={(remoteStore, message) => {
-            const merged = mergeCalendarStores(latestStoreRef.current, remoteStore);
-            void commitStore(merged, false);
+          onMergeRemoteStore={async (remoteStore, message) => {
+            await saveLocalBackupSnapshot(latestStoreRef.current, '復元前自動', { force: true });
+            const restored = buildRestoredStoreFromBackup(latestStoreRef.current, remoteStore);
+            void commitStore(restored, true, true);
             showToast(message);
           }}
           onImportEvents={(events) => {

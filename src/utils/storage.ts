@@ -31,6 +31,26 @@ const LS_ACTIVE_PARTNER_KEY = 'futarical_active_partner_v1';
 export const LS_WELCOME_PHOTO_KEY = 'paircal_welcome_photo_dedicated_v1';
 export const LS_SHARED_KEYWORD_KEY = 'futarical_shared_keyword_v1';
 export const LS_CUSTOM_KEYWORD_DEF_KEY = 'futarical_custom_keyword_def_v1';
+const IDB_AUTO_BACKUPS_KEY = 'paircal_auto_backups_v1';
+const LS_AUTO_BACKUPS_FALLBACK_KEY = 'paircal_auto_backups_fallback_v1';
+const MAX_LOCAL_BACKUPS = 20;
+
+export interface LocalBackupSnapshot {
+  id: string;
+  createdAt: string;
+  reason: string;
+  counts: {
+    shifts: number;
+    events: number;
+    tasks: number;
+  };
+  store: CalendarDataStore;
+}
+
+export interface CloudBackupRevision {
+  version: string;
+  committedAt: string;
+}
 
 // デフォルトの特定の合言葉（ひらがな、カタカナ、アルファベット表記揺れを許容）
 export const DEFAULT_SHARED_KEYWORDS = ['ゆうとさや', 'ゆとさや', 'yutosaya', 'paircal', 'futari'];
@@ -805,4 +825,330 @@ export async function syncWithGitHub(
       statusMessage: `✨ 夫婦クラウド (${owner}/${repo}) と自動同期しました！`,
     };
   }
+}
+
+// ===== 🛡️ 自動ローカルバックアップ（IndexedDBローリング保存）＆ クラウド履歴タイムマシン復元 =====
+
+export function countActiveStoreItems(store: CalendarDataStore): {
+  shifts: number;
+  events: number;
+  tasks: number;
+} {
+  let shifts = 0;
+  for (const s of Object.values(store.shifts || {})) {
+    if (s && !s.deletedAt) shifts++;
+  }
+  let events = 0;
+  let tasks = 0;
+  for (const ev of Object.values(store.events || {})) {
+    if (!ev || ev.deletedAt) continue;
+    if (ev.isTask) tasks++;
+    else events++;
+  }
+  return { shifts, events, tasks };
+}
+
+function stripHeavyWelcomePhoto(store: CalendarDataStore): CalendarDataStore {
+  if (!store.metadata?.welcomeImageConfig?.dataUrl) return store;
+  return {
+    ...store,
+    metadata: {
+      ...store.metadata,
+      welcomeImageConfig: {
+        ...store.metadata.welcomeImageConfig,
+        dataUrl: '',
+      },
+    },
+  };
+}
+
+export async function loadLocalBackupSnapshots(): Promise<LocalBackupSnapshot[]> {
+  const fromIdb = await idbGet<LocalBackupSnapshot[]>(IDB_AUTO_BACKUPS_KEY);
+  if (Array.isArray(fromIdb) && fromIdb.length > 0) {
+    return fromIdb.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }
+  try {
+    const raw = localStorage.getItem(LS_AUTO_BACKUPS_FALLBACK_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as LocalBackupSnapshot[];
+      if (Array.isArray(parsed)) {
+        return parsed.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+async function persistLocalBackupSnapshots(list: LocalBackupSnapshot[]): Promise<void> {
+  await idbSet(IDB_AUTO_BACKUPS_KEY, list);
+  try {
+    // localStorage 側には容量超過しない範囲で最新3件のみ保険保存
+    localStorage.setItem(LS_AUTO_BACKUPS_FALLBACK_KEY, JSON.stringify(list.slice(0, 3)));
+  } catch {
+    // ignore quota error
+  }
+}
+
+/**
+ * 端末内（IndexedDB）へローリング自動バックアップを保存する。
+ * - 空データのスナップショットは自動保存しない（force=true時を除く）
+ * - 最新19件＋過去データの中で件数が最大の1件を必ず保持し、万が一空同期が連続しても良質な控えが押し出されないように保護
+ */
+export async function saveLocalBackupSnapshot(
+  store: CalendarDataStore,
+  reason: string,
+  options?: { force?: boolean; minIntervalMs?: number }
+): Promise<LocalBackupSnapshot | null> {
+  const counts = countActiveStoreItems(store);
+  const totalCount = counts.shifts + counts.events + counts.tasks;
+  if (totalCount === 0 && !options?.force) {
+    return null;
+  }
+
+  const existing = await loadLocalBackupSnapshots();
+  const latest = existing[0];
+  const nowMs = Date.now();
+  const minInterval = options?.minIntervalMs ?? 5 * 60 * 1000;
+
+  if (
+    !options?.force &&
+    latest &&
+    latest.counts.shifts === counts.shifts &&
+    latest.counts.events === counts.events &&
+    latest.counts.tasks === counts.tasks &&
+    latest.store.updatedAt === store.updatedAt &&
+    nowMs - (Date.parse(latest.createdAt) || 0) < minInterval
+  ) {
+    return null;
+  }
+
+  const nowIso = new Date(nowMs).toISOString();
+  const snap: LocalBackupSnapshot = {
+    id: `bak_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+    createdAt: nowIso,
+    reason,
+    counts,
+    store: stripHeavyWelcomePhoto(store),
+  };
+
+  const combined = [snap, ...existing];
+  let trimmed = combined;
+  if (combined.length > MAX_LOCAL_BACKUPS) {
+    const recent = combined.slice(0, MAX_LOCAL_BACKUPS - 1);
+    const overflow = combined.slice(MAX_LOCAL_BACKUPS - 1);
+    // 押し出される候補の中から最もデータ件数が多い1件を「保険スナップショット」として残す
+    let richest = overflow[0];
+    let richestTotal =
+      richest.counts.shifts + richest.counts.events + richest.counts.tasks;
+    for (const cand of overflow.slice(1)) {
+      const t = cand.counts.shifts + cand.counts.events + cand.counts.tasks;
+      if (t > richestTotal) {
+        richest = cand;
+        richestTotal = t;
+      }
+    }
+    trimmed = [...recent, richest];
+  }
+
+  await persistLocalBackupSnapshots(trimmed);
+  return snap;
+}
+
+export async function deleteLocalBackupSnapshot(id: string): Promise<LocalBackupSnapshot[]> {
+  const existing = await loadLocalBackupSnapshots();
+  const next = existing.filter((s) => s.id !== id);
+  await persistLocalBackupSnapshots(next);
+  return next;
+}
+
+/**
+ * バックアップスナップショットから安全にデータを復活マージする。
+ * 通常の mergeCalendarStores では「新しい削除(deletedAt)」が勝ってしまうため、
+ * バックアップ側で有効(!deletedAt)な予定・タスク・シフトは新しい updatedAt を付与して確実に復活させ、
+ * Google カレンダー / Google タスクへも再同期できるよう stale な Google ID をリセットする。
+ */
+export function buildRestoredStoreFromBackup(
+  currentStore: CalendarDataStore,
+  backupStore: CalendarDataStore
+): CalendarDataStore {
+  const nowIso = new Date().toISOString();
+
+  // 1. シフト復活マージ
+  const mergedShifts: Record<string, ShiftEntry> = { ...(currentStore.shifts || {}) };
+  for (const [id, bShift] of Object.entries(backupStore.shifts || {})) {
+    if (!bShift || bShift.deletedAt) continue;
+    const cur = mergedShifts[id];
+    if (!cur || cur.deletedAt) {
+      mergedShifts[id] = {
+        ...bShift,
+        deletedAt: null,
+        updatedAt: nowIso,
+      };
+    } else if (toTimeMs(bShift.updatedAt) > toTimeMs(cur.updatedAt)) {
+      mergedShifts[id] = bShift;
+    }
+  }
+
+  // 2. 予定・タスク復活マージ（消去済みのものは新しい updatedAt で復活させ、Google再同期対象にする）
+  const mergedEvents: Record<string, ScheduleEvent> = { ...(currentStore.events || {}) };
+  for (const [id, bEv] of Object.entries(backupStore.events || {})) {
+    if (!bEv || bEv.deletedAt) continue;
+    const cur = mergedEvents[id];
+    if (!cur || cur.deletedAt) {
+      mergedEvents[id] = {
+        ...bEv,
+        deletedAt: null,
+        updatedAt: nowIso,
+        googleCalSynced: false,
+        googleEventId: undefined,
+        googleEventIds: undefined,
+        googleTaskSynced: false,
+        googleTaskId: undefined,
+        googleTaskListId: undefined,
+      };
+    } else if (toTimeMs(bEv.updatedAt) > toTimeMs(cur.updatedAt)) {
+      mergedEvents[id] = {
+        ...bEv,
+        googleEventId: cur.googleEventId || bEv.googleEventId,
+        googleEventIds: cur.googleEventIds || bEv.googleEventIds,
+        googleCalSynced: Boolean(cur.googleCalSynced || bEv.googleCalSynced),
+        googleTaskId: cur.googleTaskId || bEv.googleTaskId,
+        googleTaskListId: cur.googleTaskListId || bEv.googleTaskListId,
+        googleTaskSynced: Boolean(cur.googleTaskSynced || bEv.googleTaskSynced),
+      };
+    }
+  }
+
+  // 3. すれ違いサポート復活マージ
+  const mergedSupports: Record<string, DaySupportEntry> = { ...(currentStore.daySupports || {}) };
+  for (const [date, bSup] of Object.entries(backupStore.daySupports || {})) {
+    if (!bSup || !bSup.badges || bSup.badges.length === 0) continue;
+    const cur = mergedSupports[date];
+    if (!cur || !cur.badges || cur.badges.length === 0) {
+      mergedSupports[date] = {
+        ...bSup,
+        updatedAt: nowIso,
+      };
+    }
+  }
+
+  const nextStamps =
+    currentStore.stamps && currentStore.stamps.length > 0
+      ? currentStore.stamps
+      : backupStore.stamps || DEFAULT_STAMP_PRESETS;
+  const nextCategories =
+    currentStore.categories && currentStore.categories.length > 0
+      ? currentStore.categories
+      : backupStore.categories;
+
+  const preservedWelcome =
+    currentStore.metadata?.welcomeImageConfig?.dataUrl
+      ? currentStore.metadata.welcomeImageConfig
+      : backupStore.metadata?.welcomeImageConfig || currentStore.metadata?.welcomeImageConfig;
+
+  return {
+    ...currentStore,
+    shifts: mergedShifts,
+    events: mergedEvents,
+    daySupports: mergedSupports,
+    stamps: nextStamps,
+    categories: nextCategories,
+    metadata: {
+      ...currentStore.metadata,
+      welcomeImageConfig: preservedWelcome,
+      updatedAt: nowIso,
+    },
+    updatedAt: nowIso,
+  };
+}
+
+/**
+ * GitHub Gist の過去リビジョン一覧（クラウド・タイムマシン履歴）を取得
+ */
+export async function fetchCloudBackupRevisions(
+  config: CloudSyncConfig,
+  limit = 15
+): Promise<CloudBackupRevision[]> {
+  const defaults = getDefaultCloudCredentials();
+  const effectiveToken = config.githubToken?.trim() || defaults.token;
+  const effectiveGistId = config.gistId?.trim() || defaults.gistId;
+  if (!effectiveToken || !effectiveGistId) {
+    throw new Error('クラウド同期設定（Gist ID / Token）が見つかりません。');
+  }
+  const res = await fetch(
+    `https://api.github.com/gists/${effectiveGistId}/commits?per_page=${Math.min(30, Math.max(1, limit))}`,
+    {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${effectiveToken}`,
+      },
+      cache: 'no-store',
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`クラウド履歴の取得に失敗しました (${res.status})`);
+  }
+  const list = (await res.json()) as Array<{ version?: string; committed_at?: string }>;
+  return (list || [])
+    .filter((c) => Boolean(c.version && c.committed_at))
+    .map((c) => ({
+      version: String(c.version),
+      committedAt: String(c.committed_at),
+    }));
+}
+
+/**
+ * 指定した GitHub Gist リビジョンを取得して復号する
+ */
+export async function loadCloudBackupRevision(
+  config: CloudSyncConfig,
+  versionSha: string,
+  password?: string
+): Promise<CalendarDataStore> {
+  const defaults = getDefaultCloudCredentials();
+  const effectiveToken = config.githubToken?.trim() || defaults.token;
+  const effectiveGistId = config.gistId?.trim() || defaults.gistId;
+  const effectivePass = password?.trim() || defaults.defaultPass;
+  if (!effectiveToken || !effectiveGistId) {
+    throw new Error('クラウド同期設定（Gist ID / Token）が見つかりません。');
+  }
+  const res = await fetch(`https://api.github.com/gists/${effectiveGistId}/${versionSha}`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${effectiveToken}`,
+    },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error(`クラウド履歴データの取得に失敗しました (${res.status})`);
+  }
+  const gistData = await res.json();
+  const fileObj =
+    gistData.files?.[GIST_FILENAME] ||
+    (gistData.files ? Object.values(gistData.files)[0] : null);
+  if (!fileObj) {
+    throw new Error('このリビジョンにカレンダーデータが見つかりませんでした。');
+  }
+  let rawContent: string = fileObj.content || '';
+  if (fileObj.truncated && fileObj.raw_url) {
+    const rawRes = await fetch(fileObj.raw_url, { cache: 'no-store' });
+    if (!rawRes.ok) {
+      throw new Error(`大容量クラウド履歴データの取得に失敗しました (${rawRes.status})`);
+    }
+    rawContent = await rawRes.text();
+  }
+  const parsed = JSON.parse(rawContent) as EncryptedPayload | CalendarDataStore;
+  if ('ciphertext' in parsed && parsed.ciphertext) {
+    try {
+      return await decryptCalendarStore(parsed as EncryptedPayload, effectivePass);
+    } catch {
+      return await decryptCalendarStore(parsed as EncryptedPayload, defaults.defaultPass);
+    }
+  }
+  if ('shifts' in parsed && 'events' in parsed) {
+    return parsed as CalendarDataStore;
+  }
+  throw new Error('クラウド履歴データの形式を認識できませんでした。');
 }
