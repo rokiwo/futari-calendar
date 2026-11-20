@@ -934,11 +934,21 @@ export async function saveLocalBackupSnapshot(
   };
 
   const combined = [snap, ...existing];
-  let trimmed = combined;
-  if (combined.length > MAX_LOCAL_BACKUPS) {
-    const recent = combined.slice(0, MAX_LOCAL_BACKUPS - 1);
-    const overflow = combined.slice(MAX_LOCAL_BACKUPS - 1);
-    // 押し出される候補の中から最もデータ件数が多い1件を「保険スナップショット」として残す
+  // 各日付（ローカル YYYY-MM-DD）ごとにその日の最後に保存された1件を確実に残す（1日に何度同期しても前日・前々日が押し出されない）
+  const latestByDay = new Map<string, LocalBackupSnapshot>();
+  for (const item of combined) {
+    const dk = toLocalDateKey(item.createdAt);
+    if (!latestByDay.has(dk)) {
+      latestByDay.set(dk, item);
+    }
+  }
+  const dedupedDaily = Array.from(latestByDay.values()).sort(
+    (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)
+  );
+  let trimmed = dedupedDaily;
+  if (dedupedDaily.length > MAX_LOCAL_BACKUPS) {
+    const recent = dedupedDaily.slice(0, MAX_LOCAL_BACKUPS - 1);
+    const overflow = dedupedDaily.slice(MAX_LOCAL_BACKUPS - 1);
     let richest = overflow[0];
     let richestTotal =
       richest.counts.shifts + richest.counts.events + richest.counts.tasks;
@@ -954,6 +964,59 @@ export async function saveLocalBackupSnapshot(
 
   await persistLocalBackupSnapshots(trimmed);
   return snap;
+}
+
+function toLocalDateKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return (iso || '').slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export interface DailyBackupSlot {
+  dayOffset: 0 | 1 | 2;
+  dayLabel: string;
+  dateKey: string;
+  snapshot: LocalBackupSnapshot | null;
+}
+
+/**
+ * 過去3日間（今日・前日・前々日）について、各日の最後に保存されたバックアップ1件ずつを返す
+ */
+export function getRecent3DaysLatestBackups(
+  snapshots: LocalBackupSnapshot[],
+  nowDate = new Date()
+): DailyBackupSlot[] {
+  const sorted = [...(snapshots || [])].sort(
+    (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)
+  );
+  const byDay = new Map<string, LocalBackupSnapshot>();
+  for (const snap of sorted) {
+    const dk = toLocalDateKey(snap.createdAt);
+    if (!byDay.has(dk)) {
+      byDay.set(dk, snap);
+    }
+  }
+
+  const labels: ['今日', '前日', '前々日'] = ['今日', '前日', '前々日'];
+  return ([0, 1, 2] as const).map((offset) => {
+    const dt = new Date(
+      nowDate.getFullYear(),
+      nowDate.getMonth(),
+      nowDate.getDate() - offset
+    );
+    const dk = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(
+      dt.getDate()
+    ).padStart(2, '0')}`;
+    return {
+      dayOffset: offset,
+      dayLabel: labels[offset],
+      dateKey: dk,
+      snapshot: byDay.get(dk) || null,
+    };
+  });
 }
 
 export async function deleteLocalBackupSnapshot(id: string): Promise<LocalBackupSnapshot[]> {

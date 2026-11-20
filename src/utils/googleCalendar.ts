@@ -1449,6 +1449,56 @@ export function matchStampForRemoteShift(
   return undefined;
 }
 
+const GENERIC_SHIFT_TOKENS = new Set([
+  '日勤', '夜勤', '準夜', '準夜勤', '深夜', '深夜勤',
+  '早出', '遅出', '早番', '遅番', '中番',
+  '明け', '夜明け', '夜勤明け',
+  '休み', '休', '公休', '休日', 'OFF',
+  '年休', '有休', '有給', '有給休暇', '特休', '代休', '振休', '半休', '午前休', '午後休',
+  '休出', '休日出勤', '出勤', '在宅', '在宅勤務', 'テレワーク', 'リモート',
+  '研修', '研外',
+  '早A', '早B', '遅A', '遅B', '準早', '準遅', '2夜', '2早', '夜L',
+]);
+
+/**
+ * 対象パートナーの勤務リストに未登録のシフト名でも、もう一方の勤務リストまたは
+ * 定番のシフト語彙に完全一致する場合は「予定欄ではなくシフト枠」として扱うための判定
+ */
+export function matchGenericShiftLabel(
+  rawTitle: string,
+  allStamps: StampPreset[],
+  partnerName?: string
+): { label: string; isHolidayWork: boolean } | undefined {
+  const token = normalizeShiftMatchToken(rawTitle, partnerName);
+  if (!token) return undefined;
+
+  if (GENERIC_SHIFT_TOKENS.has(token)) {
+    const displayLabel = (rawTitle || '')
+      .trim()
+      .replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/gu, '')
+      .replace(/\s*[\(（][^)）]*[\)）]\s*$/g, '')
+      .trim() || token;
+    return {
+      label: displayLabel,
+      isHolidayWork: token === '休出' || token === '休日出勤',
+    };
+  }
+
+  for (const st of allStamps || []) {
+    if (st.type !== 'shift') continue;
+    const lNorm = normalizeShiftMatchToken(st.label);
+    const sNorm = normalizeShiftMatchToken(st.shortLabel);
+    if ((lNorm && token === lNorm) || (sNorm && token === sNorm)) {
+      return {
+        label: st.label,
+        isHolidayWork: st.id === 'shift_hol_work' || st.label.includes('休出') || st.label.includes('休日出勤'),
+      };
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * ペアカレ ⇄ Googleカレンダー 双方向自動同期を実行
  * - ペアカレで追加・編集・削除した予定を Google カレンダーへ即座に反映
@@ -2019,28 +2069,46 @@ export async function syncWithGoogleCalendar(
       if (rem.title && /^🔔 ペアカレ通知連携テスト/.test(rem.title)) {
         continue;
       }
+      // 旧nscale由来の過去シフトイベントは勝手に予定・シフトへ取り込まない
+      if (rem.memo && rem.memo.trim() === '*nscale*') {
+        continue;
+      }
 
-      // Googleカレンダーに直接入力されたシフト名（勤務リストに一致するもの）をペアカレの「シフト枠」へ自動取り込み！
+      // Googleカレンダーに直接入力されたシフト名（勤務リストまたは定番シフト語彙に完全一致するもの）をペアカレの「シフト枠」へ自動取り込み！
+      // ※シフトと一致したものは絶対に通常予定欄（store.events）へ入れない
       if (shouldSyncShifts && (target.key === 'partnerA' || target.key === 'partnerB')) {
+        const partnerName = store.metadata.partners[target.key]?.name;
         const matchedStamp = matchStampForRemoteShift(
           rem.title || '',
           store.stamps || [],
           target.key,
-          store.metadata.partners[target.key]?.name
+          partnerName
         );
-        if (matchedStamp) {
+        const genericShift = matchedStamp
+          ? undefined
+          : matchGenericShiftLabel(rem.title || '', store.stamps || [], partnerName);
+
+        if (matchedStamp || genericShift) {
           const shiftId = `${rem.date}_${target.key}`;
           const existingShift = nextShifts[shiftId];
           const remTimeMs = Date.parse(rem.updatedAt || '') || 0;
           const locTimeMs = Date.parse(existingShift?.updatedAt || '') || 0;
           const nowIso = new Date().toISOString();
-          const nextStart = rem.isAllDay ? matchedStamp.startTime : rem.startTime || matchedStamp.startTime;
-          const nextEnd = rem.isAllDay ? matchedStamp.endTime : rem.endTime || matchedStamp.endTime;
-          const isHolWorkStamp = Boolean(
-            matchedStamp.id === 'shift_hol_work' ||
-            matchedStamp.label.includes('休出') ||
-            matchedStamp.label.includes('休日出勤')
-          );
+          const nextStampId = matchedStamp ? matchedStamp.id : '';
+          const nextCustomLabel = matchedStamp ? undefined : genericShift?.label;
+          const nextStart = rem.isAllDay
+            ? matchedStamp?.startTime
+            : rem.startTime || matchedStamp?.startTime;
+          const nextEnd = rem.isAllDay
+            ? matchedStamp?.endTime
+            : rem.endTime || matchedStamp?.endTime;
+          const isHolWorkStamp = matchedStamp
+            ? Boolean(
+                matchedStamp.id === 'shift_hol_work' ||
+                matchedStamp.label.includes('休出') ||
+                matchedStamp.label.includes('休日出勤')
+              )
+            : Boolean(genericShift?.isHolidayWork);
 
           if (!existingShift || existingShift.deletedAt) {
             // 直前にペアカレ側で削除したシフトを古いGoogleデータで復活させない
@@ -2049,7 +2117,8 @@ export async function syncWithGoogleCalendar(
                 id: shiftId,
                 date: rem.date,
                 partnerId: target.key,
-                stampId: matchedStamp.id,
+                stampId: nextStampId,
+                ...(nextCustomLabel ? { customLabel: nextCustomLabel } : {}),
                 startTime: nextStart,
                 endTime: nextEnd,
                 isHolidayWork: isHolWorkStamp,
@@ -2067,14 +2136,15 @@ export async function syncWithGoogleCalendar(
             }
           } else {
             const hasShiftDiff =
-              existingShift.stampId !== matchedStamp.id ||
+              existingShift.stampId !== nextStampId ||
+              (existingShift.customLabel || '') !== (nextCustomLabel || '') ||
               (existingShift.startTime || '') !== (nextStart || '') ||
               (existingShift.endTime || '') !== (nextEnd || '');
             if (hasShiftDiff && remTimeMs > locTimeMs + 2000) {
               nextShifts[shiftId] = {
                 ...existingShift,
-                stampId: matchedStamp.id,
-                customLabel: undefined,
+                stampId: nextStampId,
+                customLabel: nextCustomLabel,
                 startTime: nextStart,
                 endTime: nextEnd,
                 isHolidayWork: isHolWorkStamp,
@@ -2124,11 +2194,8 @@ export async function syncWithGoogleCalendar(
         }
       }
 
-      // すでにペアカレが作成したシフト出力用イベント（futarical-shift-...等）および旧nscale勤務シフトはスキップ
+      // すでにペアカレが作成したシフト出力用イベント（futarical-shift-...等）はスキップ
       if (rem.title && /^[🐻🐰🐱🐶🦊🐼🐨🦁🐥🐧🧑👩🤵👰].*?:/.test(rem.title)) {
-        continue;
-      }
-      if (rem.memo && rem.memo.trim() === '*nscale*') {
         continue;
       }
 

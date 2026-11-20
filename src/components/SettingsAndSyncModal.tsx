@@ -45,6 +45,7 @@ import {
   createNewSecretGist,
   deleteLocalBackupSnapshot,
   fetchCloudBackupRevisions,
+  getRecent3DaysLatestBackups,
   loadCloudBackupRevision,
   loadLocalBackupSnapshots,
   saveLocalBackupSnapshot,
@@ -291,6 +292,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   const [backupBusy, setBackupBusy] = useState(false);
 
   const currentCounts = countActiveStoreItems(store);
+  const recent3DaysBackups = getRecent3DaysLatestBackups(localBackups);
+  const recent3DaysAvailableCount = recent3DaysBackups.filter((d) => Boolean(d.snapshot)).length;
 
   const formatBackupDateTime = (iso: string): string => {
     const d = new Date(iso);
@@ -1352,191 +1355,160 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
           {/* タブ2：Googleカレンダー・Gemini双方向自動同期 ＆ iCal連携 ＆ JSONバックアップ */}
           {activeTab === 'ical_backup' && (
             <div className="space-y-3">
-              {/* 🛡️ 自動バックアップ ＆ 最後のバックアップから復元（アコーディオン・デフォルト閉じ） */}
+              {/* 🛡️ 自動バックアップ ＆ 過去3日間から復元（アコーディオン・デフォルト閉じ） */}
               <details className="group bg-white rounded-2xl border-2 border-[#34D399] shadow-sm overflow-hidden">
                 <summary className="list-none cursor-pointer p-3.5 flex items-center justify-between gap-2 select-none hover:bg-emerald-50/40 transition-colors">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-lg shrink-0">🛡️</span>
                     <div className="min-w-0">
                       <h3 className="text-xs sm:text-sm font-black text-stone-800 truncate">
-                        自動バックアップ ＆ 1タップ復元
+                        自動バックアップ ＆ 復元（過去3日間）
                       </h3>
                       <p className="text-[10px] text-stone-500 truncate">
-                        {localBackups[0]
-                          ? `最終保存: ${formatBackupDateTime(localBackups[0].createdAt)}（シフト${localBackups[0].counts.shifts}・予定${localBackups[0].counts.events}・タスク${localBackups[0].counts.tasks}）`
-                          : '起動時・同期前・削除前に自動保存'}
+                        {recent3DaysBackups[0]?.snapshot
+                          ? `今日 最終保存: ${formatBackupDateTime(recent3DaysBackups[0].snapshot.createdAt)}`
+                          : '今日・前日・前々日の各最終バックアップを表示'}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span className="px-2 py-0.5 rounded-full font-extrabold text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      {localBackups.length}件保存済
+                      {recent3DaysAvailableCount}/3日分
                     </span>
                     <ChevronDown className="w-4 h-4 text-emerald-700 transition-transform group-open:rotate-180" />
                   </div>
                 </summary>
 
-                <div className="px-4 pb-4 pt-1 space-y-3 border-t border-emerald-100">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-stone-500 pt-1">
+                <div className="px-4 pb-4 pt-2 space-y-3 border-t border-emerald-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-stone-500">
                     <span>
-                      起動時・同期前・一括削除前に自動保存。復元するとクラウド＆Googleにも自動反映されます。
+                      各日の最後に保存されたバックアップのみ表示（復元時はクラウド＆Googleにも自動反映）。
                     </span>
                     <span className="px-2 py-0.5 rounded-full font-extrabold text-[10px] bg-stone-100 text-stone-600 shrink-0">
                       現在：シフト{currentCounts.shifts}・予定{currentCounts.events}・タスク{currentCounts.tasks}
                     </span>
                   </div>
 
-                  {/* メイン：最後のバックアップから1タップ復元 ＆ 今すぐ保存 */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      disabled={!localBackups[0] || restoringBackupId !== null}
-                      onClick={() => localBackups[0] && handleRestoreLocalSnapshot(localBackups[0])}
-                      className="w-full py-3 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex flex-col items-center justify-center gap-0.5 shadow-sm active:scale-98 transition-all disabled:opacity-50"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <RotateCcw className="w-4 h-4" />
-                        <span>
-                          {restoringBackupId
-                            ? '復元中...'
-                            : '♻️ 最後のバックアップから復元'}
-                        </span>
-                      </span>
-                      <span className="text-[10px] font-bold text-emerald-100">
-                        {localBackups[0]
-                          ? `${formatBackupDateTime(localBackups[0].createdAt)}（シフト${localBackups[0].counts.shifts}・予定${localBackups[0].counts.events}・タスク${localBackups[0].counts.tasks}）`
-                          : 'まだバックアップがありません'}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={backupBusy}
-                      onClick={handleCreateManualSnapshot}
-                      className="w-full py-3 px-3.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-60"
-                    >
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>{backupBusy ? '保存中...' : '📸 今すぐバックアップを保存'}</span>
-                    </button>
+                  {/* 過去3日間（今日・前日・前々日）の各日最終バックアップ */}
+                  <div className="space-y-2">
+                    {recent3DaysBackups.map((slot) => {
+                      const snap = slot.snapshot;
+                      const [, mm, dd] = slot.dateKey.split('-');
+                      const shortDate = `${Number(mm)}/${Number(dd)}`;
+                      return (
+                        <div
+                          key={slot.dateKey}
+                          className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border ${
+                            snap
+                              ? 'bg-[#F8FDFB] border-emerald-200/80'
+                              : 'bg-stone-50/80 border-stone-200/70'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                                {slot.dayLabel}（{shortDate}）
+                              </span>
+                              {snap ? (
+                                <span className="font-extrabold text-stone-800 text-xs">
+                                  最終 {formatBackupDateTime(snap.createdAt).split(' ')[1]}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-stone-400 font-bold">
+                                  バックアップなし
+                                </span>
+                              )}
+                            </div>
+                            {snap && (
+                              <div className="text-[10px] text-stone-500 mt-0.5">
+                                シフト {snap.counts.shifts}件 ／ 予定 {snap.counts.events}件 ／ タスク{' '}
+                                {snap.counts.tasks}件
+                              </div>
+                            )}
+                          </div>
+                          {snap && (
+                            <button
+                              type="button"
+                              disabled={restoringBackupId !== null}
+                              onClick={() => handleRestoreLocalSnapshot(snap)}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] flex items-center gap-1 shrink-0 disabled:opacity-50"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>{restoringBackupId === snap.id ? '復元中...' : '復元'}</span>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  {/* 非常用：過去の履歴・クラウド履歴（折りたたみ） */}
+                  <button
+                    type="button"
+                    disabled={backupBusy}
+                    onClick={handleCreateManualSnapshot}
+                    className="w-full py-2.5 px-3.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-60"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>{backupBusy ? '保存中...' : '📸 今すぐ今日のバックアップを保存'}</span>
+                  </button>
+
+                  {/* 非常用：クラウド過去履歴（折りたたみ） */}
                   <details className="rounded-xl bg-stone-50/80 border border-stone-200/80">
                     <summary className="cursor-pointer px-3 py-2 text-[11px] font-bold text-stone-600 select-none">
-                      📂 過去の履歴・クラウド履歴から選ぶ（非常用）
+                      ☁️ クラウド過去履歴から復元（端末変更・非常用）
                     </summary>
-                    <div className="px-3 pb-3 pt-1 space-y-3 border-t border-stone-200/60">
-                      {localBackups.length > 0 && (
-                        <div className="space-y-1.5">
-                          <div className="text-[11px] font-extrabold text-stone-700">
-                            📱 端末内の保存履歴（{localBackups.length}件）
-                          </div>
-                          <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-                            {localBackups.map((snap, idx) => (
-                              <div
-                                key={snap.id}
-                                className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-white border border-emerald-200/70"
-                              >
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="font-extrabold text-stone-800 text-xs">
-                                      {formatBackupDateTime(snap.createdAt)}
+                    <div className="px-3 pb-3 pt-2 space-y-2 border-t border-stone-200/60">
+                      <button
+                        type="button"
+                        disabled={loadingCloudRevisions}
+                        onClick={handleLoadCloudRevisions}
+                        className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 font-extrabold text-[11px] flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                      >
+                        <History className={`w-3.5 h-3.5 ${loadingCloudRevisions ? 'animate-spin' : ''}`} />
+                        <span>
+                          {loadingCloudRevisions
+                            ? 'クラウド履歴を読込中...'
+                            : '☁️ クラウド履歴を読み込む'}
+                        </span>
+                      </button>
+
+                      {cloudRevisions.length > 0 && (
+                        <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                          {cloudRevisions.map((rev, idx) => (
+                            <div
+                              key={rev.version}
+                              className="flex items-center justify-between gap-2 p-2 rounded-xl bg-sky-50/70 border border-sky-200/70"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-extrabold text-stone-800 text-xs">
+                                    {formatBackupDateTime(rev.committedAt)}
+                                  </span>
+                                  {idx === 0 && (
+                                    <span className="px-1.5 py-0.5 rounded-md bg-sky-200 text-sky-900 text-[10px] font-bold">
+                                      最新
                                     </span>
-                                    <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                                      {idx === 0 ? `最新・${snap.reason}` : snap.reason}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px] text-stone-500 mt-0.5">
-                                    シフト {snap.counts.shifts}件 ／ 予定 {snap.counts.events}件 ／ タスク{' '}
-                                    {snap.counts.tasks}件
-                                  </div>
+                                  )}
                                 </div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    disabled={restoringBackupId !== null}
-                                    onClick={() => handleRestoreLocalSnapshot(snap)}
-                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] flex items-center gap-1 disabled:opacity-50"
-                                  >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                    <span>復元</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleExportSnapshotJson(snap)}
-                                    title="JSONファイルとして保存"
-                                    className="px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-[11px]"
-                                  >
-                                    <Download className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteLocalSnapshot(snap)}
-                                    title="削除"
-                                    className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                                <div className="text-[10px] text-stone-400 font-mono">
+                                  ID: {rev.version.slice(0, 8)}
                                 </div>
                               </div>
-                            ))}
-                          </div>
+                              <button
+                                type="button"
+                                disabled={restoringBackupId !== null}
+                                onClick={() => handleRestoreCloudRevision(rev)}
+                                className="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[11px] flex items-center gap-1 shrink-0 disabled:opacity-50"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>
+                                  {restoringBackupId === rev.version ? '復元中...' : '復元'}
+                                </span>
+                              </button>
+                            </div>
+                          ))}
                         </div>
                       )}
-
-                      <div className="space-y-2 pt-1 border-t border-stone-200/70">
-                        <button
-                          type="button"
-                          disabled={loadingCloudRevisions}
-                          onClick={handleLoadCloudRevisions}
-                          className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 font-extrabold text-[11px] flex items-center gap-1.5 transition-colors disabled:opacity-60"
-                        >
-                          <History className={`w-3.5 h-3.5 ${loadingCloudRevisions ? 'animate-spin' : ''}`} />
-                          <span>
-                            {loadingCloudRevisions
-                              ? 'クラウド履歴を読込中...'
-                              : '☁️ クラウド過去履歴（別端末の控え）を表示'}
-                          </span>
-                        </button>
-
-                        {cloudRevisions.length > 0 && (
-                          <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
-                            {cloudRevisions.map((rev, idx) => (
-                              <div
-                                key={rev.version}
-                                className="flex items-center justify-between gap-2 p-2 rounded-xl bg-sky-50/70 border border-sky-200/70"
-                              >
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-extrabold text-stone-800 text-xs">
-                                      {formatBackupDateTime(rev.committedAt)}
-                                    </span>
-                                    {idx === 0 && (
-                                      <span className="px-1.5 py-0.5 rounded-md bg-sky-200 text-sky-900 text-[10px] font-bold">
-                                        最新
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-[10px] text-stone-400 font-mono">
-                                    ID: {rev.version.slice(0, 8)}
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  disabled={restoringBackupId !== null}
-                                  onClick={() => handleRestoreCloudRevision(rev)}
-                                  className="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[11px] flex items-center gap-1 shrink-0 disabled:opacity-50"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                  <span>
-                                    {restoringBackupId === rev.version ? '復元中...' : '復元'}
-                                  </span>
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </details>
                 </div>
