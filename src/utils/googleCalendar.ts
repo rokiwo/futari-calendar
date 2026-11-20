@@ -6,6 +6,7 @@ import {
   NotifyTarget,
   PartnerId,
   ScheduleEvent,
+  ShiftEntry,
 } from '../types/calendar';
 import {
   DEFAULT_CATEGORIES,
@@ -462,6 +463,8 @@ export function loadGoogleCalendarSyncConfig(
       partnerBGasUrl: normB.partnerBGasUrl,
       partnerBCalendarId: normB.partnerBCalendarId,
       sharedCalendarId: storeConfig.sharedCalendarId ?? '',
+      syncShifts: storeConfig.syncShifts ?? true,
+      syncPartnerShiftsToOwnCalendar: storeConfig.syncPartnerShiftsToOwnCalendar ?? false,
       syncRangePastDays: storeConfig.syncRangePastDays ?? 30,
       syncRangeFutureDays: storeConfig.syncRangeFutureDays ?? 120,
       lastGoogleSyncedAt: storeConfig.lastGoogleSyncedAt,
@@ -485,6 +488,8 @@ export function loadGoogleCalendarSyncConfig(
         partnerBGasUrl: normB.partnerBGasUrl,
         partnerBCalendarId: normB.partnerBCalendarId,
         sharedCalendarId: parsed.sharedCalendarId ?? '',
+        syncShifts: parsed.syncShifts ?? true,
+        syncPartnerShiftsToOwnCalendar: parsed.syncPartnerShiftsToOwnCalendar ?? false,
         syncRangePastDays: parsed.syncRangePastDays ?? 30,
         syncRangeFutureDays: parsed.syncRangeFutureDays ?? 120,
         lastGoogleSyncedAt: parsed.lastGoogleSyncedAt,
@@ -502,6 +507,8 @@ export function loadGoogleCalendarSyncConfig(
     partnerBGasUrl: '',
     partnerBCalendarId: DEFAULT_PARTNER_B_CALENDAR_ID,
     sharedCalendarId: '',
+    syncShifts: true,
+    syncPartnerShiftsToOwnCalendar: false,
     syncRangePastDays: 30,
     syncRangeFutureDays: 120,
   };
@@ -1477,6 +1484,81 @@ export async function syncWithGoogleCalendar(
   }
 
   const nextEvents: Record<string, ScheduleEvent> = { ...store.events };
+  const nextShifts: Record<string, ShiftEntry> = { ...(store.shifts || {}) };
+  const stampMap = new Map((store.stamps || []).map((st) => [st.id, st]));
+  const SHIFT_PAIRCAL_ID_PREFIX = 'paircal_shift_';
+  const shouldSyncShifts = config.syncShifts !== false;
+  const syncPartnerShifts = Boolean(config.syncPartnerShiftsToOwnCalendar);
+
+  const shouldSyncShiftToTarget = (
+    shift: ShiftEntry,
+    targetKey: 'partnerA' | 'partnerB' | 'shared'
+  ): boolean => {
+    if (!shouldSyncShifts) return false;
+    if (targetKey === 'shared') return true;
+    if (shift.partnerId === targetKey) return true;
+    return syncPartnerShifts;
+  };
+
+  const buildShiftUpsertPayload = (
+    shift: ShiftEntry,
+    targetKey: 'partnerA' | 'partnerB' | 'shared'
+  ) => {
+    const stamp = stampMap.get(shift.stampId);
+    const partner = store.metadata.partners[shift.partnerId];
+    const baseLabel =
+      shift.customLabel || stamp?.label || (shift.isHolidayWork ? '休日出勤' : 'シフト');
+    const icon = stamp?.icon || '';
+    const extraParts: string[] = [];
+    const otMin = getShiftOvertimeMinutes(shift);
+    const holMin = getShiftHolidayWorkMinutes(shift);
+    if (otMin > 0) extraParts.push(`残業+${formatMinutesShort(otMin)}`);
+    if (holMin > 0) extraParts.push(`休出${formatMinutesShort(holMin)}`);
+    if (shift.subCustomLabel) extraParts.push(`+${shift.subCustomLabel}`);
+    const extraSuffix = extraParts.length > 0 ? ` (${extraParts.join('/')})` : '';
+
+    const includePartnerName = targetKey === 'shared' || targetKey !== shift.partnerId;
+    const prefix = includePartnerName
+      ? `${partner.avatar}${partner.name}: ${icon}`
+      : `${partner.avatar}${icon}`;
+    const title = `${prefix}${baseLabel}${extraSuffix}`.trim();
+
+    const startTime = shift.startTime || stamp?.startTime || undefined;
+    const endTime = shift.endTime || stamp?.endTime || undefined;
+    const isAllDay = !startTime;
+
+    const memoLines: string[] = [];
+    if (shift.subCustomLabel) {
+      const subRange =
+        shift.subStartTime && shift.subEndTime
+          ? ` (${shift.subStartTime}〜${shift.subEndTime})`
+          : '';
+      memoLines.push(`サブ勤務: ${shift.subCustomLabel}${subRange}`);
+    }
+    if (otMin > 0) memoLines.push(`残業: +${formatMinutesShort(otMin)}`);
+    if (holMin > 0) memoLines.push(`休日出勤: ${formatMinutesShort(holMin)}`);
+    if (shift.memo) memoLines.push(shift.memo);
+    memoLines.push('ペアカレ シフト自動同期');
+
+    return {
+      id: `${SHIFT_PAIRCAL_ID_PREFIX}${shift.id}`,
+      googleEventId: shift.googleEventIds?.[targetKey],
+      date: shift.date,
+      endDate: undefined as string | undefined,
+      title,
+      isAllDay,
+      startTime: isAllDay ? undefined : startTime,
+      endTime: isAllDay ? undefined : endTime,
+      memo: memoLines.join('\n'),
+      categoryId: shift.partnerId as CalendarCategoryId,
+      supportBadges: undefined as string[] | undefined,
+      isTask: false,
+      reminderMinutes: undefined as number | undefined,
+      updatedAt: shift.updatedAt,
+      deletedAt: null,
+    };
+  };
+
   let totalImported = 0;
   let totalUpdated = 0;
   let totalPushed = 0;
@@ -1488,7 +1570,7 @@ export async function syncWithGoogleCalendar(
 
   for (const target of targets) {
     // 1a. Googleカレンダーから削除すべき予定（削除済み または プライベート変更・別カテゴリ化等で対象外になった既存紐付け予定）
-    const deletions = Object.values(nextEvents)
+    const eventDeletions = Object.values(nextEvents)
       .filter((ev) => {
         if (!ev || !ev.date) return false;
         const existingGId = ev.googleEventIds?.[target.key] || (target.key === 'partnerA' ? ev.googleEventId : undefined);
@@ -1504,8 +1586,27 @@ export async function syncWithGoogleCalendar(
         deletedAt: ev.deletedAt || null,
       }));
 
+    // 1a-shift. Googleカレンダーから削除すべきシフト（削除済み または 設定OFF等で対象外になった既同期シフト）
+    const shiftDeletions = Object.values(nextShifts)
+      .filter((s) => {
+        if (!s || !s.date) return false;
+        const existingGId = s.googleEventIds?.[target.key];
+        if (!existingGId) return false;
+        if (s.deletedAt) return true;
+        return !shouldSyncShiftToTarget(s, target.key);
+      })
+      .map((s) => ({
+        id: `${SHIFT_PAIRCAL_ID_PREFIX}${s.id}`,
+        paircalId: `${SHIFT_PAIRCAL_ID_PREFIX}${s.id}`,
+        googleEventId: s.googleEventIds?.[target.key],
+        date: s.date,
+        deletedAt: s.deletedAt || null,
+      }));
+
+    const deletions = [...eventDeletions, ...shiftDeletions];
+
     // 1b. このターゲットに送信（追加・更新）すべきペアカレ予定を抽出
-    let upserts = Object.values(nextEvents)
+    const eventUpserts = Object.values(nextEvents)
       .filter((ev) => {
         if (!ev || !ev.date || ev.deletedAt) return false;
         const inRange = ev.date >= minDateStr && ev.date <= maxDateStr;
@@ -1532,6 +1633,21 @@ export async function syncWithGoogleCalendar(
         updatedAt: ev.updatedAt,
         deletedAt: null,
       }));
+
+    // 1b-shift. このターゲットに送信（追加・更新）すべきペアカレシフトを抽出
+    const shiftUpserts = Object.values(nextShifts)
+      .filter((s) => {
+        if (!s || !s.date || s.deletedAt) return false;
+        const inRange = s.date >= minDateStr && s.date <= maxDateStr;
+        if (!inRange || !shouldSyncShiftToTarget(s, target.key)) return false;
+        const existingGId = s.googleEventIds?.[target.key];
+        if (!existingGId || !s.googleCalSynced) return true;
+        const sUpdatedMs = Date.parse(s.updatedAt || '') || 0;
+        return sUpdatedMs > lastSyncedMs;
+      })
+      .map((s) => buildShiftUpsertPayload(s, target.key));
+
+    let upserts = [...eventUpserts, ...shiftUpserts];
 
     // 1c. このターゲットの Google Tasks (ToDoリスト) へ送信すべきタスク（削除／追加・更新・完了）を抽出
     const taskDeletions = target.syncTasks
@@ -1614,6 +1730,11 @@ export async function syncWithGoogleCalendar(
         if (u.googleEventId) return true;
         const matchedRem = remoteByPairCalId.get(u.id);
         if (!matchedRem) return true;
+        if (u.id.startsWith(SHIFT_PAIRCAL_ID_PREFIX)) {
+          // シフトはペアカレ側を正として既存Googleイベントへ紐付け上書き
+          u.googleEventId = matchedRem.googleEventId;
+          return true;
+        }
         const localEv = nextEvents[u.id];
         const remTimeMs = Date.parse(matchedRem.updatedAt || '') || 0;
         const locTimeMs = Date.parse(localEv?.updatedAt || '') || 0;
@@ -1700,6 +1821,21 @@ export async function syncWithGoogleCalendar(
     const idBumpIso = new Date().toISOString();
 
     for (const delItem of deletions) {
+      if (delItem.id.startsWith(SHIFT_PAIRCAL_ID_PREFIX)) {
+        const shiftId = delItem.id.slice(SHIFT_PAIRCAL_ID_PREFIX.length);
+        const localShiftDel = nextShifts[shiftId];
+        if (localShiftDel) {
+          const nextGIds = { ...(localShiftDel.googleEventIds || {}) };
+          delete nextGIds[target.key];
+          nextShifts[shiftId] = {
+            ...localShiftDel,
+            googleEventIds: Object.keys(nextGIds).length > 0 ? nextGIds : undefined,
+            googleCalSynced: Object.keys(nextGIds).length > 0,
+            updatedAt: idBumpIso,
+          };
+        }
+        continue;
+      }
       const localDel = nextEvents[delItem.id];
       if (localDel) {
         const nextGIds = { ...(localDel.googleEventIds || {}) };
@@ -1714,6 +1850,26 @@ export async function syncWithGoogleCalendar(
     }
 
     for (const [paircalId, gEventId] of Object.entries(mapping)) {
+      if (paircalId.startsWith(SHIFT_PAIRCAL_ID_PREFIX)) {
+        const shiftId = paircalId.slice(SHIFT_PAIRCAL_ID_PREFIX.length);
+        const localShift = nextShifts[shiftId];
+        if (localShift && !localShift.deletedAt) {
+          const prevGId = localShift.googleEventIds?.[target.key];
+          if (prevGId !== gEventId || !localShift.googleCalSynced) {
+            nextShifts[shiftId] = {
+              ...localShift,
+              googleCalSynced: true,
+              googleEventIds: {
+                ...(localShift.googleEventIds || {}),
+                [target.key]: gEventId,
+              },
+              ...(prevGId && prevGId !== gEventId ? { updatedAt: idBumpIso } : {}),
+            };
+            totalPushed++;
+          }
+        }
+        continue;
+      }
       const localEv = nextEvents[paircalId];
       if (localEv && !localEv.deletedAt) {
         const prevGId = localEv.googleEventIds?.[target.key];
@@ -1739,6 +1895,10 @@ export async function syncWithGoogleCalendar(
       if (!rem.googleEventId || !rem.date) continue;
       seenGoogleIdsInRemote.add(rem.googleEventId);
 
+      // ペアカレがGoogleへ書き込んだシフトイベントは通常予定として重複取り込みしない
+      if (rem.paircalId && rem.paircalId.startsWith(SHIFT_PAIRCAL_ID_PREFIX)) {
+        continue;
+      }
       // すでにペアカレが作成したシフト出力用イベント（futarical-shift-...等）および旧nscale勤務シフトはスキップ
       if (rem.title && /^([🐻🐰🐱🐶🦊🐼🐨🦁🐥🐧🧑👩🤵👰].*?:|🔔 ペアカレ通知連携テスト)/.test(rem.title)) {
         continue;
@@ -2110,6 +2270,7 @@ export async function syncWithGoogleCalendar(
       googleCalendarSyncConfig: updatedGcalConfig,
       updatedAt: nowIso,
     },
+    shifts: nextShifts,
     events: nextEvents,
     updatedAt: nowIso,
   };

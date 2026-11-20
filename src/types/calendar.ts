@@ -71,6 +71,12 @@ export interface ShiftEntry {
   holidayWorkStatus?: 'tentative' | 'confirmed';  // 既存ヘルパー互換用ステータス
 
   memo?: string;
+  googleCalSynced?: boolean;
+  googleEventIds?: {
+    partnerA?: string;
+    partnerB?: string;
+    shared?: string;
+  };
   createdBy: PartnerId;
   createdAt: string;      // ISO 8601
   updatedAt: string;      // ISO 8601
@@ -163,6 +169,8 @@ export interface GoogleCalendarSyncConfig {
   // ふたり共有GoogleカレンダーID（任意：指定すると二人予定をここへ同期）
   sharedCalendarId?: string;
   // 1つのGAS URLで複数カレンダー（ゆうと・さや・共有）をまとめて同期する統合モードか、個別URLか
+  syncShifts?: boolean;                      // ペアカレのシフトもGoogleカレンダーへ自動書き込みするか（デフォルトtrue）
+  syncPartnerShiftsToOwnCalendar?: boolean;  // 相手のシフトも自分のGoogleカレンダーに表示するか（デフォルトfalse）
   syncRangePastDays?: number;   // 過去何日分を同期するか（デフォルト30日）
   syncRangeFutureDays?: number; // 未来何日分を同期するか（デフォルト120日）
   lastGoogleSyncedAt?: string;  // 最終同期日時 ISO 8601

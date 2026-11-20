@@ -114,6 +114,10 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   // Googleカレンダー双方向・Gemini自動同期フォーム状態
   const [gcalEnabled, setGcalEnabled] = useState<boolean>(gcalSyncConfig.enabled ?? false);
   const [gcalAutoSync, setGcalAutoSync] = useState<boolean>(gcalSyncConfig.autoSync ?? true);
+  const [gcalSyncShifts, setGcalSyncShifts] = useState<boolean>(gcalSyncConfig.syncShifts ?? true);
+  const [gcalSyncPartnerShifts, setGcalSyncPartnerShifts] = useState<boolean>(
+    gcalSyncConfig.syncPartnerShiftsToOwnCalendar ?? false
+  );
   const [partnerAGasUrl, setPartnerAGasUrl] = useState<string>(gcalSyncConfig.partnerAGasUrl || '');
   const [partnerACalendarId, setPartnerACalendarId] = useState<string>(
     gcalSyncConfig.partnerACalendarId || 'primary'
@@ -144,6 +148,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
       partnerBGasUrl: effectiveGasB,
       partnerBCalendarId: effectiveCalB,
       sharedCalendarId: sharedCalendarId.trim(),
+      syncShifts: gcalSyncShifts,
+      syncPartnerShiftsToOwnCalendar: gcalSyncPartnerShifts,
       syncRangePastDays: gcalSyncConfig.syncRangePastDays || 60,
       syncRangeFutureDays: gcalSyncConfig.syncRangeFutureDays || 180,
       lastGoogleSyncedAt: gcalSyncConfig.lastGoogleSyncedAt,
@@ -444,6 +450,8 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
   useEffect(() => {
     setGcalEnabled(gcalSyncConfig.enabled ?? false);
     setGcalAutoSync(gcalSyncConfig.autoSync ?? true);
+    setGcalSyncShifts(gcalSyncConfig.syncShifts ?? true);
+    setGcalSyncPartnerShifts(gcalSyncConfig.syncPartnerShiftsToOwnCalendar ?? false);
     setPartnerAGasUrl(gcalSyncConfig.partnerAGasUrl || '');
     setPartnerACalendarId(gcalSyncConfig.partnerACalendarId || 'primary');
     setPartnerBGasUrl(gcalSyncConfig.partnerBGasUrl || '');
@@ -1626,6 +1634,32 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                       予定追加・起動時にバックグラウンドで自動同期する
                     </span>
                   </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={gcalSyncShifts}
+                      onChange={(e) => setGcalSyncShifts(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#126875] focus:ring-[#56CFE1]"
+                    />
+                    <span className="font-extrabold text-[#126875] text-xs">
+                      📅 ペアカレのシフトもGoogleカレンダーへ自動書き込み
+                    </span>
+                  </label>
+
+                  {gcalSyncShifts && (
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={gcalSyncPartnerShifts}
+                        onChange={(e) => setGcalSyncPartnerShifts(e.target.checked)}
+                        className="w-4 h-4 rounded text-[#126875] focus:ring-[#56CFE1]"
+                      />
+                      <span className="font-bold text-stone-600 text-xs">
+                        👫 相手のシフトも自分のGoogleカレンダーに表示する
+                      </span>
+                    </label>
+                  )}
                 </div>
 
                 {/* 🐻 パートナーA（ゆうと）のGoogleカレンダー設定 */}

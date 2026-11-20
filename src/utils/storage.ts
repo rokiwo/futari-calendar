@@ -985,6 +985,8 @@ export function buildRestoredStoreFromBackup(
         ...bShift,
         deletedAt: null,
         updatedAt: nowIso,
+        googleCalSynced: false,
+        googleEventIds: undefined,
       };
     } else if (toTimeMs(bShift.updatedAt) > toTimeMs(cur.updatedAt)) {
       mergedShifts[id] = bShift;

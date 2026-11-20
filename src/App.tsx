@@ -1154,6 +1154,7 @@ export const App: React.FC = () => {
           date: targetDate,
           partnerId,
           stampId: activeExisting?.stampId || '',
+          googleEventIds: activeExisting?.googleEventIds,
           createdBy: activePartner,
           createdAt: activeExisting?.createdAt || nowIso,
           updatedAt: nowIso,
@@ -1246,7 +1247,7 @@ export const App: React.FC = () => {
           [shiftId]: nextShift,
         },
       };
-      void commitStore(nextStore, true, false);
+      void commitStore(nextStore, true, true);
     },
     [activePartner, commitStore, setSelectedDate, showToast]
   );
@@ -1346,7 +1347,7 @@ export const App: React.FC = () => {
           },
         },
         true,
-        false
+        true
       );
 
       const [, m, d] = dateStr.split('-').map(Number);
@@ -1489,7 +1490,7 @@ export const App: React.FC = () => {
           events: nextEvents,
         },
         true,
-        newEvents.length > 0
+        newEvents.length > 0 || newShifts.length > 0
       );
       showToast(summaryMsg);
     },
@@ -1708,10 +1709,14 @@ export const App: React.FC = () => {
         deletedAt: nowIso,
       };
     }
-    void commitStore({
-      ...curStore,
-      shifts: deletedShifts,
-    });
+    void commitStore(
+      {
+        ...curStore,
+        shifts: deletedShifts,
+      },
+      true,
+      true
+    );
     showToast('🗑️ すべてのシフトデータを削除しました');
   }, [commitStore, showToast]);
 
