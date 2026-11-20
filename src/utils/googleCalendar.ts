@@ -7,6 +7,7 @@ import {
   PartnerId,
   ScheduleEvent,
   ShiftEntry,
+  StampPreset,
 } from '../types/calendar';
 import {
   DEFAULT_CATEGORIES,
@@ -1377,6 +1378,77 @@ function shouldSyncEventToTarget(
   return false;
 }
 
+function normalizeShiftMatchToken(raw: string, partnerName?: string): string {
+  let s = (raw || '').trim();
+  // 末尾の括弧付き補足（例: " (残業+60分)", "（バイト）"）を除去
+  s = s.replace(/\s*[\(（][^)）]*[\)）]\s*$/g, '').trim();
+  // 先頭の絵文字・装飾文字を除去
+  s = s.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/gu, '').trim();
+  // 先頭の "さや: " / "ゆうと：" のようなパートナー名プレフィックスを除去
+  if (partnerName) {
+    const escaped = partnerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    s = s.replace(new RegExp(`^${escaped}\\s*[:：・]\\s*`), '').trim();
+  }
+  s = s.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/gu, '').trim();
+  // 全角英数字を半角化・大文字化・空白除去
+  s = s
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/\s+/g, '')
+    .toUpperCase();
+  return s;
+}
+
+/**
+ * Googleカレンダーから取り込んだイベントタイトルが、対象パートナーの勤務リスト（シフトスタンプ）に
+ * 一致するかを判定する（完全一致＋定番の休み/有休表記ゆれのみ許可し、通常の予定とは誤判定しない）
+ */
+export function matchStampForRemoteShift(
+  rawTitle: string,
+  stamps: StampPreset[],
+  partnerId: PartnerId,
+  partnerName?: string
+): StampPreset | undefined {
+  const token = normalizeShiftMatchToken(rawTitle, partnerName);
+  if (!token) return undefined;
+
+  const partnerStamps = (stamps || []).filter(
+    (st) => st.type === 'shift' && (!st.partnerId || st.partnerId === partnerId)
+  );
+  if (partnerStamps.length === 0) return undefined;
+
+  // 1. label / shortLabel の完全一致を最優先
+  for (const st of partnerStamps) {
+    const lNorm = normalizeShiftMatchToken(st.label);
+    const sNorm = normalizeShiftMatchToken(st.shortLabel);
+    if ((lNorm && token === lNorm) || (sNorm && token === sNorm)) {
+      return st;
+    }
+  }
+
+  // 2. 定番の表記ゆれ（休み／公休／休日、年休／有休／有給）
+  const paidLeaveAliases = new Set(['年休', '有休', '有給', '有給休暇', '有休休暇']);
+  if (paidLeaveAliases.has(token)) {
+    const found = partnerStamps.find((st) => {
+      const l = normalizeShiftMatchToken(st.label);
+      const s = normalizeShiftMatchToken(st.shortLabel);
+      return paidLeaveAliases.has(l) || paidLeaveAliases.has(s);
+    });
+    if (found) return found;
+  }
+
+  const holidayAliases = new Set(['休み', '休', '公休', '休日', 'OFF']);
+  if (holidayAliases.has(token)) {
+    const found = partnerStamps.find((st) => {
+      const l = normalizeShiftMatchToken(st.label);
+      const s = normalizeShiftMatchToken(st.shortLabel);
+      return holidayAliases.has(l) || holidayAliases.has(s) || Boolean(st.isHoliday && l.includes('休'));
+    });
+    if (found) return found;
+  }
+
+  return undefined;
+}
+
 /**
  * ペアカレ ⇄ Googleカレンダー 双方向自動同期を実行
  * - ペアカレで追加・編集・削除した予定を Google カレンダーへ即座に反映
@@ -1895,12 +1967,165 @@ export async function syncWithGoogleCalendar(
       if (!rem.googleEventId || !rem.date) continue;
       seenGoogleIdsInRemote.add(rem.googleEventId);
 
-      // ペアカレがGoogleへ書き込んだシフトイベントは通常予定として重複取り込みしない
+      // ペアカレがGoogleへ書き込んだシフトイベントは通常予定として重複取り込みしない（Google側で編集されていればシフト枠を更新）
       if (rem.paircalId && rem.paircalId.startsWith(SHIFT_PAIRCAL_ID_PREFIX)) {
+        const shiftId = rem.paircalId.slice(SHIFT_PAIRCAL_ID_PREFIX.length);
+        const curShift = nextShifts[shiftId];
+        if (
+          shouldSyncShifts &&
+          curShift &&
+          !curShift.deletedAt &&
+          (target.key === 'partnerA' || target.key === 'partnerB') &&
+          curShift.partnerId === target.key
+        ) {
+          const remTimeMs = Date.parse(rem.updatedAt || '') || 0;
+          const locTimeMs = Date.parse(curShift.updatedAt || '') || 0;
+          if (remTimeMs > locTimeMs + 2000) {
+            const matchedStamp = matchStampForRemoteShift(
+              rem.title || '',
+              store.stamps || [],
+              target.key,
+              store.metadata.partners[target.key]?.name
+            );
+            if (matchedStamp) {
+              const nextStart = rem.isAllDay ? matchedStamp.startTime : rem.startTime || matchedStamp.startTime;
+              const nextEnd = rem.isAllDay ? matchedStamp.endTime : rem.endTime || matchedStamp.endTime;
+              if (
+                curShift.stampId !== matchedStamp.id ||
+                (curShift.startTime || '') !== (nextStart || '') ||
+                (curShift.endTime || '') !== (nextEnd || '')
+              ) {
+                nextShifts[shiftId] = {
+                  ...curShift,
+                  stampId: matchedStamp.id,
+                  customLabel: undefined,
+                  startTime: nextStart,
+                  endTime: nextEnd,
+                  googleCalSynced: true,
+                  googleEventIds: {
+                    ...(curShift.googleEventIds || {}),
+                    [target.key]: rem.googleEventId,
+                  },
+                  updatedAt: rem.updatedAt || new Date().toISOString(),
+                };
+                totalUpdated++;
+              }
+            }
+          }
+        }
         continue;
       }
+
+      if (rem.title && /^🔔 ペアカレ通知連携テスト/.test(rem.title)) {
+        continue;
+      }
+
+      // Googleカレンダーに直接入力されたシフト名（勤務リストに一致するもの）をペアカレの「シフト枠」へ自動取り込み！
+      if (shouldSyncShifts && (target.key === 'partnerA' || target.key === 'partnerB')) {
+        const matchedStamp = matchStampForRemoteShift(
+          rem.title || '',
+          store.stamps || [],
+          target.key,
+          store.metadata.partners[target.key]?.name
+        );
+        if (matchedStamp) {
+          const shiftId = `${rem.date}_${target.key}`;
+          const existingShift = nextShifts[shiftId];
+          const remTimeMs = Date.parse(rem.updatedAt || '') || 0;
+          const locTimeMs = Date.parse(existingShift?.updatedAt || '') || 0;
+          const nowIso = new Date().toISOString();
+          const nextStart = rem.isAllDay ? matchedStamp.startTime : rem.startTime || matchedStamp.startTime;
+          const nextEnd = rem.isAllDay ? matchedStamp.endTime : rem.endTime || matchedStamp.endTime;
+          const isHolWorkStamp = Boolean(
+            matchedStamp.id === 'shift_hol_work' ||
+            matchedStamp.label.includes('休出') ||
+            matchedStamp.label.includes('休日出勤')
+          );
+
+          if (!existingShift || existingShift.deletedAt) {
+            // 直前にペアカレ側で削除したシフトを古いGoogleデータで復活させない
+            if (!existingShift?.deletedAt || remTimeMs > locTimeMs + 2000) {
+              nextShifts[shiftId] = {
+                id: shiftId,
+                date: rem.date,
+                partnerId: target.key,
+                stampId: matchedStamp.id,
+                startTime: nextStart,
+                endTime: nextEnd,
+                isHolidayWork: isHolWorkStamp,
+                googleCalSynced: true,
+                googleEventIds: {
+                  ...(existingShift?.googleEventIds || {}),
+                  [target.key]: rem.googleEventId,
+                },
+                createdBy: target.key,
+                createdAt: rem.updatedAt || nowIso,
+                updatedAt: rem.updatedAt || nowIso,
+                deletedAt: null,
+              };
+              totalImported++;
+            }
+          } else {
+            const hasShiftDiff =
+              existingShift.stampId !== matchedStamp.id ||
+              (existingShift.startTime || '') !== (nextStart || '') ||
+              (existingShift.endTime || '') !== (nextEnd || '');
+            if (hasShiftDiff && remTimeMs > locTimeMs + 2000) {
+              nextShifts[shiftId] = {
+                ...existingShift,
+                stampId: matchedStamp.id,
+                customLabel: undefined,
+                startTime: nextStart,
+                endTime: nextEnd,
+                isHolidayWork: isHolWorkStamp,
+                googleCalSynced: true,
+                googleEventIds: {
+                  ...(existingShift.googleEventIds || {}),
+                  [target.key]: rem.googleEventId,
+                },
+                updatedAt: rem.updatedAt || nowIso,
+              };
+              totalUpdated++;
+            } else if (
+              existingShift.googleEventIds?.[target.key] !== rem.googleEventId ||
+              !existingShift.googleCalSynced
+            ) {
+              nextShifts[shiftId] = {
+                ...existingShift,
+                googleCalSynced: true,
+                googleEventIds: {
+                  ...(existingShift.googleEventIds || {}),
+                  [target.key]: rem.googleEventId,
+                },
+              };
+            }
+          }
+
+          // 過去に通常予定として取り込まれてしまっていた同一Googleイベントがあれば二重表示を防ぐため静かに整理（Google側からは消さない）
+          for (const [evKey, evVal] of Object.entries(nextEvents)) {
+            if (
+              evVal &&
+              !evVal.deletedAt &&
+              evVal.syncedFromGoogle &&
+              (evVal.googleEventIds?.[target.key] === rem.googleEventId ||
+                (target.key === 'partnerA' && evVal.googleEventId === rem.googleEventId))
+            ) {
+              nextEvents[evKey] = {
+                ...evVal,
+                googleEventId: undefined,
+                googleEventIds: undefined,
+                googleCalSynced: false,
+                deletedAt: nowIso,
+                updatedAt: nowIso,
+              };
+            }
+          }
+          continue;
+        }
+      }
+
       // すでにペアカレが作成したシフト出力用イベント（futarical-shift-...等）および旧nscale勤務シフトはスキップ
-      if (rem.title && /^([🐻🐰🐱🐶🦊🐼🐨🦁🐥🐧🧑👩🤵👰].*?:|🔔 ペアカレ通知連携テスト)/.test(rem.title)) {
+      if (rem.title && /^[🐻🐰🐱🐶🦊🐼🐨🦁🐥🐧🧑👩🤵👰].*?:/.test(rem.title)) {
         continue;
       }
       if (rem.memo && rem.memo.trim() === '*nscale*') {

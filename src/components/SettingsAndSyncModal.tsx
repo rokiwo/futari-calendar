@@ -1682,7 +1682,7 @@ export const SettingsAndSyncModal: React.FC<SettingsAndSyncModalProps> = ({
                       className="w-4 h-4 rounded text-[#126875] focus:ring-[#56CFE1]"
                     />
                     <span className="font-extrabold text-[#126875] text-xs">
-                      📅 ペアカレのシフトもGoogleカレンダーへ自動書き込み
+                      📅 シフトもGoogleカレンダーと双方向自動同期（Google入力もシフト枠に反映）
                     </span>
                   </label>
 
