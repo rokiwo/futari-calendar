@@ -64,6 +64,7 @@ import { WidgetCompactView, WidgetGuideModal } from './components/WidgetModalAnd
 import { CategoryManagerModal } from './components/CategoryManagerModal';
 import { ExportPartnerMode, ShiftExportModal } from './components/ShiftExportModal';
 import { TaskManagerModal } from './components/TaskManagerModal';
+import { ShoppingListModal } from './components/ShoppingListModal';
 import { WelcomeImageModal } from './components/WelcomeImageModal';
 import { SharedKeywordModal } from './components/SharedKeywordModal';
 import { PartnerEventsModal } from './components/PartnerEventsModal';
@@ -148,6 +149,7 @@ export const App: React.FC = () => {
   const [shiftExportOpen, setShiftExportOpen] = useState<boolean>(false);
   const [shiftExportMode, setShiftExportMode] = useState<ExportPartnerMode>('partnerA');
   const [taskManagerOpen, setTaskManagerOpen] = useState<boolean>(false);
+  const [shoppingListOpen, setShoppingListOpen] = useState<boolean>(false);
   const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(false);
   const [welcomePreviewConfig, setWelcomePreviewConfig] = useState<WelcomeImageConfig | null>(null);
   const [partnerEventsModalOpen, setPartnerEventsModalOpen] = useState<boolean>(false);
@@ -197,6 +199,7 @@ export const App: React.FC = () => {
   const widgetGuideOpenRef = useRef(widgetGuideOpen);
   const shiftExportOpenRef = useRef(shiftExportOpen);
   const taskManagerOpenRef = useRef(taskManagerOpen);
+  const shoppingListOpenRef = useRef(shoppingListOpen);
   const welcomeModalOpenRef = useRef(welcomeModalOpen);
   const sharedKeywordModalOpenRef = useRef(sharedKeywordModalOpen);
   const partnerEventsModalOpenRef = useRef(partnerEventsModalOpen);
@@ -214,6 +217,7 @@ export const App: React.FC = () => {
   useEffect(() => { widgetGuideOpenRef.current = widgetGuideOpen; }, [widgetGuideOpen]);
   useEffect(() => { shiftExportOpenRef.current = shiftExportOpen; }, [shiftExportOpen]);
   useEffect(() => { taskManagerOpenRef.current = taskManagerOpen; }, [taskManagerOpen]);
+  useEffect(() => { shoppingListOpenRef.current = shoppingListOpen; }, [shoppingListOpen]);
   useEffect(() => { welcomeModalOpenRef.current = welcomeModalOpen; }, [welcomeModalOpen]);
   useEffect(() => { sharedKeywordModalOpenRef.current = sharedKeywordModalOpen; }, [sharedKeywordModalOpen]);
   useEffect(() => { partnerEventsModalOpenRef.current = partnerEventsModalOpen; }, [partnerEventsModalOpen]);
@@ -322,6 +326,11 @@ export const App: React.FC = () => {
     pushNavLayer('taskManager');
   }, [pushNavLayer]);
 
+  const openShoppingListModal = useCallback(() => {
+    setShoppingListOpen(true);
+    pushNavLayer('shoppingList');
+  }, [pushNavLayer]);
+
   const openWelcomeModal = useCallback(() => {
     setWelcomePreviewConfig(null);
     setWelcomeModalOpen(true);
@@ -395,6 +404,10 @@ export const App: React.FC = () => {
       }
       if (taskManagerOpenRef.current) {
         setTaskManagerOpen(false);
+        return;
+      }
+      if (shoppingListOpenRef.current) {
+        setShoppingListOpen(false);
         return;
       }
       if (settingsOpenRef.current) {
@@ -2332,6 +2345,12 @@ export const App: React.FC = () => {
               }
             }}
             onOpenTaskManager={openTaskManagerModal}
+            onOpenShoppingList={openShoppingListModal}
+            shoppingUnboughtCount={
+              Object.values(store.events).filter(
+                (ev) => ev && !ev.deletedAt && Boolean(ev.isShoppingItem) && !ev.isCompleted
+              ).length
+            }
             onOpenShiftExport={() => openShiftExportModal(currentDrawerPartner)}
             metadata={store.metadata}
             activePartner={activePartner}
@@ -2610,6 +2629,54 @@ export const App: React.FC = () => {
           onToggleTaskComplete={handleToggleTaskComplete}
           onSyncGoogleTasks={() => {
             void handleTriggerGoogleCalendarSync();
+          }}
+          onOpenShoppingList={() => {
+            setTaskManagerOpen(false);
+            setShoppingListOpen(true);
+            replaceNavLayer('shoppingList');
+          }}
+          isSyncing={isSyncing}
+        />
+      )}
+
+      {/* 🛒 ふたりの買い物・ほしい物リストモーダル（Gemini / Google ToDoリスト自動双方向同期） */}
+      {shoppingListOpen && (
+        <ShoppingListModal
+          events={store.events}
+          activePartner={activePartner}
+          metadata={store.metadata}
+          onClose={() => closeNavLayer(() => setShoppingListOpen(false))}
+          onSaveEvent={handleSaveEvent}
+          onSaveEvents={handleSaveEvents}
+          onDeleteEvent={handleDeleteEvent}
+          onClearBoughtItems={(ids) => {
+            if (ids.length === 0) return;
+            if (!window.confirm(`購入済みの ${ids.length} 件をリストからまとめて消去しますか？`)) {
+              return;
+            }
+            const curStore = latestStoreRef.current;
+            const nowIso = new Date().toISOString();
+            const nextEvents = { ...curStore.events };
+            for (const id of ids) {
+              if (nextEvents[id]) {
+                nextEvents[id] = {
+                  ...nextEvents[id],
+                  deletedAt: nowIso,
+                  updatedAt: nowIso,
+                };
+              }
+            }
+            void commitStore({ ...curStore, events: nextEvents }, true, true);
+            showToast(`🧹 購入済み ${ids.length} 件を消去しました✨`);
+          }}
+          onToggleTaskComplete={handleToggleTaskComplete}
+          onSyncGoogleTasks={() => {
+            void handleTriggerGoogleCalendarSync();
+          }}
+          onOpenTaskManager={() => {
+            setShoppingListOpen(false);
+            setTaskManagerOpen(true);
+            replaceNavLayer('taskManager');
           }}
           isSyncing={isSyncing}
         />

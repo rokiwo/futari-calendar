@@ -1378,6 +1378,77 @@ function shouldSyncEventToTarget(
   return false;
 }
 
+export const SHOPPING_MEMO_TAG = '[PAIRCAL_SHOPPING:1]';
+
+/**
+ * Google Tasks (ToDoリスト) または Googleカレンダー（Gemini音声入力等）から届いたタイトル・メモが
+ * 「🛒買い物リスト」項目かどうかを自動判定し、プレフィックスを除去した品名を返す。
+ * 例: "買い物 牛乳" / "買う：卵" / "🛒 パン" / "洗剤を買う" / "ティッシュ（買い物）" -> { isShopping: true, cleanTitle: "牛乳" ... }
+ */
+export function detectShoppingItemFromRemote(
+  rawTitle?: string | null,
+  rawMemo?: string | null
+): { isShopping: boolean; cleanTitle: string; cleanMemo?: string } {
+  const trimmedTitle = (rawTitle || '').trim();
+  const trimmedMemo = (rawMemo || '').trim();
+  const cleanMemo =
+    trimmedMemo
+      .replace(/\n?\[PAIRCAL_SHOPPING:[^\]]*\]/g, '')
+      .replace(/(?:^|\s)#買い物(?:リスト)?(?=\s|$)/g, '')
+      .trim() || undefined;
+
+  const hasMemoTag =
+    /\[PAIRCAL_SHOPPING:/i.test(trimmedMemo) ||
+    /(?:^|\s)#買い物(?:リスト)?(?=\s|$)|【買い物(?:リスト)?】|\[買い物(?:リスト)?\]/i.test(trimmedMemo);
+
+  let itemTitle = trimmedTitle;
+  let matchedByTitle = false;
+
+  // 1. 先頭絵文字 (🛒 / 🛍️)
+  if (/^(🛒|🛍️)\s*(.+)$/.test(itemTitle)) {
+    itemTitle = itemTitle.replace(/^(🛒|🛍️)\s*/, '').trim();
+    matchedByTitle = true;
+  }
+
+  // 2. 先頭キーワード: "買い物 牛乳", "買い物：牛乳", "【買い物】牛乳", "買う 卵", "買うもの パン", "購入 洗剤"
+  const prefixRegex =
+    /^(?:【?(?:買い物(?:リスト)?|買う(?:もの|物)?|購入(?:品|リスト)?|ショッピング)】?|\[(?:買い物(?:リスト)?|買う(?:もの|物)?|購入(?:品|リスト)?)\]|(?:買い物(?:リスト)?|買う(?:もの|物)?|購入(?:品|リスト)?))(?:[:：\s・、]+|[\(（【\[])(.+?)(?:[\)）】\]])?$/i;
+  const prefixMatch = itemTitle.match(prefixRegex);
+  if (prefixMatch && prefixMatch[1]?.trim()) {
+    itemTitle = prefixMatch[1].trim();
+    matchedByTitle = true;
+  }
+
+  // 3. 末尾キーワード: "牛乳（買い物）", "牛乳 [買う]", "牛乳を買う"
+  if (!matchedByTitle) {
+    const suffixParenRegex =
+      /^(.+?)\s*[\(（【\[](?:買い物(?:リスト)?|買う(?:もの|物)?|購入(?:品)?|🛒)[\)）】\]]\s*$/i;
+    const suffixParenMatch = itemTitle.match(suffixParenRegex);
+    if (suffixParenMatch && suffixParenMatch[1]?.trim()) {
+      itemTitle = suffixParenMatch[1].trim();
+      matchedByTitle = true;
+    } else {
+      const buyVerbRegex = /^(.{1,30}?)(?:を?買う|を?購入する)$/i;
+      const buyVerbMatch = itemTitle.match(buyVerbRegex);
+      if (
+        buyVerbMatch &&
+        buyVerbMatch[1]?.trim() &&
+        !/チケット|株|宝くじ|家|車|マンション/.test(buyVerbMatch[1])
+      ) {
+        itemTitle = buyVerbMatch[1].trim();
+        matchedByTitle = true;
+      }
+    }
+  }
+
+  const isShopping = matchedByTitle || hasMemoTag;
+  return {
+    isShopping,
+    cleanTitle: itemTitle || trimmedTitle || '(無題の買い物)',
+    cleanMemo,
+  };
+}
+
 function normalizeShiftMatchToken(raw: string, partnerName?: string): string {
   let s = (raw || '').trim();
   // 末尾の括弧付き補足（例: " (残業+60分)", "（バイト）"）を除去
@@ -1690,6 +1761,20 @@ export async function syncWithGoogleCalendar(
   const lastSyncedMs = config.lastGoogleSyncedAt ? Date.parse(config.lastGoogleSyncedAt) || 0 : 0;
   let allTargetsSucceeded = true;
 
+  const hasSeparatePartnerBTasks = targets.some((t) => t.key === 'partnerB' && t.syncTasks);
+  const shouldSyncTaskWithTarget = (
+    ev: ScheduleEvent,
+    targetKey: 'partnerA' | 'partnerB' | 'shared',
+    defaultCreator: PartnerId
+  ): boolean => {
+    if (ev.isShoppingItem) {
+      if (ev.privateFor) return ev.privateFor === defaultCreator;
+      if (!hasSeparatePartnerBTasks) return targetKey === 'partnerA';
+      return (ev.createdBy || 'partnerA') === defaultCreator;
+    }
+    return getEffectivePrivateFor(ev) === defaultCreator;
+  };
+
   for (const target of targets) {
     // 1a. Googleカレンダーから削除すべき予定（削除済み または プライベート変更・別カテゴリ化等で対象外になった既存紐付け予定）
     const eventDeletions = Object.values(nextEvents)
@@ -1771,12 +1856,12 @@ export async function syncWithGoogleCalendar(
 
     let upserts = [...eventUpserts, ...shiftUpserts];
 
-    // 1c. このターゲットの Google Tasks (ToDoリスト) へ送信すべきタスク（削除／追加・更新・完了）を抽出
+    // 1c. このターゲットの Google Tasks (ToDoリスト) へ送信すべきタスク・買い物リスト（削除／追加・更新・完了）を抽出
     const taskDeletions = target.syncTasks
       ? Object.values(nextEvents)
           .filter((ev) => {
             if (!ev || !ev.isTask || !ev.deletedAt || !ev.googleTaskId) return false;
-            return getEffectivePrivateFor(ev) === target.defaultCreator;
+            return shouldSyncTaskWithTarget(ev, target.key, target.defaultCreator);
           })
           .map((ev) => ({
             id: ev.id,
@@ -1789,21 +1874,34 @@ export async function syncWithGoogleCalendar(
       ? Object.values(nextEvents)
           .filter((ev) => {
             if (!ev || !ev.isTask || ev.deletedAt) return false;
-            if (getEffectivePrivateFor(ev) !== target.defaultCreator) return false;
+            if (!shouldSyncTaskWithTarget(ev, target.key, target.defaultCreator)) return false;
             if (!ev.googleTaskId || !ev.googleTaskSynced) return true;
             const evUpdatedMs = Date.parse(ev.updatedAt || '') || 0;
             return evUpdatedMs > lastSyncedMs;
           })
-          .map((ev) => ({
-            id: ev.id,
-            googleTaskId: ev.googleTaskId,
-            googleTaskListId: ev.googleTaskListId,
-            date: ev.date,
-            title: ev.title,
-            memo: ev.memo,
-            isCompleted: Boolean(ev.isCompleted),
-            updatedAt: ev.updatedAt,
-          }))
+          .map((ev) => {
+            const isShop = Boolean(ev.isShoppingItem);
+            const rawTitle = (ev.title || '').trim();
+            const pushedTitle = isShop
+              ? rawTitle.startsWith('🛒')
+                ? rawTitle
+                : `🛒 ${rawTitle}`
+              : rawTitle;
+            const baseMemo = (ev.memo || '').replace(/\n?\[PAIRCAL_SHOPPING:[^\]]*\]/g, '').trim();
+            const pushedMemo = isShop
+              ? [baseMemo, SHOPPING_MEMO_TAG].filter(Boolean).join('\n')
+              : baseMemo || undefined;
+            return {
+              id: ev.id,
+              googleTaskId: ev.googleTaskId,
+              googleTaskListId: ev.googleTaskListId,
+              date: ev.date,
+              title: pushedTitle,
+              memo: pushedMemo,
+              isCompleted: Boolean(ev.isCompleted),
+              updatedAt: ev.updatedAt,
+            };
+          })
       : [];
 
     // 未紐付けのローカル予定またはローカルタスクがある場合、先にGoogle側の最新を取得して
@@ -2213,18 +2311,24 @@ export async function syncWithGoogleCalendar(
 
       const rawTrimmed = (rem.title || '').trim();
       const rawMemo = (rem.memo || '').trim();
+      const shoppingCalDet = detectShoppingItemFromRemote(rawTrimmed, rawMemo);
+      const isShoppingCalDetected =
+        shoppingCalDet.isShopping || Boolean(matchedLocal?.isShoppingItem);
       const isTaskDetected =
+        isShoppingCalDetected ||
         /^(✅|⬜|☑️|【?タスク】?|\[タスク\]|タスク|TODO|ToDo|やること)/i.test(rawTrimmed) ||
         /(【?タスク】?|\[タスク\]|タスク|TODO|ToDo|やること)\s*$/i.test(rawTrimmed) ||
         /([（(【\[](タスク|TODO|ToDo|やること)[）)】\]])/i.test(rawTrimmed) ||
         /(#タスク|【タスク】|\[タスク\])/i.test(rawMemo);
-      const cleanTitle =
-        rawTrimmed
-          .replace(/^(✅|⬜|☑️)\s*/, '')
-          .replace(/^(【?タスク】?|\[タスク\]|タスク|TODO|ToDo|やること)[:：\s・]*/i, '')
-          .replace(/\s*([（(【\[](タスク|TODO|ToDo|やること)[）)】\]])\s*$/i, '')
-          .replace(/\s+(タスク|TODO|ToDo|やること)\s*$/i, '')
-          .trim() || rawTrimmed || '(無題の予定)';
+      const cleanTitle = isShoppingCalDetected
+        ? shoppingCalDet.cleanTitle
+        : rawTrimmed
+            .replace(/^(✅|⬜|☑️)\s*/, '')
+            .replace(/^(【?タスク】?|\[タスク\]|タスク|TODO|ToDo|やること)[:：\s・]*/i, '')
+            .replace(/\s*([（(【\[](タスク|TODO|ToDo|やること)[）)】\]])\s*$/i, '')
+            .replace(/\s+(タスク|TODO|ToDo|やること)\s*$/i, '')
+            .trim() || rawTrimmed || '(無題の予定)';
+      const cleanCalMemo = isShoppingCalDetected ? shoppingCalDet.cleanMemo : rem.memo || undefined;
 
       if (matchedLocal) {
         // もしローカルで削除済みの場合は復活させない
@@ -2241,7 +2345,7 @@ export async function syncWithGoogleCalendar(
           matchedLocal.isAllDay !== rem.isAllDay ||
           (matchedLocal.startTime || '') !== (rem.startTime || '') ||
           (matchedLocal.endTime || '') !== (rem.endTime || '') ||
-          (matchedLocal.memo || '') !== (rem.memo || '');
+          (matchedLocal.memo || '') !== (cleanCalMemo || '');
 
         if (hasDiff && remTimeMs > locTimeMs + 2000) {
           nextEvents[matchedLocal.id] = {
@@ -2252,7 +2356,8 @@ export async function syncWithGoogleCalendar(
             isAllDay: rem.isAllDay,
             startTime: rem.isAllDay ? undefined : rem.startTime || undefined,
             endTime: rem.isAllDay ? undefined : rem.endTime || undefined,
-            memo: rem.memo || undefined,
+            memo: cleanCalMemo,
+            ...(isShoppingCalDetected ? { isTask: true, isShoppingItem: true } : {}),
             googleCalSynced: true,
             googleEventIds: {
               ...(matchedLocal.googleEventIds || {}),
@@ -2273,9 +2378,11 @@ export async function syncWithGoogleCalendar(
         }
       } else {
         // 新規にGoogleカレンダー（またはスマホのGemini等）から作成された予定をペアカレに自動インポート！
-        // タスクの場合は常に個人のカレンダー（相手には非表示）として取り込む
+        // 買い物リスト項目の場合は夫婦共有の買い物リストとして、通常タスクの場合は個人カレンダーとして取り込む
         let inferredCat: CalendarCategoryId = target.defaultCategory;
-        if (isTaskDetected) {
+        if (isShoppingCalDetected) {
+          inferredCat = 'shared';
+        } else if (isTaskDetected) {
           inferredCat = target.defaultCreator;
         } else if (/二人|ふたり|デート|旅行|記念日|外食|結婚/.test(cleanTitle)) {
           inferredCat = 'shared';
@@ -2293,7 +2400,9 @@ export async function syncWithGoogleCalendar(
         if (nextEvents[newId]?.deletedAt) continue;
 
         const nowIso = new Date().toISOString();
-        const notifyTarget: NotifyTarget = isTaskDetected
+        const notifyTarget: NotifyTarget = isShoppingCalDetected
+          ? 'both'
+          : isTaskDetected
           ? target.defaultCreator
           : inferredCat === 'partnerA'
           ? 'partnerA'
@@ -2311,11 +2420,12 @@ export async function syncWithGoogleCalendar(
           isAllDay: rem.isAllDay,
           startTime: rem.isAllDay ? undefined : rem.startTime || undefined,
           endTime: rem.isAllDay ? undefined : rem.endTime || undefined,
-          memo: rem.memo || undefined,
+          memo: cleanCalMemo,
           isTask: isTaskDetected,
+          ...(isShoppingCalDetected ? { isShoppingItem: true } : {}),
           isCompleted: false,
           notifyTarget,
-          privateFor: isTaskDetected ? target.defaultCreator : undefined,
+          privateFor: isShoppingCalDetected ? undefined : isTaskDetected ? target.defaultCreator : undefined,
           googleCalSynced: true,
           syncedFromGoogle: true,
           googleEventId: target.key === 'partnerA' ? rem.googleEventId : undefined,
@@ -2421,7 +2531,7 @@ export async function syncWithGoogleCalendar(
         let matchedLocal: ScheduleEvent | undefined = Object.values(nextEvents).find(
           (e) =>
             e.googleTaskId === remTask.googleTaskId &&
-            getEffectivePrivateFor(e) === target.defaultCreator
+            (Boolean(e.isShoppingItem) || getEffectivePrivateFor(e) === target.defaultCreator)
         );
         if (!matchedLocal && remTask.paircalId && nextEvents[remTask.paircalId]) {
           const candidate = nextEvents[remTask.paircalId];
@@ -2435,7 +2545,13 @@ export async function syncWithGoogleCalendar(
           }
         }
 
-        const cleanTaskTitle = (remTask.title || '').trim() || '(無題のタスク)';
+        const shopTaskDet = detectShoppingItemFromRemote(remTask.title, remTask.memo);
+        const isShoppingTask =
+          shopTaskDet.isShopping || Boolean(matchedLocal?.isShoppingItem);
+        const cleanTaskTitle = isShoppingTask
+          ? shopTaskDet.cleanTitle
+          : (remTask.title || '').trim() || '(無題のタスク)';
+        const cleanTaskMemo = isShoppingTask ? shopTaskDet.cleanMemo : remTask.memo || undefined;
         const nextTaskCompleted = Boolean(remTask.isCompleted);
 
         if (matchedLocal) {
@@ -2449,7 +2565,7 @@ export async function syncWithGoogleCalendar(
             matchedLocal.title !== cleanTaskTitle ||
             Boolean(matchedLocal.isCompleted) !== nextTaskCompleted ||
             matchedLocal.date !== nextTaskDate ||
-            (matchedLocal.memo || '') !== (remTask.memo || '');
+            (matchedLocal.memo || '') !== (cleanTaskMemo || '');
 
           const wasPushedNow = pushedTaskIdsNow.has(matchedLocal.id);
           const hasNoUnpushedLocalEdit =
@@ -2463,7 +2579,10 @@ export async function syncWithGoogleCalendar(
               title: cleanTaskTitle,
               date: nextTaskDate,
               isCompleted: nextTaskCompleted,
-              memo: remTask.memo || undefined,
+              memo: cleanTaskMemo,
+              ...(isShoppingTask
+                ? { isShoppingItem: true, categoryId: 'shared', privateFor: undefined }
+                : {}),
               googleTaskSynced: true,
               googleTaskId: remTask.googleTaskId,
               googleTaskListId: remTask.googleTaskListId || matchedLocal.googleTaskListId,
@@ -2486,21 +2605,23 @@ export async function syncWithGoogleCalendar(
           const newId = `gtask_${target.key}_${safeHash}`;
           if (nextEvents[newId]?.deletedAt) continue;
 
-          const catInfo = resolveCategoryInfo(target.defaultCreator, categories, store.metadata);
+          const taskCatId = isShoppingTask ? 'shared' : target.defaultCreator;
+          const catInfo = resolveCategoryInfo(taskCatId, categories, store.metadata);
           const nowIso = new Date().toISOString();
 
           nextEvents[newId] = {
             id: newId,
             date: remTask.date || getLocalTodayStr(),
             title: cleanTaskTitle,
-            categoryId: target.defaultCreator,
+            categoryId: taskCatId,
             color: catInfo.accentColor,
             isAllDay: true,
-            memo: remTask.memo || undefined,
+            memo: cleanTaskMemo,
             isTask: true,
+            ...(isShoppingTask ? { isShoppingItem: true } : {}),
             isCompleted: nextTaskCompleted,
-            notifyTarget: target.defaultCreator,
-            privateFor: target.defaultCreator,
+            notifyTarget: isShoppingTask ? 'both' : target.defaultCreator,
+            privateFor: isShoppingTask ? undefined : target.defaultCreator,
             googleTaskSynced: true,
             syncedFromGoogle: true,
             googleTaskId: remTask.googleTaskId,
@@ -2519,7 +2640,7 @@ export async function syncWithGoogleCalendar(
         const taskDeleteCandidates: string[] = [];
         for (const [evId, localEv] of Object.entries(nextEvents)) {
           if (!localEv || localEv.deletedAt || !localEv.isTask) continue;
-          if (getEffectivePrivateFor(localEv) !== target.defaultCreator) continue;
+          if (!shouldSyncTaskWithTarget(localEv, target.key, target.defaultCreator)) continue;
           if (!localEv.googleTaskSynced || !localEv.googleTaskId) continue;
           totalSyncedTasks++;
           if (!seenGoogleTaskIds.has(localEv.googleTaskId) && !pushedTaskMap[evId]) {

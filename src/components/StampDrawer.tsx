@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp,
   CheckSquare,
+  ShoppingCart,
 } from 'lucide-react';
 import {
   CoupleMetadata,
@@ -71,6 +72,8 @@ interface StampDrawerProps {
   onOpenImageOcrModal: () => void;
   onOpenWidgetModal: () => void;
   onOpenTaskManager?: () => void;
+  onOpenShoppingList?: () => void;
+  shoppingUnboughtCount?: number;
   onOpenShiftExport?: () => void;
   metadata: CoupleMetadata;
   activePartner?: PartnerId;
@@ -100,6 +103,8 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   onOpenImageOcrModal,
   onOpenWidgetModal,
   onOpenTaskManager,
+  onOpenShoppingList,
+  shoppingUnboughtCount = 0,
   onOpenShiftExport,
   metadata,
   activePartner = 'partnerA',
@@ -136,7 +141,7 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
   if (!isOpen) {
     return (
       <nav className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#FFE5EC] shadow-[0_-4px_20px_rgba(255,143,171,0.15)] pb-[env(safe-area-inset-bottom)]">
-        <div className="max-w-lg mx-auto px-2 py-1.5 grid grid-cols-4 gap-1.5">
+        <div className="max-w-lg mx-auto px-2 py-1.5 grid grid-cols-5 gap-1">
           <button
             type="button"
             onClick={() => onToggleOpen(true)}
@@ -181,6 +186,23 @@ export const StampDrawer: React.FC<StampDrawerProps> = ({
             <span className="text-[10px] font-extrabold mt-0.5 leading-tight">
               タスク
             </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenShoppingList}
+            className="relative flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl bg-emerald-100/90 text-emerald-800 active:scale-95 transition-all"
+            title="ふたりの買い物・ほしい物リストを開く"
+          >
+            <ShoppingCart className="w-5 h-5 text-emerald-600" />
+            <span className="text-[10px] font-extrabold mt-0.5 leading-tight">
+              買い物
+            </span>
+            {shoppingUnboughtCount > 0 && (
+              <span className="absolute -top-1 right-1 px-1.5 py-0.2 rounded-full bg-emerald-600 text-white font-black text-[9px] shadow-2xs">
+                {shoppingUnboughtCount}
+              </span>
+            )}
           </button>
         </div>
       </nav>

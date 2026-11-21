@@ -15,6 +15,7 @@ import {
   Check,
   X,
   RefreshCw,
+  ShoppingCart,
 } from 'lucide-react';
 import {
   CalendarCategoryItem,
@@ -40,6 +41,7 @@ interface TaskManagerModalProps {
   onDeleteEvent: (id: string) => void;
   onToggleTaskComplete: (id: string) => void;
   onSyncGoogleTasks?: () => void;
+  onOpenShoppingList?: () => void;
   isSyncing?: boolean;
 }
 
@@ -75,6 +77,7 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
   onDeleteEvent,
   onToggleTaskComplete,
   onSyncGoogleTasks,
+  onOpenShoppingList,
   isSyncing = false,
 }) => {
   const now = new Date();
@@ -135,10 +138,17 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
     };
   };
 
-  // 自分のタスクのみ抽出（Googleタスクと双方向自動連係・相手には見えない個人カレンダー）
+  // 自分のタスクのみ抽出（買い物リスト項目は専用の買い物リスト画面に分離）
   const allTasks = useMemo(() => {
     return Object.values(events)
-      .filter((ev) => ev && ev.isTask && !ev.deletedAt && isEventVisibleToPartner(ev, activePartner))
+      .filter(
+        (ev) =>
+          ev &&
+          ev.isTask &&
+          !ev.isShoppingItem &&
+          !ev.deletedAt &&
+          isEventVisibleToPartner(ev, activePartner)
+      )
       .sort(
         (a, b) =>
           a.date.localeCompare(b.date) ||
@@ -545,6 +555,17 @@ export const TaskManagerModal: React.FC<TaskManagerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {onOpenShoppingList && (
+              <button
+                type="button"
+                onClick={onOpenShoppingList}
+                className="px-2.5 py-2 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs flex items-center gap-1 shrink-0 active:scale-95 transition-all shadow-xs"
+                title="ふたりの買い物リストを開く"
+              >
+                <ShoppingCart className="w-3.5 h-3.5" />
+                <span>🛒 買い物</span>
+              </button>
+            )}
             {onSyncGoogleTasks && (
               <button
                 type="button"

@@ -835,6 +835,7 @@ export function calculateMinutesBetween(startTime: string, endTime: string): num
  */
 export function getEffectivePrivateFor(ev: ScheduleEvent): PartnerId | undefined {
   if (ev.privateFor) return ev.privateFor;
+  if (ev.isShoppingItem) return undefined;
   if (ev.isTask) {
     if (ev.categoryId === 'partnerA' || ev.notifyTarget === 'partnerA') return 'partnerA';
     if (ev.categoryId === 'partnerB' || ev.notifyTarget === 'partnerB') return 'partnerB';

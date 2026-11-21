@@ -101,9 +101,11 @@ export interface ScheduleEvent {
   supportBadges?: string[]; // 例: ["🍳夜ごはん不要", "🍱お弁当あり"]
   isTentative?: boolean;    // 仮予定フラグ（「〜予定」「〜かも」）
 
-  // タスク機能＆Googleカレンダー端末別通知・双方向自動同期フィールド
+  // タスク機能＆買い物リスト＆Googleカレンダー端末別通知・双方向自動同期フィールド
   isTask?: boolean;           // true の場合はタスク（ToDoチェック付き）として扱う
-  isCompleted?: boolean;      // タスクの完了チェック状態
+  isShoppingItem?: boolean;   // true の場合は🛒買い物リスト項目として扱う（夫婦共有＆Googleタスク双方向連携）
+  shoppingCategory?: 'food' | 'daily' | 'other'; // 買い物カテゴリ（食材 / 日用品 / ほしい物・その他）
+  isCompleted?: boolean;      // タスク・買い物の完了（購入済み）チェック状態
   notifyTarget?: NotifyTarget; // 通知を送る対象（'partnerA'=夫の端末のみ, 'partnerB'=妻の端末のみ, 'both'=両方）
   reminderMinutes?: number;   // Googleカレンダー通知タイミング（分前: 0=定刻, 10=10分前, 30=30分前, 60=1時間前, 1440=前日）
   googleCalSynced?: boolean;  // Googleカレンダーへ登録済みフラグ
